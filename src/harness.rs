@@ -13,7 +13,7 @@ use crate::contract::{
     IntentSurface, ResetHooks, SurfaceVariant, TestApi, TestApiResolve, UserIntent,
 };
 use bevy::app::App;
-use bevy::camera::Camera;
+use bevy::prelude::Camera;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageWriter;
@@ -720,8 +720,10 @@ pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
 /// mid-run (still counts as executed).
 pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> SystemCoverage {
     let after = snapshot_systems(world);
-    let mut cov = SystemCoverage::default();
-    cov.registered = after.keys().cloned().collect();
+    let mut cov = SystemCoverage {
+        registered: after.keys().cloned().collect(),
+        ..Default::default()
+    };
     for (name, age) in &after {
         match before.get(name) {
             // Same-or-older age = did not run during the scenario.
@@ -810,11 +812,11 @@ fn chaos_bot_system(
         rate
     };
     let fire_every = (state.tps / effective_rate as u64).max(1);
-    if state.frame % fire_every != 0 {
+    if !state.frame.is_multiple_of(fire_every) {
         return;
     }
     // Idle persona: skip 7 of 8 fire slots entirely (occasional jabs).
-    if persona == "idle" && state.next_rand() % 8 != 0 {
+    if persona == "idle" && !state.next_rand().is_multiple_of(8) {
         return;
     }
     let Some(surface) = surface else {
@@ -1152,7 +1154,7 @@ fn synthetic_pointer_bot_system(
 /// a bot issuing NO input is itself a violation, not a silent fallback.
 /// Spatial games only; that's inherent to pursuing.
 fn pursuit_bot_system(
-    mut state: ResMut<PlaytestState>,
+    state: ResMut<PlaytestState>,
     mut violations: ResMut<Violations>,
     mut intents: MessageWriter<UserIntent>,
     q: Query<(&Name, &Transform), With<Gameplay>>,
@@ -1252,6 +1254,7 @@ fn out_of_bounds(t: bevy::math::Vec3, inv: &Invariant) -> bool {
 /// comparison only runs on `Changed<Transform>` (O(changes), not
 /// O(all entities × ticks)). ECS change detection is what makes the
 /// per-tick poll affordable.
+#[allow(clippy::type_complexity)]
 fn check_bounds_gameplay_system(
     q_changed: Query<(&Name, &Transform), (With<Gameplay>, Changed<Transform>)>,
     q_all: Query<(&Name, &Transform), With<Gameplay>>,
@@ -1281,7 +1284,7 @@ fn check_bounds_gameplay_system(
                 if out_of_bounds(transform.translation, inv) {
                     violations.report(
                         &inv.name,
-                        &name.to_string(),
+                        name.as_ref(),
                         format!(
                             "out of bounds ({}, {}, {})",
                             transform.translation.x,
@@ -1317,7 +1320,7 @@ fn check_bounds_gameplay_system(
                     if out_of_bounds(transform.translation, inv) {
                         violations.report(
                             &inv.name,
-                            &name.to_string(),
+                            name.as_ref(),
                             format!(
                                 "out of bounds ({}, {}, {})",
                                 transform.translation.x,
@@ -1618,7 +1621,6 @@ fn check_custom_system(world: &mut World) {
                 );
                 continue;
             };
-            let numeric = count as f64;
             let check = inv.check.as_deref().unwrap_or("above");
             let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
 
@@ -1640,11 +1642,10 @@ fn check_custom_system(world: &mut World) {
                         if entry.1.is_none() {
                             entry.1 = Some(frame);
                         }
-                    } else if elapsed_s >= deadline && entry.1.is_none() {
-                        drop(state_mut);
-                        world.resource_mut::<Violations>().report(
-                            &inv.name,
-                            &format!("query({:?})", query),
+                } else if elapsed_s >= deadline && entry.1.is_none() {
+                    world.resource_mut::<Violations>().report(
+                        &inv.name,
+                        &format!("query({:?})", query),
                             format!(
                                 "query count {} never {} {} within {:.1}s (eventually deadline expired)",
                                 count, check, threshold.unwrap_or(0.0), deadline
@@ -1734,7 +1735,6 @@ fn check_custom_system(world: &mut World) {
                 if eq {
                     entry.1 = Some(entry.1.unwrap_or(frame)); // first satisfaction
                 } else if elapsed_s >= deadline && entry.1.is_none() {
-                    drop(state_mut);
                     world.resource_mut::<Violations>().report(
                         &inv.name,
                         path,
@@ -1784,7 +1784,6 @@ fn check_custom_system(world: &mut World) {
                             entry.1 = Some(frame);
                         }
                     } else if elapsed_s >= deadline && entry.1.is_none() {
-                        drop(state_mut);
                         world.resource_mut::<Violations>().report(
                             &inv.name,
                             path,
@@ -1953,7 +1952,7 @@ fn check_custom_system(world: &mut World) {
 /// variant names), but the audit trail — what makes crashes found by ANY
 /// writer minimizable via ddmin — lives here and nowhere else.
 fn intent_audit_log_system(
-    mut state: ResMut<PlaytestState>,
+    state: ResMut<PlaytestState>,
     mut reader: bevy::ecs::message::MessageReader<UserIntent>,
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
 ) {
@@ -2640,7 +2639,7 @@ impl BranchMatrixReport {
 // ---------------------------------------------------------------------------
 // Crash minimization (ddmin) — Rebellion-style crash reproducer reduction.
 // ---------------------------------------------------------------------------
-
+//
 /// Outcome of a crash-minimization session.
 #[derive(Debug, Clone)]
 pub struct MinimizeOutcome {
