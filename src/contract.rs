@@ -141,10 +141,13 @@ pub trait TestApiResolve {
     fn resolve(&self, path: &str) -> Option<TestFieldValue>;
 }
 
+/// Hook closure type shared by ResetHooks, CheatHooks, and NamedIntents.
+pub type WorldHook = Box<dyn Fn(&mut World) + Send + Sync>;
+
 /// Reset Hooks — typed resets, no string method dispatch.
 /// Fn bounds must be Send + Sync for the Resource derive.
 #[derive(Resource, Default)]
-pub struct ResetHooks(pub HashMap<String, Box<dyn Fn(&mut World) + Send + Sync>>);
+pub struct ResetHooks(pub std::collections::HashMap<String, WorldHook>);
 
 impl ResetHooks {
     pub fn register<F: Fn(&mut World) + Send + Sync + 'static>(&mut self, name: &str, f: F) {
@@ -214,7 +217,7 @@ impl Plugin for TestConventionsPlugin {
 /// Cheat Hooks — typed cheat commands (e.g., "god_mode", "instant_build").
 /// Cheats are AUDITED: every invocation is logged and reported.
 #[derive(Resource, Default)]
-pub struct CheatHooks(pub HashMap<String, Box<dyn Fn(&mut World) + Send + Sync>>);
+pub struct CheatHooks(pub HashMap<String, WorldHook>);
 
 impl CheatHooks {
     pub fn register<F: Fn(&mut World) + Send + Sync + 'static>(&mut self, name: &str, f: F) {
@@ -295,7 +298,7 @@ pub const HARNESS_TYPE_PATHS: &[&str] = &["bevy_swarm::contract::", "bevy_swarm:
 /// for a custom UserIntent enum when the game has simple named actions.
 #[derive(Resource, Default)]
 pub struct NamedIntents(
-    pub std::collections::HashMap<String, Box<dyn Fn(&mut World) + Send + Sync>>,
+    pub std::collections::HashMap<String, WorldHook>,
 );
 
 impl NamedIntents {
@@ -327,10 +330,6 @@ impl NamedIntents {
 /// exactly. Set by the harness at scenario start; defaults to 0.
 #[derive(Resource, Clone, Copy, Debug, Reflect)]
 #[reflect(Resource)]
+#[derive(Default)]
 pub struct ScenarioSeed(pub u64);
 
-impl Default for ScenarioSeed {
-    fn default() -> Self {
-        Self(0)
-    }
-}

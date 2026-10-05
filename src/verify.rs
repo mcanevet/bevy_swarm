@@ -5,9 +5,11 @@ use bevy::prelude::*;
 #[test]
 fn verify_playtest_features() {
     // 1. Reflect resolution paths
-    let mut api = TestApi::default();
-    api.score = 42;
-    api.active_players = 3;
+    let api = TestApi {
+        score: 42,
+        active_players: 3,
+        ..Default::default()
+    };
     assert_eq!(
         api.resolve("TestApi.score"),
         Some(TestFieldValue::Numeric(42.0))

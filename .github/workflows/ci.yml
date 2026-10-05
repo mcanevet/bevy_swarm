@@ -32,3 +32,6 @@ jobs:
       
       - name: Run doc tests
         run: cargo test --doc
+      
+      - name: Lint with Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
