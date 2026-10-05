@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use bevy_swarm::contract::*;
 use bevy_swarm::harness::*;
+use bevy_swarm::enums::PlaytestStatus;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]
@@ -64,7 +65,7 @@ fn input_desync_clean_passes() {
     .unwrap();
     let mut app = build_app(false);
     let report = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(report.status, "pass", "clean: {:?}", report.violations);
+    assert_eq!(report.status, PlaytestStatus::Pass, "clean: {:?}", report.violations);
 }
 
 #[test]
