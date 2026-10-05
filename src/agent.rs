@@ -8,11 +8,14 @@
 //!
 //! Feature-gated behind `agent`: CI headless runs pay nothing.
 
-use crate::contract::{ActionLog, ActionSource, CheatHooks, IntentSurface, NamedIntents, ResetHooks, SurfaceVariant, UserIntent};
+use crate::contract::{
+    ActionLog, ActionSource, CheatHooks, IntentSurface, NamedIntents, ResetHooks, SurfaceVariant,
+    UserIntent,
+};
+use bevy::picking;
 use bevy::prelude::*;
 use bevy::remote::http::RemoteHttpPlugin;
 use bevy::remote::{error_codes, BrpError, BrpResult, RemotePlugin};
-use bevy::picking;
 use serde_json::{json, Value};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -26,8 +29,13 @@ pub enum AgentRequest {
     Intent(UserIntent),
     /// Named intent: dispatched via NamedIntents in the flush system.
     NamedIntent(String),
-    KeyPress { key: String },
-    PointerClick { x: f32, y: f32 },
+    KeyPress {
+        key: String,
+    },
+    PointerClick {
+        x: f32,
+        y: f32,
+    },
     Reset(String),
     Cheat(String),
 }
@@ -119,7 +127,8 @@ fn brp_params(params: Option<Value>) -> BrpResult<Value> {
 
 fn send_request(world: &World, req: AgentRequest) -> BrpResult {
     let tx = &world.resource::<AgentRequestSender>().0;
-    tx.send(req).map_err(|_| internal_error("agent queue closed"))?;
+    tx.send(req)
+        .map_err(|_| internal_error("agent queue closed"))?;
     Ok(json!({ "ok": true }))
 }
 
@@ -127,11 +136,7 @@ fn send_request(world: &World, req: AgentRequest) -> BrpResult {
 fn playtest_schema(In(params): In<Option<Value>>, world: &World) -> BrpResult {
     let _ = params;
     let surface = world.resource::<IntentSurface>();
-    let variants: Vec<String> = surface
-        .0
-        .iter()
-        .map(variant_label)
-        .collect();
+    let variants: Vec<String> = surface.0.iter().map(variant_label).collect();
     let resets: Vec<String> = world.resource::<ResetHooks>().0.keys().cloned().collect();
     let cheats: Vec<String> = world.resource::<CheatHooks>().0.keys().cloned().collect();
     Ok(json!({
@@ -164,12 +169,11 @@ fn playtest_observe(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         .get("path")
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_params("params.path (percept path) required"))?;
-    let value = crate::harness::resolve_world_percept(world, path)
-        .ok_or_else(|| BrpError {
-            code: error_codes::RESOURCE_ERROR,
-            message: format!("percept `{path}` not found"),
-            data: None,
-        })?;
+    let value = crate::harness::resolve_world_percept(world, path).ok_or_else(|| BrpError {
+        code: error_codes::RESOURCE_ERROR,
+        message: format!("percept `{path}` not found"),
+        data: None,
+    })?;
     Ok(match value {
         crate::contract::TestFieldValue::Numeric(n) => json!({ "value": n }),
         crate::contract::TestFieldValue::Text(s) => json!({ "value": s }),
@@ -194,9 +198,17 @@ fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         if !registered {
             return Err(BrpError {
                 code: error_codes::INVALID_PARAMS,
-                message: format!("unknown named intent `{}` (known: {})",
+                message: format!(
+                    "unknown named intent `{}` (known: {})",
                     name,
-                    world.resource::<NamedIntents>().0.keys().cloned().collect::<Vec<_>>().join(", ")),
+                    world
+                        .resource::<NamedIntents>()
+                        .0
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
                 data: None,
             });
         }
@@ -245,15 +257,20 @@ fn playtest_reset(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         .unwrap_or("reset_game")
         .to_string();
     // Validate synchronously before queuing.
-    let known = world
-        .resource::<ResetHooks>()
-        .0
-        .contains_key(&kind);
+    let known = world.resource::<ResetHooks>().0.contains_key(&kind);
     if !known {
         return Err(BrpError {
             code: error_codes::INVALID_PARAMS,
-            message: format!("unknown reset kind `{kind}` (known: {})",
-                world.resource::<ResetHooks>().0.keys().cloned().collect::<Vec<_>>().join(", ")),
+            message: format!(
+                "unknown reset kind `{kind}` (known: {})",
+                world
+                    .resource::<ResetHooks>()
+                    .0
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             data: None,
         });
     }
@@ -272,8 +289,16 @@ fn playtest_cheat(In(params): In<Option<Value>>, world: &World) -> BrpResult {
     if !known {
         return Err(BrpError {
             code: error_codes::INVALID_PARAMS,
-            message: format!("unknown cheat kind `{kind}` (known: {})",
-                world.resource::<CheatHooks>().0.keys().cloned().collect::<Vec<_>>().join(", ")),
+            message: format!(
+                "unknown cheat kind `{kind}` (known: {})",
+                world
+                    .resource::<CheatHooks>()
+                    .0
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             data: None,
         });
     }
@@ -449,10 +474,7 @@ fn agent_flush_system(world: &mut World) {
                 };
                 let window = primary_window_entity(world);
                 world.write_message(key_input(code, bevy::input::ButtonState::Pressed, window));
-                world
-                    .resource_mut::<PendingAgentInput>()
-                    .keys
-                    .push(code);
+                world.resource_mut::<PendingAgentInput>().keys.push(code);
                 world.resource_mut::<ActionLog>().record(
                     frame,
                     0.0,
@@ -539,18 +561,19 @@ fn agent_flush_system(world: &mut World) {
         .filter(|g| g.press_at == frame || g.release_at == frame)
         .count();
     if pending > 0 {
-        let due: Vec<PendingPointerGesture> = std::mem::take(&mut world.resource_mut::<PendingAgentInput>().gestures)
-            .into_iter()
-            .filter(|g| {
-                if g.press_at == frame {
-                    let w = primary_window_entity(world).unwrap_or(Entity::PLACEHOLDER);
-                    let _ = w;
-                    true
-                } else {
-                    false
-                }
-            })
-            .collect();
+        let due: Vec<PendingPointerGesture> =
+            std::mem::take(&mut world.resource_mut::<PendingAgentInput>().gestures)
+                .into_iter()
+                .filter(|g| {
+                    if g.press_at == frame {
+                        let w = primary_window_entity(world).unwrap_or(Entity::PLACEHOLDER);
+                        let _ = w;
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .collect();
         // Re-add gestures not yet complete.
         let _ = due;
         let _ = world;
@@ -626,7 +649,12 @@ fn primary_window_entity(world: &mut World) -> Option<Entity> {
         .ok()
 }
 
-fn viewport_location(world: &World, window: Entity, x: f32, y: f32) -> Option<picking::pointer::Location> {
+fn viewport_location(
+    world: &World,
+    window: Entity,
+    x: f32,
+    y: f32,
+) -> Option<picking::pointer::Location> {
     let target = bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window))
         .normalize(Some(window))?;
     Some(picking::pointer::Location {
@@ -662,8 +690,7 @@ fn playtest_diagnostics(_params: In<Option<Value>>, world: &World) -> BrpResult 
     if let Some(obj) = v.as_object_mut() {
         obj.insert(
             "auto_observed_paths".into(),
-            serde_json::to_value(crate::harness::auto_observed_paths(world))
-                .unwrap_or(Value::Null),
+            serde_json::to_value(crate::harness::auto_observed_paths(world)).unwrap_or(Value::Null),
         );
     }
     Ok(v)

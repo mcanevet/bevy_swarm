@@ -7,11 +7,9 @@
 //! combinators control ordering, alternatives, and retries.
 
 use crate::contract::{TestApi, TestApiResolve, TestFieldValue, UserIntent};
-use crate::harness::{
-    PlaytestState, ReplayIntent, ScenarioResource, Violations,
-};
-use bevy::ecs::system::{Res, ResMut};
+use crate::harness::{PlaytestState, ReplayIntent, ScenarioResource, Violations};
 use bevy::ecs::message::MessageWriter;
+use bevy::ecs::system::{Res, ResMut};
 use serde::{Deserialize, Serialize};
 
 fn default_any_max_s() -> f32 {
@@ -99,17 +97,24 @@ impl PlannerStack {
 
     fn push(&mut self, goal: &GoalNode, api: &TestApi, frame: u64, deadline: Option<u64>) {
         let snap = match goal {
-            GoalNode::Primitive { path, min_gain, max_gain, .. }
-                if min_gain.is_some() || max_gain.is_some() =>
-            {
-                match api.resolve(path) {
-                    Some(TestFieldValue::Numeric(n)) => Some(n),
-                    _ => None,
-                }
-            }
+            GoalNode::Primitive {
+                path,
+                min_gain,
+                max_gain,
+                ..
+            } if min_gain.is_some() || max_gain.is_some() => match api.resolve(path) {
+                Some(TestFieldValue::Numeric(n)) => Some(n),
+                _ => None,
+            },
             _ => None,
         };
-        self.0.push(PlannerEntry { goal: goal.clone(), child: 0, snap, deadline, activated: frame });
+        self.0.push(PlannerEntry {
+            goal: goal.clone(),
+            child: 0,
+            snap,
+            deadline,
+            activated: frame,
+        });
     }
 
     /// Human-readable goal path for diagnostics, e.g.
@@ -135,9 +140,9 @@ impl PlannerStack {
     /// Deepest unfinished primitive's (path, check, value) for reports.
     fn deepest_unfinished_primitive(&self) -> Option<(String, String, String)> {
         self.0.iter().rev().find_map(|e| match &e.goal {
-            GoalNode::Primitive { path, check, value, .. } => {
-                Some((path.clone(), check.clone(), value.to_string()))
-            }
+            GoalNode::Primitive {
+                path, check, value, ..
+            } => Some((path.clone(), check.clone(), value.to_string())),
             _ => None,
         })
     }
@@ -151,7 +156,9 @@ fn pop_success(stack: &mut PlannerStack, api: &TestApi, violations: &mut Violati
     while let Some(entry) = stack.0.pop() {
         check_postcondition(&entry, api, violations, frame, &stack.trace());
         match stack.0.last() {
-            Some(parent) if matches!(parent.goal, GoalNode::Any { .. } | GoalNode::Repeat { .. }) => {
+            Some(parent)
+                if matches!(parent.goal, GoalNode::Any { .. } | GoalNode::Repeat { .. }) =>
+            {
                 continue; // success propagates through Any/Repeat
             }
             _ => break, // Seq absorbs child completion
@@ -169,9 +176,16 @@ fn check_postcondition(
     frame: u64,
     trace: &str,
 ) {
-    let GoalNode::Primitive { path, min_gain, max_gain, .. } = &entry.goal else { return };
-    let (Some(TestFieldValue::Numeric(curr)), Some(start)) = (api.resolve(path), entry.snap)
+    let GoalNode::Primitive {
+        path,
+        min_gain,
+        max_gain,
+        ..
+    } = &entry.goal
     else {
+        return;
+    };
+    let (Some(TestFieldValue::Numeric(curr)), Some(start)) = (api.resolve(path), entry.snap) else {
         return;
     };
     let delta = curr - start;
@@ -205,9 +219,7 @@ fn check_postcondition(
 
 /// Convert a ReplayIntent to a UserIntent. Select intents resolve by
 /// Name against live Gameplay entities (stable across resets).
-fn replay_intent_to_user(
-    ri: &ReplayIntent,
-) -> Option<UserIntent> {
+fn replay_intent_to_user(ri: &ReplayIntent) -> Option<UserIntent> {
     match ri {
         ReplayIntent::Move { dir } => Some(UserIntent::Move {
             dir: bevy::math::Vec2::new(dir.0, dir.1),
@@ -362,7 +374,13 @@ pub fn planner_bot_system(
                     break; // child is in flight on the stack above us
                 }
             }
-            GoalNode::Primitive { path, check, value, emit, .. } => {
+            GoalNode::Primitive {
+                path,
+                check,
+                value,
+                emit,
+                ..
+            } => {
                 if primitive_achieved(&api, path, check, value) {
                     pop_success(&mut planner, &api, &mut violations, frame);
                     goals_done += 1;
@@ -418,9 +436,7 @@ pub fn planner_unfinished_check(
 ) -> Option<crate::harness::ViolationEntry> {
     let top = planner.0.last()?;
     let trace = planner.trace();
-    let (ppath, pcheck, pvalue) = planner
-        .deepest_unfinished_primitive()
-        .unwrap_or_default();
+    let (ppath, pcheck, pvalue) = planner.deepest_unfinished_primitive().unwrap_or_default();
     Some(crate::harness::ViolationEntry {
         rule: "planner_goal_unfinished".into(),
         target: ppath.clone(),

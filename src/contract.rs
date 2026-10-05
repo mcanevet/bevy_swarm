@@ -69,9 +69,7 @@ impl TestApiResolve for TestApi {
         // Fast path: hand-written match (covers named default fields).
         match field {
             "score" => return Some(TestFieldValue::Numeric(self.score as f64)),
-            "active_players" => {
-                return Some(TestFieldValue::Numeric(self.active_players as f64))
-            }
+            "active_players" => return Some(TestFieldValue::Numeric(self.active_players as f64)),
             _ => {}
         }
         // Game-defined custom fields (checked before the reflect fallback
@@ -193,7 +191,7 @@ pub struct TestConventionsPlugin;
 impl Plugin for TestConventionsPlugin {
     fn build(&self, app: &mut App) {
         use bevy::ecs::reflect::AppTypeRegistry;
-        
+
         app.add_message::<UserIntent>()
             .init_resource::<TestApi>()
             .init_resource::<ResetHooks>()
@@ -201,7 +199,7 @@ impl Plugin for TestConventionsPlugin {
             .init_resource::<CheatHooks>()
             .init_resource::<ActionLog>()
             .init_resource::<GameVersion>();
-        
+
         // Register reflective types for query-target invariants.
         let registry = app.world_mut().resource_mut::<AppTypeRegistry>();
         let mut reg = registry.0.write();
@@ -288,10 +286,7 @@ pub struct GameVersion(pub String);
 
 /// Harness-owned type paths excluded from auto-discovery and feature
 /// detection to ignore harness internals.
-pub const HARNESS_TYPE_PATHS: &[&str] = &[
-    "bevy_playtest::contract::",
-    "bevy_playtest::harness::",
-];
+pub const HARNESS_TYPE_PATHS: &[&str] = &["bevy_playtest::contract::", "bevy_playtest::harness::"];
 
 /// Named intent handlers — games register closures that translate a named
 /// intent (e.g., "end_turn") into concrete gameplay effects. The agent can
@@ -299,7 +294,9 @@ pub const HARNESS_TYPE_PATHS: &[&str] = &[
 /// the harness will invoke the registered handler. This removes the need
 /// for a custom UserIntent enum when the game has simple named actions.
 #[derive(Resource, Default)]
-pub struct NamedIntents(pub std::collections::HashMap<String, Box<dyn Fn(&mut World) + Send + Sync>>);
+pub struct NamedIntents(
+    pub std::collections::HashMap<String, Box<dyn Fn(&mut World) + Send + Sync>>,
+);
 
 impl NamedIntents {
     pub fn register(&mut self, name: &str, handler: impl Fn(&mut World) + Send + Sync + 'static) {
@@ -313,7 +310,10 @@ impl NamedIntents {
         match handler {
             Some(h) => {
                 h(world);
-                world.resource_mut::<NamedIntents>().0.insert(name.to_string(), h);
+                world
+                    .resource_mut::<NamedIntents>()
+                    .0
+                    .insert(name.to_string(), h);
                 true
             }
             None => false,

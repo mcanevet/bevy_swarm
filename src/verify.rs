@@ -1,5 +1,5 @@
-use crate::harness::*;
 use crate::contract::*;
+use crate::harness::*;
 use bevy::prelude::*;
 
 #[test]
@@ -8,30 +8,58 @@ fn verify_playtest_features() {
     let mut api = TestApi::default();
     api.score = 42;
     api.active_players = 3;
-    assert_eq!(api.resolve("TestApi.score"), Some(TestFieldValue::Numeric(42.0)));
-    assert_eq!(api.resolve("TestApi.active_players"), Some(TestFieldValue::Numeric(3.0)));
+    assert_eq!(
+        api.resolve("TestApi.score"),
+        Some(TestFieldValue::Numeric(42.0))
+    );
+    assert_eq!(
+        api.resolve("TestApi.active_players"),
+        Some(TestFieldValue::Numeric(3.0))
+    );
     assert_eq!(api.resolve("TestApi.nonexistent"), None);
     println!("resolve (reflect + manual): OK");
 
-    println!("resolve paths: OK (crate TestApi is numeric-reflect only; \
-games with enum fields implement TestApiResolve on their own TestApi)");
+    println!(
+        "resolve paths: OK (crate TestApi is numeric-reflect only; \
+games with enum fields implement TestApiResolve on their own TestApi)"
+    );
 
     // 2. Branch matrix
     let scenarios: Vec<(String, Scenario)> = vec![
-        ("chaos-a".into(), serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"setup":{}}"#).unwrap()),
-        ("chaos-b".into(), serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":2},"duration_s":0.5,"invariants":[],"setup":{}}"#).unwrap()),
+        (
+            "chaos-a".into(),
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"setup":{}}"#,
+            )
+            .unwrap(),
+        ),
+        (
+            "chaos-b".into(),
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":2},"duration_s":0.5,"invariants":[],"setup":{}}"#,
+            )
+            .unwrap(),
+        ),
     ];
     let matrix = run_branch_matrix(build_app, scenarios).expect("matrix runs");
     assert_eq!(matrix.outcomes.len(), 2);
-    assert!(matrix.all_passed(), "failed: {:?}", matrix.failed_variants());
-    println!("branch matrix: {} variants, all passed", matrix.outcomes.len());
+    assert!(
+        matrix.all_passed(),
+        "failed: {:?}",
+        matrix.failed_variants()
+    );
+    println!(
+        "branch matrix: {} variants, all passed",
+        matrix.outcomes.len()
+    );
 
     // 3. Coverage in reports
     let cov = &matrix.outcomes[0].report.coverage;
     assert!(!cov.intents_emitted.is_empty(), "coverage empty!");
-    println!("coverage: {:?}", cov.intents_emitted.keys().collect::<Vec<_>>());
+    println!(
+        "coverage: {:?}",
+        cov.intents_emitted.keys().collect::<Vec<_>>()
+    );
 
     // 4. Intent-in-flight context on violations
     let bad: Scenario = serde_json::from_str(
@@ -45,7 +73,6 @@ games with enum fields implement TestApiResolve on their own TestApi)");
     let ctx = &rep.violations[0].detail;
     assert!(ctx.starts_with("[intent: "), "missing context: {}", ctx);
     println!("violation detail: {}", ctx);
-
 
     // 6. Frame-time oracle: Welford stats accumulate and no false positive
     // on a clean run (anomalies require >60 samples + 3σ outlier).
@@ -88,8 +115,15 @@ games with enum fields implement TestApiResolve on their own TestApi)");
         ).unwrap();
         let mut app = build_app();
         let rep = run_scenario(&mut app, &scen).unwrap();
-        assert!(rep.coverage.intents_emitted.contains_key("choice:idx=0"), "replay emitted no choice intents");
-        assert_eq!(rep.status, "pass", "unexpected violations: {:?}", rep.violations);
+        assert!(
+            rep.coverage.intents_emitted.contains_key("choice:idx=0"),
+            "replay emitted no choice intents"
+        );
+        assert_eq!(
+            rep.status, "pass",
+            "unexpected violations: {:?}",
+            rep.violations
+        );
     }
     println!("replay bot: emits frame-indexed intents, invariants hold");
 
@@ -104,7 +138,11 @@ games with enum fields implement TestApiResolve on their own TestApi)");
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &expert_ok).unwrap();
-        assert_eq!(rep.status, "pass", "expert rule false positive: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "pass",
+            "expert rule false positive: {:?}",
+            rep.violations
+        );
     }
     // Failing direction: REQUIRE active_players above 999 — must fire.
     let expert_bad: Scenario = serde_json::from_str(
@@ -128,7 +166,12 @@ games with enum fields implement TestApiResolve on their own TestApi)");
         ).unwrap();
         let mut app = build_app();
         let rep = run_scenario(&mut app, &scen).unwrap();
-        let waits = rep.coverage.intents_emitted.get("wait").copied().unwrap_or(0);
+        let waits = rep
+            .coverage
+            .intents_emitted
+            .get("wait")
+            .copied()
+            .unwrap_or(0);
         assert_eq!(waits, 0, "aggressive persona must never Wait");
         let total: u64 = rep.coverage.intents_emitted.values().sum();
         assert!(total > 0, "aggressive persona emitted nothing");
@@ -146,22 +189,32 @@ games with enum fields implement TestApiResolve on their own TestApi)");
              "min_x":-100,"max_x":100,"min_y":-100,"max_y":100,"min_z":-50,"max_z":50,
              "targets":["Ball"]}
         ],"setup":{}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     {
         let mut app = build_app();
         app.add_systems(Update, inject_bounds_bug);
         let rep = run_scenario(&mut app, &bounds_scen).unwrap();
-        assert_eq!(rep.status, "fail", "bounds bug not detected: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "fail",
+            "bounds bug not detected: {:?}",
+            rep.violations
+        );
         assert!(
             rep.violations.iter().any(|v| v.rule == "ball_in_bounds"),
-            "no ball_in_bounds violation: {:?}", rep.violations
+            "no ball_in_bounds violation: {:?}",
+            rep.violations
         );
     }
     // Control: same scenario WITHOUT the bug must pass (no false positive).
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &bounds_scen).unwrap();
-        assert_eq!(rep.status, "pass", "false positive on healthy game: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "pass",
+            "false positive on healthy game: {:?}",
+            rep.violations
+        );
     }
     println!("mutation: bounds pass-through detected, control passes");
 
@@ -173,21 +226,31 @@ games with enum fields implement TestApiResolve on their own TestApi)");
              "check":"above","value":-1,
              "max_delta_per_sec":50.0}
         ],"setup":{}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     {
         let mut app = build_app();
         app.add_systems(Update, inject_rampant_score_bug);
         let rep = run_scenario(&mut app, &rate_scen).unwrap();
-        assert_eq!(rep.status, "fail", "rampant score not detected: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "fail",
+            "rampant score not detected: {:?}",
+            rep.violations
+        );
         assert!(
             rep.violations.iter().any(|v| v.rule == "score_rate"),
-            "no score_rate violation: {:?}", rep.violations
+            "no score_rate violation: {:?}",
+            rep.violations
         );
     }
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &rate_scen).unwrap();
-        assert_eq!(rep.status, "pass", "false positive on healthy game: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "pass",
+            "false positive on healthy game: {:?}",
+            rep.violations
+        );
     }
     println!("mutation: rampant score (timer-leak proxy) detected, control passes");
 
@@ -207,16 +270,25 @@ games with enum fields implement TestApiResolve on their own TestApi)");
         let mut app = build_app_no_scoring();
         app.add_systems(Update, inject_missing_points_bug);
         let rep = run_scenario(&mut app, &gain_scen).unwrap();
-        assert_eq!(rep.status, "fail", "missing-points bug not detected: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "fail",
+            "missing-points bug not detected: {:?}",
+            rep.violations
+        );
         assert!(
             rep.violations.iter().any(|v| v.rule == "score_monotonic"),
-            "no monotonic violation: {:?}", rep.violations
+            "no monotonic violation: {:?}",
+            rep.violations
         );
     }
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &gain_scen).unwrap();
-        assert_eq!(rep.status, "pass", "false positive on healthy game: {:?}", rep.violations);
+        assert_eq!(
+            rep.status, "pass",
+            "false positive on healthy game: {:?}",
+            rep.violations
+        );
     }
     println!("mutation: missing-points detected via differential invariant, control passes");
 
@@ -232,13 +304,16 @@ games with enum fields implement TestApiResolve on their own TestApi)");
         r#"{"bot":{"type":"synthetic_pointer","pointer_clicks":[
             {"frame":1,"target":"Ball"}
         ],"seed":1},"duration_s":0.2,"invariants":[],"setup":{}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &click_scen).unwrap();
         assert!(
-            rep.violations.iter().any(|v| v.rule == "synthetic_pointer_config"
-                && v.detail.contains("no primary window")),
+            rep.violations
+                .iter()
+                .any(|v| v.rule == "synthetic_pointer_config"
+                    && v.detail.contains("no primary window")),
             "headless app must loudly reject pointer synthesis, got: {:?}",
             rep.violations
         );
@@ -261,7 +336,10 @@ fn sync_score_to_test_api(mut api: ResMut<TestApi>, score: Res<Score>) {
 fn build_app() -> App {
     let mut app = build_app_no_scoring();
     app.insert_resource(Score(0));
-    app.add_systems(Update, (handle_choice_awards_points, sync_score_to_test_api));
+    app.add_systems(
+        Update,
+        (handle_choice_awards_points, sync_score_to_test_api),
+    );
     app
 }
 
@@ -288,11 +366,7 @@ pub fn build_app_no_scoring() -> App {
 }
 
 fn spawn_minimal_ball(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Ball"),
-        Gameplay,
-        Transform::default(),
-    ));
+    commands.spawn((Name::new("Ball"), Gameplay, Transform::default()));
 }
 
 /// Stub gameplay: each Choice intent awards +5 points to the game Score
@@ -314,10 +388,7 @@ fn handle_choice_awards_points(
 
 /// Bug 1: bounds pass-through — at frame 10, teleport every transformed
 /// Gameplay entity far out of bounds (as if it flew through a wall).
-fn inject_bounds_bug(
-    mut frame: Local<u64>,
-    mut q: Query<&mut Transform, With<Gameplay>>,
-) {
+fn inject_bounds_bug(mut frame: Local<u64>, mut q: Query<&mut Transform, With<Gameplay>>) {
     *frame += 1;
     if *frame == 10 {
         for mut t in &mut q {
@@ -431,8 +502,9 @@ fn system_coverage_reports_registered_and_executed() {
         r#"{"bot":{"type":"replay","inputs":[
             {"frame":1,"intent":{"intent":"choice","index":0}},
             {"frame":2,"intent":{"intent":"choice","index":0}}
-        ]},"duration_s":0.2,"invariants":[]}"#)
-        .unwrap();
+        ]},"duration_s":0.2,"invariants":[]}"#,
+    )
+    .unwrap();
     let mut app = build_app_no_scoring();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     let cov = &rep.system_coverage;
@@ -461,8 +533,9 @@ fn eventually_mode_passes_on_late_satisfaction() {
         ]},"duration_s":0.2,"invariants":[
             {"name":"score_eventually","rule":"custom","path":"TestApi.score",
              "check":"above","value":5,"eventually_s":0.15}
-        ]}"#)
-        .unwrap();
+        ]}"#,
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "pass", "violations: {:?}", rep.violations);
@@ -476,8 +549,9 @@ fn eventually_mode_fails_at_deadline() {
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.2,"invariants":[
             {"name":"score_eventually","rule":"custom","path":"TestApi.score",
              "check":"above","value":5,"eventually_s":0.15}
-        ]}"#)
-        .unwrap();
+        ]}"#,
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "fail");
@@ -492,8 +566,11 @@ fn eventually_mode_fails_at_deadline() {
     // at 0.15s ≈ frame 9, firing every frame after → bounded by frames
     // after deadline. Allow the aggregated entry but verify the detail
     // mentions the deadline.
-    assert!(hits[0].detail.contains("eventually"),
-        "violation should be an eventually-deadline failure: {}", hits[0].detail);
+    assert!(
+        hits[0].detail.contains("eventually"),
+        "violation should be an eventually-deadline failure: {}",
+        hits[0].detail
+    );
 }
 
 #[test]
@@ -503,8 +580,9 @@ fn eventually_mode_passes_when_already_satisfied() {
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
             {"name":"score_eventually","rule":"custom","path":"TestApi.score",
              "check":"above","value":-1,"eventually_s":0.05}
-        ]}"#)
-        .unwrap();
+        ]}"#,
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "pass", "violations: {:?}", rep.violations);
@@ -534,12 +612,16 @@ fn query_target_invariant_fails_when_count_mismatch() {
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
             {"name":"ghost_should_exist","rule":"custom","query":{"with":["Name"],"without":[]},
              "check":"equals","value":2}
-        ]}"#)
-        .unwrap();
+        ]}"#,
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "fail");
-    assert!(rep.violations.iter().any(|v| v.rule == "ghost_should_exist"));
+    assert!(rep
+        .violations
+        .iter()
+        .any(|v| v.rule == "ghost_should_exist"));
 }
 
 #[test]
@@ -566,12 +648,16 @@ fn query_target_invalid_component_reports_error() {
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
             {"name":"typo_test","rule":"custom","query":{"with":["Gamepla"],"without":[]},
              "check":"equals","value":0}
-        ]}"#)
-        .unwrap();
+        ]}"#,
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "fail");
-    assert!(rep.violations.iter().any(|v| v.rule == "typo_test" && v.detail.contains("unresolved")));
+    assert!(rep
+        .violations
+        .iter()
+        .any(|v| v.rule == "typo_test" && v.detail.contains("unresolved")));
 }
 
 #[test]
@@ -623,10 +709,13 @@ fn readiness_gate_defers_scenario_start() {
     .unwrap();
     let mut app = build_app();
     app.insert_resource(crate::harness::GameReady(false));
-    app.add_systems(bevy::app::Update, |mut ready: ResMut<crate::harness::GameReady>| {
-        // Become ready on the first update tick.
-        ready.0 = true;
-    });
+    app.add_systems(
+        bevy::app::Update,
+        |mut ready: ResMut<crate::harness::GameReady>| {
+            // Become ready on the first update tick.
+            ready.0 = true;
+        },
+    );
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(rep.status, "pass", "violations: {:?}", rep.violations);
     // Readiness took at least one frame before scenario frames began.
@@ -669,7 +758,9 @@ fn planner_bot_any_exhausted() {
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert!(
-        rep.violations.iter().any(|v| v.rule == "planner_any_exhausted"),
+        rep.violations
+            .iter()
+            .any(|v| v.rule == "planner_any_exhausted"),
         "any should exhaust: {:?}",
         rep.violations
     );
@@ -685,7 +776,9 @@ fn planner_bot_unfinished_check_at_end() {
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert!(
-        rep.violations.iter().any(|v| v.rule == "planner_goal_unfinished"),
+        rep.violations
+            .iter()
+            .any(|v| v.rule == "planner_goal_unfinished"),
         "unfinished goal at run end must be reported: {:?}",
         rep.violations
     );
@@ -727,7 +820,10 @@ fn action_log_structured_payloads_roundtrip() {
     };
     assert_eq!(
         action_to_replay_intent(&axis_action),
-        Some(ReplayIntent::Axis { name: "throttle".into(), value: 0.75 })
+        Some(ReplayIntent::Axis {
+            name: "throttle".into(),
+            value: 0.75
+        })
     );
 
     let select_action = TimedAction {
@@ -738,7 +834,9 @@ fn action_log_structured_payloads_roundtrip() {
     };
     assert_eq!(
         action_to_replay_intent(&select_action),
-        Some(ReplayIntent::Select { target: "end_turn".into() })
+        Some(ReplayIntent::Select {
+            target: "end_turn".into()
+        })
     );
 
     let wait_action = TimedAction {
@@ -747,5 +845,8 @@ fn action_log_structured_payloads_roundtrip() {
         action: "intent:wait".into(),
         details: None,
     };
-    assert_eq!(action_to_replay_intent(&wait_action), Some(ReplayIntent::Wait));
+    assert_eq!(
+        action_to_replay_intent(&wait_action),
+        Some(ReplayIntent::Wait)
+    );
 }

@@ -13,14 +13,14 @@ use crate::contract::{
     IntentSurface, ResetHooks, SurfaceVariant, TestApi, TestApiResolve, UserIntent,
 };
 use bevy::app::App;
-use bevy::ecs::message::MessageWriter;
+use bevy::camera::Camera;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::entity::Entity;
+use bevy::ecs::message::MessageWriter;
 use bevy::ecs::query::{Changed, With};
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::ecs::world::World;
-use bevy::camera::Camera;
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::{GlobalTransform, Name, Transform};
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,8 @@ use std::collections::{HashMap, HashSet};
 
 // Re-export for consumers that only depend on the harness module.
 pub use crate::contract::Gameplay;
-use crate::contract::HARNESS_TYPE_PATHS;
 use crate::contract::TestFieldValue;
+use crate::contract::HARNESS_TYPE_PATHS;
 
 // ---------------------------------------------------------------------------
 // Scenario schema (mirrors test_player.gd JSON)
@@ -79,29 +79,46 @@ pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {
 }
 
 const KEY_LETTERS: [bevy::input::keyboard::KeyCode; 26] = [
-    bevy::input::keyboard::KeyCode::KeyA, bevy::input::keyboard::KeyCode::KeyB,
-    bevy::input::keyboard::KeyCode::KeyC, bevy::input::keyboard::KeyCode::KeyD,
-    bevy::input::keyboard::KeyCode::KeyE, bevy::input::keyboard::KeyCode::KeyF,
-    bevy::input::keyboard::KeyCode::KeyG, bevy::input::keyboard::KeyCode::KeyH,
-    bevy::input::keyboard::KeyCode::KeyI, bevy::input::keyboard::KeyCode::KeyJ,
-    bevy::input::keyboard::KeyCode::KeyK, bevy::input::keyboard::KeyCode::KeyL,
-    bevy::input::keyboard::KeyCode::KeyM, bevy::input::keyboard::KeyCode::KeyN,
-    bevy::input::keyboard::KeyCode::KeyO, bevy::input::keyboard::KeyCode::KeyP,
-    bevy::input::keyboard::KeyCode::KeyQ, bevy::input::keyboard::KeyCode::KeyR,
-    bevy::input::keyboard::KeyCode::KeyS, bevy::input::keyboard::KeyCode::KeyT,
-    bevy::input::keyboard::KeyCode::KeyU, bevy::input::keyboard::KeyCode::KeyV,
-    bevy::input::keyboard::KeyCode::KeyW, bevy::input::keyboard::KeyCode::KeyX,
-    bevy::input::keyboard::KeyCode::KeyY, bevy::input::keyboard::KeyCode::KeyZ,
+    bevy::input::keyboard::KeyCode::KeyA,
+    bevy::input::keyboard::KeyCode::KeyB,
+    bevy::input::keyboard::KeyCode::KeyC,
+    bevy::input::keyboard::KeyCode::KeyD,
+    bevy::input::keyboard::KeyCode::KeyE,
+    bevy::input::keyboard::KeyCode::KeyF,
+    bevy::input::keyboard::KeyCode::KeyG,
+    bevy::input::keyboard::KeyCode::KeyH,
+    bevy::input::keyboard::KeyCode::KeyI,
+    bevy::input::keyboard::KeyCode::KeyJ,
+    bevy::input::keyboard::KeyCode::KeyK,
+    bevy::input::keyboard::KeyCode::KeyL,
+    bevy::input::keyboard::KeyCode::KeyM,
+    bevy::input::keyboard::KeyCode::KeyN,
+    bevy::input::keyboard::KeyCode::KeyO,
+    bevy::input::keyboard::KeyCode::KeyP,
+    bevy::input::keyboard::KeyCode::KeyQ,
+    bevy::input::keyboard::KeyCode::KeyR,
+    bevy::input::keyboard::KeyCode::KeyS,
+    bevy::input::keyboard::KeyCode::KeyT,
+    bevy::input::keyboard::KeyCode::KeyU,
+    bevy::input::keyboard::KeyCode::KeyV,
+    bevy::input::keyboard::KeyCode::KeyW,
+    bevy::input::keyboard::KeyCode::KeyX,
+    bevy::input::keyboard::KeyCode::KeyY,
+    bevy::input::keyboard::KeyCode::KeyZ,
 ];
 
 const KEY_DIGITS: [bevy::input::keyboard::KeyCode; 10] = [
-    bevy::input::keyboard::KeyCode::Digit0, bevy::input::keyboard::KeyCode::Digit1,
-    bevy::input::keyboard::KeyCode::Digit2, bevy::input::keyboard::KeyCode::Digit3,
-    bevy::input::keyboard::KeyCode::Digit4, bevy::input::keyboard::KeyCode::Digit5,
-    bevy::input::keyboard::KeyCode::Digit6, bevy::input::keyboard::KeyCode::Digit7,
-    bevy::input::keyboard::KeyCode::Digit8, bevy::input::keyboard::KeyCode::Digit9,
+    bevy::input::keyboard::KeyCode::Digit0,
+    bevy::input::keyboard::KeyCode::Digit1,
+    bevy::input::keyboard::KeyCode::Digit2,
+    bevy::input::keyboard::KeyCode::Digit3,
+    bevy::input::keyboard::KeyCode::Digit4,
+    bevy::input::keyboard::KeyCode::Digit5,
+    bevy::input::keyboard::KeyCode::Digit6,
+    bevy::input::keyboard::KeyCode::Digit7,
+    bevy::input::keyboard::KeyCode::Digit8,
+    bevy::input::keyboard::KeyCode::Digit9,
 ];
-
 
 fn default_duration() -> f32 {
     15.0
@@ -229,10 +246,7 @@ fn default_pointer_button() -> String {
 /// receives candidate subsequences; must be deterministic and side-effect
 /// isolated (caller is responsible for resetting world state between calls).
 /// Returns the smallest found prefix-preserving subsequence that still fails.
-pub fn ddmin_minimize<T: Clone>(
-    actions: &[T],
-    reproduce: impl Fn(&[T]) -> bool,
-) -> Vec<T> {
+pub fn ddmin_minimize<T: Clone>(actions: &[T], reproduce: impl Fn(&[T]) -> bool) -> Vec<T> {
     let mut cur: Vec<T> = actions.to_vec();
     if cur.is_empty() || !reproduce(&cur) {
         return cur; // not reproducible (or empty) — return as-is
@@ -309,14 +323,23 @@ pub fn action_log_to_timed_actions(log: &[crate::contract::ActionEntry]) -> Vec<
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "intent", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReplayIntent {
-    Move { dir: (f32, f32) },
-    Choice { index: usize },
-    Axis { name: String, value: f32 },
+    Move {
+        dir: (f32, f32),
+    },
+    Choice {
+        index: usize,
+    },
+    Axis {
+        name: String,
+        value: f32,
+    },
     /// Select a tile/entity BY NAME — resolved against live `Name` +
     /// `Gameplay` entities at fire time. Unlike raw-entity Selects, this
     /// survives reset cycles (fresh entity ids) — the replay scenario
     /// refers to stable scene names.
-    Select { target: String },
+    Select {
+        target: String,
+    },
     Wait,
 }
 
@@ -781,7 +804,11 @@ fn chaos_bot_system(
     // jabs. Different personas find different bugs.
     let persona = scenario.0.bot.persona.as_deref().unwrap_or("");
     let rate = scenario.0.bot.input_rate_hz.max(1);
-    let effective_rate = if persona == "aggressive" { rate.saturating_mul(2) } else { rate };
+    let effective_rate = if persona == "aggressive" {
+        rate.saturating_mul(2)
+    } else {
+        rate
+    };
     let fire_every = (state.tps / effective_rate as u64).max(1);
     if state.frame % fire_every != 0 {
         return;
@@ -868,7 +895,12 @@ fn chaos_bot_system(
         }
     };
     // Coverage: track which variant was sampled
-    state.coverage.intents_emitted.entry(variant_name.clone()).and_modify(|c| *c += 1).or_insert(1);
+    state
+        .coverage
+        .intents_emitted
+        .entry(variant_name.clone())
+        .and_modify(|c| *c += 1)
+        .or_insert(1);
     state.coverage.chaos_surface_indices.insert(roll);
     // Context for violations
     violations.set_context(format!("chaos:{},idx={}", variant_name, roll));
@@ -924,13 +956,21 @@ fn replay_bot_system(
                                 "replay:frame={},select-target-miss={}",
                                 entry.frame, target
                             ));
-                                            continue;
+                            continue;
                         }
                     }
                 }
             };
-            state.coverage.intents_emitted.entry(variant_name).and_modify(|c| *c += 1).or_insert(1);
-            violations.set_context(format!("replay:frame={},intent={:?}", entry.frame, entry.intent));
+            state
+                .coverage
+                .intents_emitted
+                .entry(variant_name)
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+            violations.set_context(format!(
+                "replay:frame={},intent={:?}",
+                entry.frame, entry.intent
+            ));
             intents.write(intent);
         }
     }
@@ -1031,10 +1071,7 @@ fn synthetic_pointer_bot_system(
                 continue;
             }
         };
-        let Some((_, transform)) = q_named
-            .iter()
-            .find(|(n, _)| n.as_str() == click.target)
-        else {
+        let Some((_, transform)) = q_named.iter().find(|(n, _)| n.as_str() == click.target) else {
             violations.report(
                 "synthetic_pointer_config",
                 &click.target,
@@ -1056,9 +1093,7 @@ fn synthetic_pointer_bot_system(
         // the first camera that can (2D boards typically have exactly one).
         let mut viewport_pos = None;
         for (camera, cam_transform) in q_camera.iter() {
-            if let Ok(p) =
-                camera.world_to_viewport(cam_transform, transform.translation())
-            {
+            if let Ok(p) = camera.world_to_viewport(cam_transform, transform.translation()) {
                 viewport_pos = Some(p);
                 break;
             }
@@ -1072,10 +1107,9 @@ fn synthetic_pointer_bot_system(
             );
             continue;
         };
-        let Some(target) = bevy::camera::RenderTarget::Window(
-            bevy::window::WindowRef::Entity(window_entity),
-        )
-        .normalize(Some(window_entity))
+        let Some(target) =
+            bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(window_entity))
+                .normalize(Some(window_entity))
         else {
             violations.report(
                 "synthetic_pointer_config",
@@ -1085,10 +1119,7 @@ fn synthetic_pointer_bot_system(
             );
             continue;
         };
-        let location = bevy::picking::pointer::Location {
-            target,
-            position,
-        };
+        let location = bevy::picking::pointer::Location { target, position };
         // A click is a THREE-FRAME gesture: Move, then Press, then Release.
         // Rationale: bevy_picking's release/click dispatch reads the
         // PREVIOUS frame's hover map (previous_hover_map), so a press
@@ -1253,7 +1284,9 @@ fn check_bounds_gameplay_system(
                         &name.to_string(),
                         format!(
                             "out of bounds ({}, {}, {})",
-                            transform.translation.x, transform.translation.y, transform.translation.z
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z
                         ),
                         state.frame,
                     );
@@ -1265,8 +1298,10 @@ fn check_bounds_gameplay_system(
             // Existence + bounds both checked here; existence every tick,
             // bounds only on change.
             for target in &inv.targets {
-                let matched_changed: Vec<(&Name, &Transform)> =
-                    q_changed.iter().filter(|(n, _)| n.as_str() == target).collect();
+                let matched_changed: Vec<(&Name, &Transform)> = q_changed
+                    .iter()
+                    .filter(|(n, _)| n.as_str() == target)
+                    .collect();
                 let matched_all: Vec<(&Name, &Transform)> =
                     q_all.iter().filter(|(n, _)| n.as_str() == target).collect();
                 if matched_all.is_empty() {
@@ -1285,7 +1320,8 @@ fn check_bounds_gameplay_system(
                             &name.to_string(),
                             format!(
                                 "out of bounds ({}, {}, {})",
-                                transform.translation.x, transform.translation.y,
+                                transform.translation.x,
+                                transform.translation.y,
                                 transform.translation.z
                             ),
                             state.frame,
@@ -1321,17 +1357,12 @@ fn check_frame_times_system(
                 // discard skipped. Diagnostic::max() doesn't exist in
                 // 0.20-rc; we use latest value as a conservative proxy
                 // (NOT a true rolling p99 — see MAPPING-NOTES).
-                let threshold = inv
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(33.3);
+                let threshold = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(33.3);
                 if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
                     if let Some(val) = ft.value() {
                         if val > threshold {
                             state.metrics.frame_ms_p99 = val;
-                            state.metrics.worst_frame_ms =
-                                state.metrics.worst_frame_ms.max(val);
+                            state.metrics.worst_frame_ms = state.metrics.worst_frame_ms.max(val);
                             violations.report(
                                 &inv.name,
                                 "",
@@ -1346,11 +1377,7 @@ fn check_frame_times_system(
                 }
             }
             "fps_floor" => {
-                let min_fps = inv
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(30.0);
+                let min_fps = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(30.0);
                 let threshold_ms = 1000.0 / min_fps;
                 if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
                     if let Some(avg) = ft.average() {
@@ -1358,10 +1385,7 @@ fn check_frame_times_system(
                             violations.report(
                                 &inv.name,
                                 "",
-                                format!(
-                                    "avg frame time = {:.2}ms (min fps: {:.0})",
-                                    avg, min_fps
-                                ),
+                                format!("avg frame time = {:.2}ms (min fps: {:.0})", avg, min_fps),
                                 state.frame,
                             );
                         }
@@ -1395,7 +1419,7 @@ fn check_frame_times_system(
 pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue> {
     use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::reflect::GetPath;
-    
+
     let registry = world.resource::<AppTypeRegistry>().0.read();
 
     // Helper: look up a registered type by short path and resolve its world
@@ -1476,8 +1500,8 @@ pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue
 /// Numeric; enums become Text (variant name); strings become Text;
 /// anything else falls back to the debug representation.
 fn value_from_reflect(val: &dyn bevy::reflect::PartialReflect) -> TestFieldValue {
-    use bevy::reflect::ReflectKind;
     use crate::contract::TestFieldValue;
+    use bevy::reflect::ReflectKind;
 
     // Try numeric conversions
     if let Some(v) = val.try_downcast_ref::<i64>() {
@@ -1525,16 +1549,15 @@ fn count_query_target(world: &World, target: &QueryTarget) -> Option<usize> {
 
     let registry = world.resource::<AppTypeRegistry>().0.read();
 
-    let resolve_ids =
-        |names: &[String]| -> Option<Vec<bevy::ecs::component::ComponentId>> {
-            names
-                .iter()
-                .map(|t| {
-                    let reg = registry.get_with_short_type_path(t)?;
-                    world.components().get_valid_id(reg.type_id())
-                })
-                .collect()
-        };
+    let resolve_ids = |names: &[String]| -> Option<Vec<bevy::ecs::component::ComponentId>> {
+        names
+            .iter()
+            .map(|t| {
+                let reg = registry.get_with_short_type_path(t)?;
+                world.components().get_valid_id(reg.type_id())
+            })
+            .collect()
+    };
 
     // Unresolvable component names → None (caller reports the typo).
     let with_ids = resolve_ids(&target.with)?;
@@ -1551,7 +1574,6 @@ fn count_query_target(world: &World, target: &QueryTarget) -> Option<usize> {
     Some(count)
 }
 
-
 fn resolve_test_api(api: &TestApi, path: &str) -> (Option<f64>, Option<String>) {
     match api.resolve(path) {
         Some(TestFieldValue::Numeric(n)) => (Some(n), None),
@@ -1559,10 +1581,6 @@ fn resolve_test_api(api: &TestApi, path: &str) -> (Option<f64>, Option<String>) 
         None => (None, None),
     }
 }
-
-
-
-
 
 /// Exclusive system: snapshot scenario/TestApi state immutably first, then
 /// mutate violations/delta-windows (two-phase to satisfy the borrow checker).
@@ -1603,7 +1621,7 @@ fn check_custom_system(world: &mut World) {
             let numeric = count as f64;
             let check = inv.check.as_deref().unwrap_or("above");
             let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
-            
+
             let holds_now = match (check, threshold) {
                 ("equals", Some(thr)) => (count as f64 - thr).abs() <= f64::EPSILON,
                 ("below", Some(thr)) => count as f64 <= thr,
@@ -1643,7 +1661,15 @@ fn check_custom_system(world: &mut World) {
                             format!(
                                 "query count {} {} {} (threshold: {})",
                                 count,
-                                if check == "equals" { "!=" } else { if check == "below" { ">" } else { "<" } },
+                                if check == "equals" {
+                                    "!="
+                                } else {
+                                    if check == "below" {
+                                        ">"
+                                    } else {
+                                        "<"
+                                    }
+                                },
                                 threshold.unwrap_or(0.0),
                                 threshold.unwrap_or(0.0)
                             ),
@@ -1695,9 +1721,7 @@ fn check_custom_system(world: &mut World) {
         }
 
         // Equals on enum-ish (string) fields.
-        if let (Some(sv), Some(serde_json::Value::String(expect))) =
-            (&string_val, &inv.value)
-        {
+        if let (Some(sv), Some(serde_json::Value::String(expect))) = (&string_val, &inv.value) {
             let eq = sv == expect;
             // Eventually-mode: pass as soon as satisfied; report only at
             // deadline expiry if never satisfied.
@@ -1791,10 +1815,7 @@ fn check_custom_system(world: &mut World) {
         // ceiling >= 1. A re-firing handler climbs the whole window.
         if let Some(max_dps) = inv.max_delta_per_sec {
             let mut state_mut = world.resource_mut::<PlaytestState>();
-            let samples = state_mut
-                .delta_windows
-                .entry(inv.name.clone())
-                .or_default();
+            let samples = state_mut.delta_windows.entry(inv.name.clone()).or_default();
             samples.push((frame, current));
             let window_ticks = tps.max(1);
             while samples.len() > 1 && frame - samples[0].0 > window_ticks {
@@ -1865,7 +1886,8 @@ fn check_custom_system(world: &mut World) {
                     }
                 } else {
                     // Text WHEN: string equality against the field value.
-                    string_val.as_deref()
+                    string_val
+                        .as_deref()
                         .and_then(|sv| when_val.as_str().map(|wv| sv == wv))
                         .unwrap_or(false)
                 }
@@ -1946,7 +1968,9 @@ fn intent_audit_log_system(
         let details = match &intent {
             UserIntent::Move { dir } => Some(format!(r#"{{"dir":[{:.4},{:.4}]}}"#, dir.x, dir.y)),
             UserIntent::Choice { index } => Some(format!(r#"{{"index":{}}}"#, index)),
-            UserIntent::Axis { name, value } => Some(format!(r#"{{"name":"{}","value":{:.4}}}"#, name, value)),
+            UserIntent::Axis { name, value } => {
+                Some(format!(r#"{{"name":"{}","value":{:.4}}}"#, name, value))
+            }
             UserIntent::Select { target } => Some(format!(r#"{{"target":"{}"}}"#, target.index())),
             UserIntent::Wait => None,
         };
@@ -2239,134 +2263,137 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // logged with source BotScenario("cheat-schedule").
     app.add_systems(bevy::app::Update, cheat_scheduler_system);
 
+    /// synthetic_keyboard: emits RAW `KeyboardInput` messages (press on
+    /// the due frame, release the next) — the exact chain winit drives:
+    /// KeyboardInput → ButtonInput<KeyCode> → the game's input adapter.
+    /// An adapter that's unregistered or maps the wrong key produces NO
+    /// intents — caught by the scenario's TestApi invariants.
+    /// AUDIT (phase 3): fires scenario-scheduled cheats on their due
+    /// frames. Every invocation is action-logged (cheat:<kind>) — cheat
+    /// use is never silent.
+    fn cheat_scheduler_system(world: &mut World) {
+        let frame = world.resource::<PlaytestState>().frame;
+        let elapsed_ms = world.resource::<PlaytestState>().elapsed_s() as f64 * 1000.0;
+        let due: Vec<String> = world
+            .resource::<ScenarioResource>()
+            .0
+            .setup
+            .cheats
+            .iter()
+            .filter(|c| c.frame == frame)
+            .map(|c| c.kind.clone())
+            .collect();
+        for kind in due {
+            // AUDIT first — cheat use is never silent.
+            world.resource_mut::<crate::contract::ActionLog>().record(
+                frame,
+                elapsed_ms,
+                crate::contract::ActionSource::BotScenario("cheat-schedule".into()),
+                format!("cheat:{}", kind),
+                None,
+            );
+            // Execute: hooks aren't Clone — remove resource, extract, run,
+            // restore.
+            let Some(mut hooks) = world.remove_resource::<crate::contract::CheatHooks>() else {
+                continue;
+            };
+            if let Some(hook) = hooks.0.remove(&kind) {
+                hook(world);
+            }
+            world.insert_resource(hooks);
+        }
+    }
 
-/// synthetic_keyboard: emits RAW `KeyboardInput` messages (press on
-/// the due frame, release the next) — the exact chain winit drives:
-/// KeyboardInput → ButtonInput<KeyCode> → the game's input adapter.
-/// An adapter that's unregistered or maps the wrong key produces NO
-/// intents — caught by the scenario's TestApi invariants.
-/// AUDIT (phase 3): fires scenario-scheduled cheats on their due
-/// frames. Every invocation is action-logged (cheat:<kind>) — cheat
-/// use is never silent.
-fn cheat_scheduler_system(world: &mut World) {
-    let frame = world.resource::<PlaytestState>().frame;
-    let elapsed_ms = world.resource::<PlaytestState>().elapsed_s() as f64 * 1000.0;
-    let due: Vec<String> = world
-        .resource::<ScenarioResource>()
-        .0
-        .setup
-        .cheats
-        .iter()
-        .filter(|c| c.frame == frame)
-        .map(|c| c.kind.clone())
-        .collect();
-    for kind in due {
-        // AUDIT first — cheat use is never silent.
-        world.resource_mut::<crate::contract::ActionLog>().record(
-            frame,
-            elapsed_ms,
-            crate::contract::ActionSource::BotScenario("cheat-schedule".into()),
-            format!("cheat:{}", kind),
-            None,
-        );
-        // Execute: hooks aren't Clone — remove resource, extract, run,
-        // restore.
-        let Some(mut hooks) = world.remove_resource::<crate::contract::CheatHooks>()
-        else {
-            continue;
+    fn synthetic_keyboard_bot_system(
+        mut state: ResMut<PlaytestState>,
+        mut violations: ResMut<Violations>,
+        mut keyboard_inputs: MessageWriter<bevy::input::keyboard::KeyboardInput>,
+        primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+        scenario: Res<ScenarioResource>,
+    ) {
+        if scenario.0.bot.bot_type != "synthetic_keyboard" {
+            return;
+        }
+        let frame = state.frame;
+        // Entity is not Default; PLACEHOLDER satisfies the field when the
+        // headless app somehow lacks a window (KeyboardInput window only
+        // routes text input, not key state).
+        let window = match primary_window.single() {
+            Ok(e) => e,
+            Err(_) => bevy::ecs::entity::Entity::PLACEHOLDER,
         };
-        if let Some(hook) = hooks.0.remove(&kind) {
-            hook(world);
+        // Releases due this frame.
+        let pending = std::mem::take(&mut state.pending_key_releases);
+        for (key, release_at) in pending {
+            if frame >= release_at {
+                if let Some(code) = parse_key_code(&key) {
+                    keyboard_inputs.write(bevy::input::keyboard::KeyboardInput {
+                        key_code: code,
+                        logical_key: bevy::input::keyboard::Key::Unidentified(
+                            bevy::input::keyboard::NativeKey::Unidentified,
+                        ),
+                        state: bevy::input::ButtonState::Released,
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                    state
+                        .coverage
+                        .intents_emitted
+                        .entry(format!("key:{}", key))
+                        .and_modify(|c| *c += 1)
+                        .or_insert(1);
+                    violations
+                        .set_context(format!("synthetic_keyboard:frame={},key={}", frame, key));
+                }
+            } else {
+                state.pending_key_releases.push((key, release_at));
+            }
         }
-        world.insert_resource(hooks);
+        // Presses due this frame.
+        for kp in &scenario.0.bot.key_presses {
+            if kp.frame != frame {
+                continue;
+            }
+            match parse_key_code(&kp.key) {
+                Some(code) => {
+                    keyboard_inputs.write(bevy::input::keyboard::KeyboardInput {
+                        key_code: code,
+                        logical_key: bevy::input::keyboard::Key::Unidentified(
+                            bevy::input::keyboard::NativeKey::Unidentified,
+                        ),
+                        state: bevy::input::ButtonState::Pressed,
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                    state
+                        .pending_key_releases
+                        .push((kp.key.clone(), frame + kp.hold_frames));
+                }
+                None => {
+                    violations.report(
+                        "synthetic_keyboard_config",
+                        &kp.key,
+                        "unknown key name (see KeyPressInput docs for supported names)".to_string(),
+                        frame,
+                    );
+                }
+            }
+        }
     }
-}
 
-fn synthetic_keyboard_bot_system(
-    mut state: ResMut<PlaytestState>,
-    mut violations: ResMut<Violations>,
-    mut keyboard_inputs: MessageWriter<bevy::input::keyboard::KeyboardInput>,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-    scenario: Res<ScenarioResource>,
-) {
-    if scenario.0.bot.bot_type != "synthetic_keyboard" {
-        return;
-    }
-    let frame = state.frame;
-    // Entity is not Default; PLACEHOLDER satisfies the field when the
-    // headless app somehow lacks a window (KeyboardInput window only
-    // routes text input, not key state).
-    let window = match primary_window.single() {
-        Ok(e) => e,
-        Err(_) => bevy::ecs::entity::Entity::PLACEHOLDER,
-    };
-    // Releases due this frame.
-    let pending = std::mem::take(&mut state.pending_key_releases);
-    for (key, release_at) in pending {
-        if frame >= release_at {
-            if let Some(code) = parse_key_code(&key) {
-                keyboard_inputs.write(bevy::input::keyboard::KeyboardInput {
-                    key_code: code,
-                    logical_key: bevy::input::keyboard::Key::Unidentified(
-                        bevy::input::keyboard::NativeKey::Unidentified,
-                    ),
-                    state: bevy::input::ButtonState::Released,
-                    text: None,
-                    repeat: false,
-                    window,
-                });
-                state
-                    .coverage
-                    .intents_emitted
-                    .entry(format!("key:{}", key))
-                    .and_modify(|c| *c += 1)
-                    .or_insert(1);
-                violations.set_context(format!("synthetic_keyboard:frame={},key={}", frame, key));
-            }
-        } else {
-            state.pending_key_releases.push((key, release_at));
-        }
-    }
-    // Presses due this frame.
-    for kp in &scenario.0.bot.key_presses {
-        if kp.frame != frame {
-            continue;
-        }
-        match parse_key_code(&kp.key) {
-            Some(code) => {
-                keyboard_inputs.write(bevy::input::keyboard::KeyboardInput {
-                    key_code: code,
-                    logical_key: bevy::input::keyboard::Key::Unidentified(
-                        bevy::input::keyboard::NativeKey::Unidentified,
-                    ),
-                    state: bevy::input::ButtonState::Pressed,
-                    text: None,
-                    repeat: false,
-                    window,
-                });
-                state.pending_key_releases.push((kp.key.clone(), frame + kp.hold_frames));
-            }
-            None => {
-                violations.report(
-                    "synthetic_keyboard_config",
-                    &kp.key,
-                    "unknown key name (see KeyPressInput docs for supported names)"
-                        .to_string(),
-                    frame,
-                );
-            }
-        }
-    }
-}
-
-// Register the synthetic_pointer bot only when the scenario asks for
+    // Register the synthetic_pointer bot only when the scenario asks for
     // it: its ResMut<PlaytestState>/ResMut<Violations> params would add
     // scheduler edges that perturb system ordering for OTHER bot types     // registration keeps the default schedule graph byte-identical.
     if scenario.bot.bot_type == "synthetic_pointer" {
         app.add_systems(bevy::app::Update, synthetic_pointer_bot_system);
         // Actionability gate queue processor (only meaningful when the
         // scenario opts in via require_actionable clicks).
-        app.add_systems(bevy::app::Update, synthetic_pointer_actionability_check_system);
+        app.add_systems(
+            bevy::app::Update,
+            synthetic_pointer_actionability_check_system,
+        );
     }
     if scenario.bot.bot_type == "synthetic_keyboard" {
         app.add_systems(bevy::app::Update, synthetic_keyboard_bot_system);
@@ -2377,7 +2404,12 @@ fn synthetic_keyboard_bot_system(
     // Take ResetHooks out of the world (owned, no borrow held), invoke
     // each hook with full world access, then restore the registry —
     // calling while holding the resource borrow is a double-borrow error.
-    let kinds: Vec<String> = scenario.setup.resets.iter().map(|r| r.kind.clone()).collect();
+    let kinds: Vec<String> = scenario
+        .setup
+        .resets
+        .iter()
+        .map(|r| r.kind.clone())
+        .collect();
     for k in &kinds {
         coverage.resets_invoked.insert(k.clone());
     }
@@ -2395,7 +2427,11 @@ fn synthetic_keyboard_bot_system(
     app.insert_resource(PlaytestState {
         frame: 0,
         tps,
-        rng: if scenario.bot.seed == 0 { 42 } else { scenario.bot.seed },
+        rng: if scenario.bot.seed == 0 {
+            42
+        } else {
+            scenario.bot.seed
+        },
         metrics: Metrics::default(),
         delta_windows: HashMap::default(),
         warned_paths: HashSet::default(),
@@ -2654,10 +2690,15 @@ pub fn action_to_replay_intent(entry: &TimedAction) -> Option<ReplayIntent> {
     }
     // Legacy per-bot string formats (kept for compatibility with old logs).
     if let Some(rest) = a.strip_prefix("choice:idx=") {
-        return rest.parse::<usize>().ok().map(|index| ReplayIntent::Choice { index });
+        return rest
+            .parse::<usize>()
+            .ok()
+            .map(|index| ReplayIntent::Choice { index });
     }
     if let Some(rest) = a.strip_prefix("select:name=") {
-        return Some(ReplayIntent::Select { target: rest.to_string() });
+        return Some(ReplayIntent::Select {
+            target: rest.to_string(),
+        });
     }
     if a == "wait" {
         return Some(ReplayIntent::Wait);
@@ -2710,12 +2751,12 @@ pub fn minimize_crash(
                 deadzone: scenario.bot.deadzone,
                 goals: None,
                 inputs,
-                    pointer_clicks: vec![],
-                    key_presses: vec![],
-                    persona: None,
-                },
-                invariants: scenario.invariants.clone(),
-            };
+                pointer_clicks: vec![],
+                key_presses: vec![],
+                persona: None,
+            },
+            invariants: scenario.invariants.clone(),
+        };
         matches!(run_scenario(&mut app, &replay_scenario), Ok(r) if r.status == "crash")
     };
 
@@ -2732,19 +2773,19 @@ pub fn minimize_crash(
     let regression_scenario = Scenario {
         setup: scenario.setup.clone(),
         duration_s: scenario.duration_s,
-            bot: BotConfig {
-                bot_type: "replay".into(),
-                seed: scenario.bot.seed,
-                input_rate_hz: scenario.bot.input_rate_hz,
-                agent_target: None,
-                target: None,
-                deadzone: scenario.bot.deadzone,
-                goals: None,
-                inputs,
-                pointer_clicks: vec![],
-                key_presses: vec![],
-                persona: None,
-            },
+        bot: BotConfig {
+            bot_type: "replay".into(),
+            seed: scenario.bot.seed,
+            input_rate_hz: scenario.bot.input_rate_hz,
+            agent_target: None,
+            target: None,
+            deadzone: scenario.bot.deadzone,
+            goals: None,
+            inputs,
+            pointer_clicks: vec![],
+            key_presses: vec![],
+            persona: None,
+        },
         invariants: scenario.invariants.clone(),
     };
     Some(MinimizeOutcome {
@@ -2810,8 +2851,7 @@ pub fn contract_diagnostics(world: &World) -> ContractReport {
         .unwrap_or_default();
     if reset_hooks.is_empty() {
         recommendations.push(
-            "no reset hooks — add register ResetHooks explicitly or register ResetHooks"
-                .into(),
+            "no reset hooks — add register ResetHooks explicitly or register ResetHooks".into(),
         );
     }
 
@@ -2895,9 +2935,15 @@ impl std::fmt::Display for DetectedFeature {
 
 /// Field-vocabulary probes for feature detection: (feature, field names).
 const FEATURE_VOCAB: [(&str, &[&str]); 4] = [
-    ("turn_based", &["turn", "turn_number", "current_turn", "faction_turn"]),
+    (
+        "turn_based",
+        &["turn", "turn_number", "current_turn", "faction_turn"],
+    ),
     ("combat", &["hp", "health", "damage", "attack", "defense"]),
-    ("inventory", &["item", "capacity", "slot", "inventory", "stack"]),
+    (
+        "inventory",
+        &["item", "capacity", "slot", "inventory", "stack"],
+    ),
     ("dialogue", &["dialogue", "speaker", "line", "node_choice"]),
 ];
 
@@ -3039,7 +3085,10 @@ pub struct CalibrationSnapshot {
 /// USAGE: Call this once per game binary, save the snapshot, then
 /// programmatically generate invariants (e.g., "archetype X never drops
 /// below N"). Zero game-code changes required.
-pub fn calibrate_world(app: &mut App, duration_s: f32) -> Result<CalibrationSnapshot, ScenarioError> {
+pub fn calibrate_world(
+    app: &mut App,
+    duration_s: f32,
+) -> Result<CalibrationSnapshot, ScenarioError> {
     // Inject a minimal chaos scenario so harness systems can run.
     let scenario = serde_json::from_str::<Scenario>(r#"{"bot":{"type":"chaos","seed":42}}"#)
         .map_err(|e| ScenarioError::Rejected(format!("internal: bad calibration scenario: {e}")))?;
@@ -3149,7 +3198,9 @@ pub fn generate_invariants_from_calibration(snapshot: &CalibrationSnapshot) -> S
             // contract and make brittle invariants.
             let comps: Vec<String> = sig
                 .split('|')
-                .filter(|c| !c.starts_with("bevy_") && !c.contains("harvestcycle::state::GameState"))
+                .filter(|c| {
+                    !c.starts_with("bevy_") && !c.contains("harvestcycle::state::GameState")
+                })
                 .map(|s| short_type_name(s).to_string())
                 .collect();
             if comps.is_empty() {
@@ -3264,7 +3315,9 @@ fn synthetic_pointer_actionability_check_system(
         }
         if let Some(hover) = hover_map.as_ref() {
             // HoverMap keys are PointerId; values are maps from window to hovered entities.
-            let mouse_hovered = hover.get(&PointerId::Mouse).and_then(|wm| wm.values().next());
+            let mouse_hovered = hover
+                .get(&PointerId::Mouse)
+                .and_then(|wm| wm.values().next());
             if mouse_hovered.is_none() {
                 violations.report(
                     "pointer_not_actionable",
