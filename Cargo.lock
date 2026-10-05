@@ -1437,15 +1437,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_playtest"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "bevy_post_process"
 version = "0.20.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1775,6 +1766,15 @@ dependencies = [
  "bevy_macro_utils",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "bevy_swarm"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

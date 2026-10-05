@@ -6,8 +6,8 @@
 //! Expected: the harness's intent audit / no-movement check flags the desync.
 
 use bevy::prelude::*;
-use bevy_playtest::contract::*;
-use bevy_playtest::harness::*;
+use bevy_swarm::contract::*;
+use bevy_swarm::harness::*;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]

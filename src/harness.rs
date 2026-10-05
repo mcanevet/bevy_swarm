@@ -1,6 +1,6 @@
 //! Headless in-process playtest harness for Bevy (port of Godot test_player.gd).
 //!
-//! Lives in the `bevy_playtest` crate — games consume it as a path
+//! Lives in the `bevy_swarm` crate — games consume it as a path
 //! dependency instead of copying 1900 lines into src/. NO game-specific
 //! glue in this file.
 //!

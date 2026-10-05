@@ -5,19 +5,19 @@
 //! Add as a path dependency in your game's `Cargo.toml`:
 //! ```toml
 //! [dev-dependencies]
-//! bevy_playtest = { path = "../.agents/skills/playtest/crates/bevy_playtest" }
+//! bevy_swarm = { path = "../.agents/skills/playtest/crates/bevy_swarm" }
 //! ```
 //!
 //! Then in your game's `src/test_conventions.rs` (or wherever you define
-//! the contract), implement the traits from `bevy_playtest::contract`:
+//! the contract), implement the traits from `bevy_swarm::contract`:
 //! - Define your `UserIntent` enum (or re-export the default one)
 //! - Implement `TestApiResolve` on your `TestApi` resource
 //! - Register `ResetHooks`, `IntentSurface`, and `Gameplay` marker
 //!
 //! In your test suite, import the harness:
 //! ```rust,no_run
-//! use bevy_playtest::harness::{run_scenario, validate_scenario};
-//! use bevy_playtest::contract::{UserIntent, Gameplay, ResetHooks, IntentSurface};
+//! use bevy_swarm::harness::{run_scenario, validate_scenario};
+//! use bevy_swarm::contract::{UserIntent, Gameplay, ResetHooks, IntentSurface};
 //! ```
 //!
 //! The harness expects:

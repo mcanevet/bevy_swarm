@@ -1,4 +1,4 @@
-# bevy_playtest
+# bevy_swarm
 
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
@@ -16,11 +16,11 @@ An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.
 
 ```toml
 [dev-dependencies]
-bevy_playtest = "0.1" # or path/git
+bevy_swarm = "0.1" # or path/git
 ```
 
 ```rust
-use bevy_playtest::harness::{run_scenario, validate_scenario, Scenario};
+use bevy_swarm::harness::{run_scenario, validate_scenario, Scenario};
 
 let scenario: Scenario = serde_json::from_str(
     r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"above","value":3,"emit":[{"intent":"choice","index":0}]}},"duration_s":1.0,"invariants":[]}"#,

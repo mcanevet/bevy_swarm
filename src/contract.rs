@@ -286,7 +286,7 @@ pub struct GameVersion(pub String);
 
 /// Harness-owned type paths excluded from auto-discovery and feature
 /// detection to ignore harness internals.
-pub const HARNESS_TYPE_PATHS: &[&str] = &["bevy_playtest::contract::", "bevy_playtest::harness::"];
+pub const HARNESS_TYPE_PATHS: &[&str] = &["bevy_swarm::contract::", "bevy_swarm::harness::"];
 
 /// Named intent handlers — games register closures that translate a named
 /// intent (e.g., "end_turn") into concrete gameplay effects. The agent can

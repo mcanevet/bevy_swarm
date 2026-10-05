@@ -5,8 +5,8 @@
 //! Expected: harness detects entity-count explosion via query-target invariant.
 
 use bevy::prelude::*;
-use bevy_playtest::contract::*;
-use bevy_playtest::harness::*;
+use bevy_swarm::contract::*;
+use bevy_swarm::harness::*;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]
