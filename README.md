@@ -45,6 +45,24 @@ Games with none of these still work: reflection-based percepts and auto-discover
 
 - `agent` — BRP-based resident agent for live inspection and intent injection
 
+## Architecture
+
+At its core, the data flow per frame:
+
+```mermaid
+flowchart LR
+    Bots[Bots] -->|UserIntent| Game[Game Systems]
+    Game --> World[(World)]
+    World --> Oracles[Oracles]
+    Oracles -->|Violations| Report[PlaytestReport]
+```
+
+- **Bots** (chaos, replay, pursuit, planner) sample from your declared `IntentSurface` and write typed `UserIntent` messages
+- **Game systems** consume those intents directly — same schedule, same binary, no adapter layer
+- **Oracles** (frozen-world, frame-time anomaly, bounds checks, invariant DSL) watch the world and report violations
+- **Synthetic input** is opt-in: `synthetic_pointer`/`synthetic_keyboard` bots drive the real `PointerInput`/`KeyPressInput` chain when a scenario asks for it
+- The harness itself is pre/post-processing around the Bevy app — `run_scenario()` sets up, pumps the loop, then collects the report
+
 ## Development
 
 ```
