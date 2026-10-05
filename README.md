@@ -2,6 +2,8 @@
 
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
+**Requires Bevy 0.19 or later** (uses the `MessageReader`/`MessageWriter` buffered-event API and `World::iter_entities`/`resource_entities`, both introduced in 0.19).
+
 ## What it does
 
 - **Typed intent bots** — chaos (with aggressive/curious/idle personas), replay, pursuit, planner (aplib-style goal trees), synthetic_pointer and synthetic_keyboard (drive the REAL input chain through picking/ButtonInput, not shortcuts)
@@ -49,4 +51,4 @@ Games with none of these still work: reflection-based percepts and auto-discover
 cargo test    # 23 lib tests (mutation-benchmark-backed)
 ```
 
-Requires Bevy 0.20.0-rc.2 with the `debug` feature for real system names.
+Requires Bevy 0.19 or later with the `debug` feature for real system names.
