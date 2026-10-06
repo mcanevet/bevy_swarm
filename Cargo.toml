@@ -3,6 +3,13 @@ name = "bevy_swarm"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
+description = "ECS-native headless playtesting harness for Bevy games — contract-driven bots, oracles, and crash minimization"
+repository = "https://github.com/mcanevet/bevy_swarm"
+homepage = "https://github.com/mcanevet/bevy_swarm"
+documentation = "https://docs.rs/bevy_swarm"
+readme = "README.md"
+keywords = ["bevy", "gamedev", "testing", "playtesting", "ecs"]
+categories = ["game-development", "development-tools::testing"]
 
 [dependencies]
 bevy = { version = "0.19", features = ["debug"] }
@@ -12,3 +19,6 @@ serde_json = "1"
 [features]
 default = []
 agent = ["bevy/bevy_remote"]
+
+[badges]
+maintenance = { status = "actively-developed" }
