@@ -1,6 +1,6 @@
 use crate::contract::*;
-use crate::harness::*;
 use crate::enums::PlaytestStatus;
+use crate::harness::*;
 use bevy::prelude::*;
 
 #[test]
@@ -123,7 +123,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
             "replay emitted no choice intents"
         );
         assert_eq!(
-            rep.status, PlaytestStatus::Pass,
+            rep.status,
+            PlaytestStatus::Pass,
             "unexpected violations: {:?}",
             rep.violations
         );
@@ -142,7 +143,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         let mut app = build_app();
         let rep = run_scenario(&mut app, &expert_ok).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Pass,
+            rep.status,
+            PlaytestStatus::Pass,
             "expert rule false positive: {:?}",
             rep.violations
         );
@@ -157,7 +159,11 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     {
         let mut app = build_app();
         let rep = run_scenario(&mut app, &expert_bad).unwrap();
-        assert_eq!(rep.status, PlaytestStatus::Fail, "expert rule failed to fire");
+        assert_eq!(
+            rep.status,
+            PlaytestStatus::Fail,
+            "expert rule failed to fire"
+        );
         assert!(rep.violations.iter().any(|v| v.rule == "impossible_policy"));
     }
     println!("expert-rule oracle: passes on compliant policy, fires on violation");
@@ -199,7 +205,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         app.add_systems(Update, inject_bounds_bug);
         let rep = run_scenario(&mut app, &bounds_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Fail,
+            rep.status,
+            PlaytestStatus::Fail,
             "bounds bug not detected: {:?}",
             rep.violations
         );
@@ -214,7 +221,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         let mut app = build_app();
         let rep = run_scenario(&mut app, &bounds_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Pass,
+            rep.status,
+            PlaytestStatus::Pass,
             "false positive on healthy game: {:?}",
             rep.violations
         );
@@ -236,7 +244,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         app.add_systems(Update, inject_rampant_score_bug);
         let rep = run_scenario(&mut app, &rate_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Fail,
+            rep.status,
+            PlaytestStatus::Fail,
             "rampant score not detected: {:?}",
             rep.violations
         );
@@ -250,7 +259,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         let mut app = build_app();
         let rep = run_scenario(&mut app, &rate_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Pass,
+            rep.status,
+            PlaytestStatus::Pass,
             "false positive on healthy game: {:?}",
             rep.violations
         );
@@ -274,7 +284,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         app.add_systems(Update, inject_missing_points_bug);
         let rep = run_scenario(&mut app, &gain_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Fail,
+            rep.status,
+            PlaytestStatus::Fail,
             "missing-points bug not detected: {:?}",
             rep.violations
         );
@@ -288,7 +299,8 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         let mut app = build_app();
         let rep = run_scenario(&mut app, &gain_scen).unwrap();
         assert_eq!(
-            rep.status, PlaytestStatus::Pass,
+            rep.status,
+            PlaytestStatus::Pass,
             "false positive on healthy game: {:?}",
             rep.violations
         );
@@ -319,7 +331,11 @@ games with enum fields implement TestApiResolve on their own TestApi)"
             "headless app must loudly reject pointer synthesis, got: {:?}",
             rep.violations
         );
-        assert_eq!(rep.status, PlaytestStatus::Fail, "dead pointer chain passed silently");
+        assert_eq!(
+            rep.status,
+            PlaytestStatus::Fail,
+            "dead pointer chain passed silently"
+        );
     }
     println!("synthetic pointer: dead-chain (no window) loudly rejected");
 
@@ -540,7 +556,12 @@ fn eventually_mode_passes_on_late_satisfaction() {
     .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -587,7 +608,12 @@ fn eventually_mode_passes_when_already_satisfied() {
     .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -604,7 +630,12 @@ fn query_target_invariant_counts_entities() {
         .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -640,7 +671,12 @@ fn query_target_with_eventually_passes_on_late_spawn() {
         .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -698,7 +734,12 @@ fn frozen_world_oracle_exempt_for_turn_based() {
         "turn-based worlds are legitimately paused: {:?}",
         rep.violations
     );
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -719,7 +760,12 @@ fn readiness_gate_defers_scenario_start() {
         },
     );
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
     // Readiness took at least one frame before scenario frames began.
     // (We can't observe pre_ready_frames from the report directly, but
     // the run passing proves the gate didn't deadlock or mis-time.)
@@ -735,7 +781,12 @@ fn planner_bot_basic_goal_achieved() {
     .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]
@@ -747,7 +798,12 @@ fn planner_bot_seq_goals() {
     .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Pass, "violations: {:?}", rep.violations);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "violations: {:?}",
+        rep.violations
+    );
 }
 
 #[test]

@@ -138,9 +138,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub fn run_id(scenario_hash: u64, seed: u64) -> String {
     let (year, month, day, hour, minute, second) = utc_now_components();
     let hash_hex = format!("{:08x}", (scenario_hash ^ seed) as u32);
-    format!(
-        "{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{hash_hex}"
-    )
+    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{hash_hex}")
 }
 
 /// Current UTC calendar time, computed without a chrono dependency
@@ -213,7 +211,10 @@ mod tests {
         let mode = parse_update_mode();
         assert_eq!(
             mode,
-            Some(UpdateMode::Categories(vec!["golden".into(), "issues".into()]))
+            Some(UpdateMode::Categories(vec![
+                "golden".into(),
+                "issues".into()
+            ]))
         );
         std::env::remove_var(ENV_UPDATE);
     }

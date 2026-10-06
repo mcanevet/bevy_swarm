@@ -5,6 +5,8 @@ members = [
     "fixtures/spinner",
     "fixtures/walker",
     "fixtures/spawner",
+    "fixtures/turn_based",
+    "fixtures/regression_pair",
     "tests/fixture-runner",
 ]
 

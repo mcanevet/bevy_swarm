@@ -33,8 +33,7 @@ impl Plugin for SpinnerAdapterPlugin {
         // RealTime marker: arms the frozen-world oracle (TurnBased exempts).
         app.add_systems(
             Startup,
-            |mut commands: Commands,
-             q: Query<Entity, With<fixture_spinner::Spinner>>| {
+            |mut commands: Commands, q: Query<Entity, With<fixture_spinner::Spinner>>| {
                 for e in &q {
                     commands.entity(e).insert((Gameplay, RealTime));
                 }
@@ -66,8 +65,7 @@ impl Plugin for WalkerAdapterPlugin {
         app.add_systems(Update, walker_intent_bridge);
         app.add_systems(
             Startup,
-            |mut commands: Commands,
-             q: Query<Entity, With<fixture_walker::Player>>| {
+            |mut commands: Commands, q: Query<Entity, With<fixture_walker::Player>>| {
                 for e in &q {
                     commands.entity(e).insert(Gameplay);
                 }
@@ -86,13 +84,62 @@ impl Plugin for SpawnerAdapterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            |mut commands: Commands,
-             q: Query<Entity, With<fixture_spawner::LeakyEntity>>| {
+            |mut commands: Commands, q: Query<Entity, With<fixture_spawner::LeakyEntity>>| {
                 for e in &q {
                     commands.entity(e).insert(Gameplay);
                 }
             },
         );
+    }
+}
+
+// ============================================================================
+// Adapter: TurnBased — bridge UserIntent::EndTurn to the fixture's CardPlayed
+// ============================================================================
+
+fn turn_based_intent_bridge(
+    mut intents: MessageReader<UserIntent>,
+    mut cards: MessageWriter<fixture_turn_based::CardPlayed>,
+) {
+    for intent in intents.read() {
+        if let UserIntent::Choice { index } = intent {
+            cards.write(fixture_turn_based::CardPlayed {
+                card_id: format!("card_{}", index),
+            });
+        }
+    }
+}
+
+pub struct TurnBasedAdapterPlugin;
+
+impl Plugin for TurnBasedAdapterPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<fixture_turn_based::CardPlayed>();
+        app.add_systems(Update, turn_based_intent_bridge);
+        app.add_systems(
+            Startup,
+            |mut commands: Commands, q: Query<Entity, With<fixture_turn_based::PlayerCard>>| {
+                for e in &q {
+                    commands.entity(e).insert(Gameplay);
+                }
+            },
+        );
+    }
+}
+
+// ============================================================================
+// Adapter: RegressionPair — tag fixture entities as Gameplay
+// ============================================================================
+
+pub struct RegressionPairAdapterPlugin;
+
+impl Plugin for RegressionPairAdapterPlugin {
+    fn build(&self, app: &mut App) {
+        // Damage is a resource, not entity-based; no entities to tag.
+        // Register score exposure for state anchoring via a counter entity.
+        app.add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((Gameplay, Transform::default()));
+        });
     }
 }
 

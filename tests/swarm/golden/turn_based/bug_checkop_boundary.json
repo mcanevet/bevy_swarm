@@ -1,0 +1,23 @@
+{
+  "status": "fail",
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 3.0,
+  "invariants": [
+    {
+      "name": "score_is_fifty",
+      "rule": "custom",
+      "check": "equals",
+      "value": 50.0
+    }
+  ],
+  "must_report": [
+    {
+      "rule": "score_is_fifty"
+    }
+  ],
+  "must_not_report": [],
+  "pending": "swarm-cj8.8"
+}

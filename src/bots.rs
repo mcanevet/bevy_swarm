@@ -4,11 +4,11 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::query::With;
 use bevy::ecs::system::{Query, Res, ResMut};
-use bevy::prelude::{Name, Transform, GlobalTransform};
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::Camera;
+use bevy::prelude::{GlobalTransform, Name, Transform};
 
-use crate::contract::{Gameplay, SurfaceVariant, UserIntent, IntentSurface};
+use crate::contract::{Gameplay, IntentSurface, SurfaceVariant, UserIntent};
 use crate::driver::ScenarioResource;
 use crate::scenario::*;
 use crate::state::*;
@@ -41,7 +41,11 @@ pub(crate) fn chaos_bot_system(
     // Persona bias (MIMIC): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.
-    let persona = scenario.0.bot.persona.unwrap_or(crate::enums::Persona::Curious);
+    let persona = scenario
+        .0
+        .bot
+        .persona
+        .unwrap_or(crate::enums::Persona::Curious);
     let rate = scenario.0.bot.input_rate_hz.max(1);
     let effective_rate = if persona == crate::enums::Persona::Aggressive {
         rate.saturating_mul(2)

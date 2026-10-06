@@ -5,8 +5,8 @@
 //!
 //! Bug selection: set `FIXTURE_BUG=leak` at runtime.
 
-use bevy::prelude::*;
 use bevy::ecs::reflect::AppTypeRegistry;
+use bevy::prelude::*;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]

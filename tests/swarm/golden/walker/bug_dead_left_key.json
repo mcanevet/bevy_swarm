@@ -7,8 +7,9 @@
   "duration_s": 3.0,
   "must_report": [
     {
-      "rule": "frozen_world"
+      "rule": "dead_verb"
     }
   ],
-  "must_not_report": []
+  "must_not_report": [],
+  "pending": "swarm-cj8.5"
 }

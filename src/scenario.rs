@@ -3,8 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-
-
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
@@ -365,13 +363,21 @@ impl std::fmt::Display for ScenarioError {
                 f,
                 "unknown reset kind '{}' — known kinds: {}",
                 kind,
-                if known.is_empty() { "(none registered)".to_string() } else { known.join(", ") }
+                if known.is_empty() {
+                    "(none registered)".to_string()
+                } else {
+                    known.join(", ")
+                }
             ),
             ScenarioError::UnknownCheat { kind, known } => write!(
                 f,
                 "unknown cheat kind '{}' — known kinds: {}",
                 kind,
-                if known.is_empty() { "(none registered)".to_string() } else { known.join(", ") }
+                if known.is_empty() {
+                    "(none registered)".to_string()
+                } else {
+                    known.join(", ")
+                }
             ),
             ScenarioError::InvalidComponent { name, reason } => {
                 write!(f, "invalid component '{}': {}", name, reason)

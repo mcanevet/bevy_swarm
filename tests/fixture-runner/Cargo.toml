@@ -14,6 +14,8 @@ serde_json = { workspace = true }
 fixture_spinner = { path = "../../fixtures/spinner" }
 fixture_walker = { path = "../../fixtures/walker" }
 fixture_spawner = { path = "../../fixtures/spawner" }
+fixture_turn_based = { path = "../../fixtures/turn_based" }
+fixture_regression_pair = { path = "../../fixtures/regression_pair" }
 
 [[bin]]
 name = "fixture-runner"

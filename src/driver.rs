@@ -9,12 +9,12 @@ use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::ecs::world::World;
 use std::collections::{HashMap, HashSet};
 
-use crate::contract::{ResetHooks, TestApi};
-use crate::scenario::*;
-use crate::state::*;
 use crate::bots::*;
+use crate::contract::{ResetHooks, TestApi};
 use crate::oracles::check_custom_system;
 use crate::oracles::*;
+use crate::scenario::*;
+use crate::state::*;
 use bevy::picking::pointer::PointerInput;
 
 // ---------------------------------------------------------------------------
@@ -137,10 +137,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         if !known_cheats.contains(&cheat.kind.as_str()) {
             return Err(ScenarioError::UnknownCheat {
                 kind: cheat.kind.clone(),
-                known: known_cheats
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
+                known: known_cheats.iter().map(|s| s.to_string()).collect(),
             });
         }
     }
@@ -413,8 +410,7 @@ pub(crate) fn synthetic_keyboard_bot_system(
                     .entry(format!("key:{}", key))
                     .and_modify(|c| *c += 1)
                     .or_insert(1);
-                violations
-                    .set_context(format!("synthetic_keyboard:frame={},key={}", frame, key));
+                violations.set_context(format!("synthetic_keyboard:frame={},key={}", frame, key));
             }
         } else {
             state.pending_key_releases.push((key, release_at));

@@ -2787,11 +2787,20 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_swarm",
+ "fixture_regression_pair",
  "fixture_spawner",
  "fixture_spinner",
+ "fixture_turn_based",
  "fixture_walker",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fixture_regression_pair"
+version = "0.1.0"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]
@@ -2803,6 +2812,13 @@ dependencies = [
 
 [[package]]
 name = "fixture_spinner"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "fixture_turn_based"
 version = "0.1.0"
 dependencies = [
  "bevy",
