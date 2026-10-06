@@ -7,6 +7,30 @@ on:
     branches: [main]
 
 jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.79
+      - run: cargo build
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -35,3 +59,16 @@ jobs:
       
       - name: Lint with Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
+      
+      - name: Build examples
+        run: cargo build --examples
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build docs
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --no-deps

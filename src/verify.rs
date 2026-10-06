@@ -4,8 +4,7 @@ use crate::harness::*;
 use bevy::prelude::*;
 
 #[test]
-fn verify_playtest_features() {
-    // 1. Reflect resolution paths
+fn test_api_resolves_numeric_fields() {
     let api = TestApi {
         score: 42,
         active_players: 3,
@@ -20,14 +19,10 @@ fn verify_playtest_features() {
         Some(TestFieldValue::Numeric(3.0))
     );
     assert_eq!(api.resolve("TestApi.nonexistent"), None);
-    println!("resolve (reflect + manual): OK");
+}
 
-    println!(
-        "resolve paths: OK (crate TestApi is numeric-reflect only; \
-games with enum fields implement TestApiResolve on their own TestApi)"
-    );
-
-    // 2. Branch matrix
+#[test]
+fn branch_matrix_runs_all_variants_and_passes() {
     let scenarios: Vec<(String, Scenario)> = vec![
         (
             "chaos-a".into(),
@@ -51,148 +46,144 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         "failed: {:?}",
         matrix.failed_variants()
     );
-    println!(
-        "branch matrix: {} variants, all passed",
-        matrix.outcomes.len()
-    );
+}
 
-    // 3. Coverage in reports
-    let cov = &matrix.outcomes[0].report.coverage;
-    assert!(!cov.intents_emitted.is_empty(), "coverage empty!");
-    println!(
-        "coverage: {:?}",
-        cov.intents_emitted.keys().collect::<Vec<_>>()
-    );
+#[test]
+fn coverage_records_intents_emitted() {
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"setup":{}}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(!rep.coverage.intents_emitted.is_empty(), "coverage empty!");
+}
 
-    // 4. Intent-in-flight context on violations
+#[test]
+fn violations_carry_intent_context() {
     let bad: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":7},"duration_s":0.2,
             "invariants":[{"name":"phase_lock","rule":"custom","path":"TestApi.game_phase","check":"equals","value":"GameOver"}],
             "setup":{}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     let mut app = build_app();
     let rep = run_scenario(&mut app, &bad).unwrap();
     assert_eq!(rep.status, PlaytestStatus::Fail);
     let ctx = &rep.violations[0].detail;
     assert!(ctx.starts_with("[intent: "), "missing context: {}", ctx);
-    println!("violation detail: {}", ctx);
+}
 
-    // 6. Frame-time oracle: Welford stats accumulate and no false positive
-    // on a clean run (anomalies require >60 samples + 3σ outlier).
-    // Direct unit check of FrameTimingStats: 1.2ms jitter over 1ms
-    // baseline must NOT flag; a 50ms stall must.
+#[test]
+fn frame_timing_stats_flag_only_true_anomalies() {
     let mut fts = FrameTimingStats::default();
     for _ in 0..200 {
         fts.observe(1.0);
     }
     assert!(!fts.is_anomalous(1.2), "small jitter must not be anomalous");
     assert!(fts.is_anomalous(50.0), "50x spike must be anomalous");
-    println!("frame-time oracle: stats OK (mean {:.2}ms)", fts.mean_ms());
+}
 
-    // 7. Differential invariants: no_decrease violation
+#[test]
+fn differential_invariants_are_accepted() {
     let diff_scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":9},"duration_s":0.1,"invariants":[
             {"name":"score_monotonic","rule":"custom","path":"TestApi.score","differential":"no_decrease"}
         ],"setup":{}}"#,
-    ).unwrap();
-    {
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &diff_scen).unwrap();
-        // Chaos bot may randomly change score; if it decreases, we catch it.
-        // Just verify the harness accepts the invariant syntax and runs.
-        let _ = rep;
-    }
-    println!("differential invariants: accepted and executed");
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &diff_scen).unwrap();
+    let _ = rep;
+}
 
-    // 8. Replay bot: frame-indexed intents award +5 per Choice.
-    {
-        let scen: Scenario = serde_json::from_str(
-            r#"{"bot":{"type":"replay","inputs":[
-                {"frame":1,"intent":{"intent":"choice","index":0}},
-                {"frame":2,"intent":{"intent":"choice","index":0}},
-                {"frame":3,"intent":{"intent":"choice","index":0}},
-                {"frame":4,"intent":{"intent":"choice","index":0}}
-            ]},"duration_s":0.2,"invariants":[
-                {"name":"score_grew","rule":"custom","path":"TestApi.score","check":"above","value":5,"after_s":0.1}
-            ],"setup":{}}"#,
-        ).unwrap();
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &scen).unwrap();
-        assert!(
-            rep.coverage.intents_emitted.contains_key("choice:idx=0"),
-            "replay emitted no choice intents"
-        );
-        assert_eq!(
-            rep.status,
-            PlaytestStatus::Pass,
-            "unexpected violations: {:?}",
-            rep.violations
-        );
-    }
-    println!("replay bot: emits frame-indexed intents, invariants hold");
+#[test]
+fn replay_bot_emits_frame_indexed_intents() {
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[
+            {"frame":1,"intent":{"intent":"choice","index":0}},
+            {"frame":2,"intent":{"intent":"choice","index":0}},
+            {"frame":3,"intent":{"intent":"choice","index":0}},
+            {"frame":4,"intent":{"intent":"choice","index":0}}
+        ]},"duration_s":0.2,"invariants":[
+            {"name":"score_grew","rule":"custom","path":"TestApi.score","check":"above","value":5,"after_s":0.1}
+        ],"setup":{}}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(
+        rep.coverage.intents_emitted.contains_key("choice:idx=0"),
+        "replay emitted no choice intents"
+    );
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "unexpected violations: {:?}",
+        rep.violations
+    );
+}
 
-    // 9. Expert-rule oracle: WHEN phase == Playing (always true in stub),
-    // REQUIRE hp >= 50. Stub leaves hp at 100 — rule holds, no violation.
-    let expert_ok: Scenario = serde_json::from_str(
+#[test]
+fn expert_rule_passes_on_compliant_policy() {
+    let scen: Scenario = serde_json::from_str(
          r#"{"bot":{"type":"chaos","seed":11},"duration_s":0.1,"invariants":[
             {"name":"heal_policy","rule":"custom","path":"TestApi.active_players","check":"below","value":5,
              "requires_path":"TestApi.active_players","requires_check":"above","requires_value":0}
         ],"setup":{}}"#,
-    ).unwrap();
-    {
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &expert_ok).unwrap();
-        assert_eq!(
-            rep.status,
-            PlaytestStatus::Pass,
-            "expert rule false positive: {:?}",
-            rep.violations
-        );
-    }
-    // Failing direction: REQUIRE active_players above 999 — must fire.
-    let expert_bad: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":11},"duration_s":0.1,"invariants":[
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "expert rule false positive: {:?}",
+        rep.violations
+    );
+}
+
+#[test]
+fn expert_rule_fires_on_violation() {
+    let scen: Scenario = serde_json::from_str(
+         r#"{"bot":{"type":"chaos","seed":11},"duration_s":0.1,"invariants":[
             {"name":"impossible_policy","rule":"custom","path":"TestApi.active_players","check":"below","value":5,
              "requires_path":"TestApi.active_players","requires_check":"above","requires_value":999}
         ],"setup":{}}"#,
-    ).unwrap();
-    {
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &expert_bad).unwrap();
-        assert_eq!(
-            rep.status,
-            PlaytestStatus::Fail,
-            "expert rule failed to fire"
-        );
-        assert!(rep.violations.iter().any(|v| v.rule == "impossible_policy"));
-    }
-    println!("expert-rule oracle: passes on compliant policy, fires on violation");
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Fail,
+        "expert rule failed to fire"
+    );
+    assert!(rep.violations.iter().any(|v| v.rule == "impossible_policy"));
+}
 
-    // 10. Personas: aggressive bot never waits and fires at 2x rate.
-    {
-        let scen: Scenario = serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":13,"persona":"aggressive"},"duration_s":0.5,"invariants":[],"setup":{}}"#,
-        ).unwrap();
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &scen).unwrap();
-        let waits = rep
-            .coverage
-            .intents_emitted
-            .get("wait")
-            .copied()
-            .unwrap_or(0);
-        assert_eq!(waits, 0, "aggressive persona must never Wait");
-        let total: u64 = rep.coverage.intents_emitted.values().sum();
-        assert!(total > 0, "aggressive persona emitted nothing");
-    }
-    println!("personas: aggressive never waits, fires at 2x rate");
+#[test]
+fn aggressive_persona_never_waits() {
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":13,"persona":"aggressive"},"duration_s":0.5,"invariants":[],"setup":{}}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    let waits = rep
+        .coverage
+        .intents_emitted
+        .get("wait")
+        .copied()
+        .unwrap_or(0);
+    assert_eq!(waits, 0, "aggressive persona must never Wait");
+    let total: u64 = rep.coverage.intents_emitted.values().sum();
+    assert!(total > 0, "aggressive persona emitted nothing");
+}
 
-    // 11. Mutation benchmark (GBQA-inspired): seeded bugs must be DETECTED.
-    //
-    // Archetype 1: collision pass-through — at frame 10 the ball is
-    // teleported out of bounds (simulating a wall pass-through).
-    // Oracle: nodes_in_bounds on target "Ball".
-    let bounds_scen: Scenario = serde_json::from_str(
+#[test]
+fn mutation_bounds_bug_is_detected_and_control_passes() {
+    let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":42},"duration_s":0.3,"invariants":[
             {"name":"ball_in_bounds","rule":"nodes_in_bounds",
              "min_x":-100,"max_x":100,"min_y":-100,"max_y":100,"min_z":-50,"max_z":50,
@@ -203,35 +194,28 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     {
         let mut app = build_app();
         app.add_systems(Update, inject_bounds_bug);
-        let rep = run_scenario(&mut app, &bounds_scen).unwrap();
-        assert_eq!(
-            rep.status,
-            PlaytestStatus::Fail,
-            "bounds bug not detected: {:?}",
-            rep.violations
-        );
+        let rep = run_scenario(&mut app, &scen).unwrap();
+        assert_eq!(rep.status, PlaytestStatus::Fail, "bounds bug not detected");
         assert!(
             rep.violations.iter().any(|v| v.rule == "ball_in_bounds"),
             "no ball_in_bounds violation: {:?}",
             rep.violations
         );
     }
-    // Control: same scenario WITHOUT the bug must pass (no false positive).
     {
         let mut app = build_app();
-        let rep = run_scenario(&mut app, &bounds_scen).unwrap();
+        let rep = run_scenario(&mut app, &scen).unwrap();
         assert_eq!(
             rep.status,
             PlaytestStatus::Pass,
-            "false positive on healthy game: {:?}",
-            rep.violations
+            "false positive on healthy game"
         );
     }
-    println!("mutation: bounds pass-through detected, control passes");
+}
 
-    // Archetype 2: re-fired handler (runaway score) — score increases at
-    // 60/sec instead of 1/sec. Oracle: max_delta_per_sec ceiling.
-    let rate_scen: Scenario = serde_json::from_str(
+#[test]
+fn mutation_rampant_score_is_detected_and_control_passes() {
+    let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":42},"duration_s":1.5,"invariants":[
             {"name":"score_rate","rule":"custom","path":"TestApi.score",
              "check":"above","value":-1,
@@ -242,12 +226,11 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     {
         let mut app = build_app();
         app.add_systems(Update, inject_rampant_score_bug);
-        let rep = run_scenario(&mut app, &rate_scen).unwrap();
+        let rep = run_scenario(&mut app, &scen).unwrap();
         assert_eq!(
             rep.status,
             PlaytestStatus::Fail,
-            "rampant score not detected: {:?}",
-            rep.violations
+            "rampant score not detected"
         );
         assert!(
             rep.violations.iter().any(|v| v.rule == "score_rate"),
@@ -257,20 +240,18 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     }
     {
         let mut app = build_app();
-        let rep = run_scenario(&mut app, &rate_scen).unwrap();
+        let rep = run_scenario(&mut app, &scen).unwrap();
         assert_eq!(
             rep.status,
             PlaytestStatus::Pass,
-            "false positive on healthy game: {:?}",
-            rep.violations
+            "false positive on healthy game"
         );
     }
-    println!("mutation: rampant score (timer-leak proxy) detected, control passes");
+}
 
-    // Archetype 3: missing-points — point awards silently suppressed after
-    // the first tick. Oracle: differential no_decrease — the healthy game
-    // grows monotonically; the bug makes awards vanish after frame 1.
-    let gain_scen: Scenario = serde_json::from_str(
+#[test]
+fn mutation_missing_points_detected_by_differential() {
+    let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[
             {"frame":1,"intent":{"intent":"choice","index":0}},
             {"frame":2,"intent":{"intent":"choice","index":0}},
@@ -278,16 +259,16 @@ games with enum fields implement TestApiResolve on their own TestApi)"
         ]},"duration_s":0.5,"invariants":[
             {"name":"score_monotonic","rule":"custom","path":"TestApi.score","differential":"no_decrease"}
         ],"setup":{}}"#,
-    ).unwrap();
+    )
+    .unwrap();
     {
         let mut app = build_app_no_scoring();
         app.add_systems(Update, inject_missing_points_bug);
-        let rep = run_scenario(&mut app, &gain_scen).unwrap();
+        let rep = run_scenario(&mut app, &scen).unwrap();
         assert_eq!(
             rep.status,
             PlaytestStatus::Fail,
-            "missing-points bug not detected: {:?}",
-            rep.violations
+            "missing-points bug not detected"
         );
         assert!(
             rep.violations.iter().any(|v| v.rule == "score_monotonic"),
@@ -297,49 +278,38 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     }
     {
         let mut app = build_app();
-        let rep = run_scenario(&mut app, &gain_scen).unwrap();
+        let rep = run_scenario(&mut app, &scen).unwrap();
         assert_eq!(
             rep.status,
             PlaytestStatus::Pass,
-            "false positive on healthy game: {:?}",
-            rep.violations
+            "false positive on healthy game"
         );
     }
-    println!("mutation: missing-points detected via differential invariant, control passes");
+}
 
-    // 9. Synthetic pointer bot: raw PointerInput events exercise the
-    // picking chain. The minimal app has NO window (MinimalPlugins),
-    // no picking backend, and no PointerClick handler — so a click
-    // request must produce a LOUD config violation and a failing
-    // report, not a silent no-op. (A real game app that wires the
-    // picking backend exercises the happy path; this crate guarantees
-    // the failure is loud, not silent.)
-    let click_scen: Scenario = serde_json::from_str(
+#[test]
+fn synthetic_pointer_dead_chain_is_loudly_rejected() {
+    let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"synthetic_pointer","pointer_clicks":[
             {"frame":1,"target":"Ball"}
         ],"seed":1},"duration_s":0.2,"invariants":[],"setup":{}}"#,
     )
     .unwrap();
-    {
-        let mut app = build_app();
-        let rep = run_scenario(&mut app, &click_scen).unwrap();
-        assert!(
-            rep.violations
-                .iter()
-                .any(|v| v.rule == "synthetic_pointer_config"
-                    && v.detail.contains("no primary window")),
-            "headless app must loudly reject pointer synthesis, got: {:?}",
-            rep.violations
-        );
-        assert_eq!(
-            rep.status,
-            PlaytestStatus::Fail,
-            "dead pointer chain passed silently"
-        );
-    }
-    println!("synthetic pointer: dead-chain (no window) loudly rejected");
-
-    println!("ALL OK");
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(
+        rep.violations
+            .iter()
+            .any(|v| v.rule == "synthetic_pointer_config"
+                && v.detail.contains("no primary window")),
+        "headless app must loudly reject pointer synthesis, got: {:?}",
+        rep.violations
+    );
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Fail,
+        "dead pointer chain passed silently"
+    );
 }
 
 /// Stub game score resource — verifies the score-related invariants.
@@ -401,7 +371,7 @@ fn handle_choice_awards_points(
 }
 
 // ---------------------------------------------------------------------------
-// Mutation benchmark: seeded bugs (GBQA-inspired archetypes)
+// Mutation benchmark: seeded bug archetypes
 // ---------------------------------------------------------------------------
 
 /// Bug 1: bounds pass-through — at frame 10, teleport every transformed

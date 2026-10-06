@@ -188,7 +188,7 @@ fn detect_features(world: &World) -> Vec<DetectedFeature> {
 }
 
 /// Persona-flavored chaos bot configuration — different exploration
-/// biases find different bugs (MIMIC finding).
+/// biases find different bugs.
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct PersonaConfig {
     /// "aggressive" (high rate, many selects/choices), "curious" (bias
@@ -436,5 +436,5 @@ fn sanitize_name(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen-world stuck oracle (ICARUS/aplib liveness check)
+// Frozen-world stuck oracle (aplib-inspired liveness check)
 // ---------------------------------------------------------------------------

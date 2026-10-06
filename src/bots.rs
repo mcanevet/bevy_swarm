@@ -38,7 +38,7 @@ pub(crate) fn chaos_bot_system(
     if scenario.0.bot.bot_type != crate::enums::BotType::Chaos {
         return;
     }
-    // Persona bias (MIMIC): aggressive = 2x rate + never Wait; curious =
+    // Persona bias (): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.
     let persona = scenario

@@ -17,9 +17,9 @@ use crate::scenario::*;
 use crate::state::*;
 use bevy::picking::pointer::PointerInput;
 
-// ---------------------------------------------------------------------------
+//-----------------------------------------------------------------------
 // PlaytestPlugin
-// ---------------------------------------------------------------------------
+//-----------------------------------------------------------------------
 
 #[derive(Resource)]
 pub struct ScenarioResource(pub Scenario);
@@ -53,9 +53,9 @@ impl bevy::app::Plugin for PlaytestPlugin {
     }
 }
 
-// ---------------------------------------------------------------------------
+//-----------------------------------------------------------------------
 // Test driver — pump the loop, catch panics, produce the report
-// ---------------------------------------------------------------------------
+//-----------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PlaytestReport {
@@ -158,7 +158,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
     // Register the synthetic_pointer bot only when the scenario asks for
     // it: its ResMut<PlaytestState>/ResMut<Violations> params would add
-    // scheduler edges that perturb system ordering for OTHER bot types     // registration keeps the default schedule graph byte-identical.
+    // scheduler edges that perturb system ordering for OTHER bot types;
+    // conditional registration keeps the default schedule graph identical.
     if scenario.bot.bot_type == crate::enums::BotType::SyntheticPointer {
         app.add_systems(bevy::app::Update, synthetic_pointer_bot_system);
         // Actionability gate queue processor (only meaningful when the
@@ -337,7 +338,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     })
 }
 
-// ---------------------------------------------------------------------------
+//-----------------------------------------------------------------------
 
 pub(crate) fn cheat_scheduler_system(world: &mut World) {
     let frame = world.resource::<PlaytestState>().frame;

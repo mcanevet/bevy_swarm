@@ -117,19 +117,19 @@ pub struct BotConfig {
     #[serde(default)]
     pub pointer_clicks: Vec<PointerClickInput>,
     /// synthetic_keyboard: frame-indexed raw key presses. Exercises
-    /// the FULL keyboard chain (KeyboardInput → ButtonInput<KeyCode>
+    /// the FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`
     /// → game adapter) that intent-injection bots bypass. A dead
     /// adapter or wrong key mapping fails the scenario's invariants.
     /// Chaos persona: "aggressive" (2x rate, never Wait), "curious"
     /// (stronger unseen-variant bias), "idle" (mostly waiting, rare
-    /// jabs). Different personas find different bugs (MIMIC).
+    /// jabs). Different personas find different bugs.
     #[serde(default)]
     pub persona: Option<crate::enums::Persona>,
     #[serde(default)]
     pub key_presses: Vec<KeyPressInput>,
     /// planner: declarative goal tree (aplib-inspired). The scenario
     /// author writes WHAT to achieve (TestApi predicates), not WHEN
-    /// to press. See `planner.rs` and `references/planner.md`.
+    /// to press.
     #[serde(default)]
     pub goals: Option<crate::planner::GoalNode>,
 }
@@ -290,7 +290,7 @@ pub struct Invariant {
     /// ECS-native analogue of Playwright's `toHaveCount`.
     #[serde(default)]
     pub query: Option<QueryTarget>,
-    /// Expert-rule oracle (TITAN): WHEN `path` satisfies `check` vs
+    /// Expert-rule oracle: WHEN `path` satisfies `check` vs
     /// `value`, REQUIRE `requires_path` to satisfy `requires_check` vs
     /// `requires_value`. Checks game POLICY compliance ("low HP ⇒ heal"),
     /// complementing state invariants.

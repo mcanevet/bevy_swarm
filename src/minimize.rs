@@ -7,7 +7,7 @@ use crate::scenario::*;
 
 // ---------------------------------------------------------------------------
 // Ddmin — Delta Debugging minimizer (Zeller's ddmin over action sequences).
-// Rebellion-style: record the full action stream, binary-search removals,
+// Record the full action stream, binary-search removals,
 // keep a minimal reproducer. The result is a permanent regression scenario.
 // ---------------------------------------------------------------------------
 
@@ -74,7 +74,7 @@ pub fn ddmin_minimize<T: Clone>(actions: &[T], reproduce: impl Fn(&[T]) -> bool)
 }
 
 // ---------------------------------------------------------------------------
-// Crash minimization (ddmin) — Rebellion-style crash reproducer reduction.
+// Crash minimization (ddmin)
 // ---------------------------------------------------------------------------
 //
 /// Outcome of a crash-minimization session.
@@ -89,7 +89,7 @@ pub struct MinimizeOutcome {
 
 /// Parse a logged action string back into a replayable intent. Handles
 /// both the legacy per-bot formats ("move:..", "choice:idx=..") and the
-/// canonical structured form: action "intent:<variant>" with a JSON
+/// canonical structured form: action "intent:\<variant\>" with a JSON
 /// payload in `details` (written by the IntentAudited observer for ALL
 /// writers — chaos/replay/pursuit/planner/game adapters alike). This is
 /// what makes crashes found by ANY bot minimizable via ddmin.
