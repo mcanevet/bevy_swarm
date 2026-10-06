@@ -105,7 +105,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     validate_scenario(scenario)?;
 
     if app.world().get_resource::<TestApi>().is_none() {
-        return Err(ScenarioError::Rejected(
+        return Err(ScenarioError::ContractMissing(
             "game does not implement testable-conventions: TestApi resource missing — custom invariants cannot be evaluated"
                 .to_string(),
         ));
@@ -119,15 +119,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     };
     for reset in &scenario.setup.resets {
         if !known_kinds.contains(&reset.kind) {
-            return Err(ScenarioError::Rejected(format!(
-                "unknown reset kind '{}' — known kinds: {}",
-                reset.kind,
-                if known_kinds.is_empty() {
-                    "(none registered)".to_string()
-                } else {
-                    known_kinds.join(", ")
-                }
-            )));
+            return Err(ScenarioError::UnknownReset {
+                kind: reset.kind.clone(),
+                known: known_kinds.clone(),
+            });
         }
     }
 
@@ -138,15 +133,13 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     };
     for cheat in &scenario.setup.cheats {
         if !known_cheats.contains(&cheat.kind.as_str()) {
-            return Err(ScenarioError::Rejected(format!(
-                "unknown cheat kind '{}' — known kinds: {}",
-                cheat.kind,
-                if known_cheats.is_empty() {
-                    "(none registered)".to_string()
-                } else {
-                    known_cheats.join(", ")
-                }
-            )));
+            return Err(ScenarioError::UnknownCheat {
+                kind: cheat.kind.clone(),
+                known: known_cheats
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            });
         }
     }
 
