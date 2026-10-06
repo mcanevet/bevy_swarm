@@ -4,6 +4,13 @@ An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.
 
 **Targets Bevy 0.20** (currently `v0.20.0-rc.2` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
 
+## Conventions
+
+Workspace layout, artifact paths, update mode (`BEVY_SWARM_UPDATE`), versioning,
+rule-name registry, and vocabulary are governed by [docs/conventions.md](docs/conventions.md)
+— the single source of truth. Oracle rule names live in the [rule registry](docs/rules.md)
+(`bevy_swarm::rules`).
+
 ## Bevy compatibility policy
 
 Each bevy_swarm release supports **exactly one Bevy minor version**. No

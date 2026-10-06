@@ -1,0 +1,14 @@
+{
+  "$schema": "../../docs/config-schema.json",
+  "schema_version": 1,
+  "budgets": {
+    "max_runtime_seconds": 300,
+    "max_memory_mb": 4096
+  },
+  "allow_list": [],
+  "fingerprint_rules": ["frozen_world", "nodes_in_bounds", "finite_transforms"],
+  "defaults": {
+    "persona": "uniform",
+    "update_mode": null
+  }
+}
