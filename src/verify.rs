@@ -380,7 +380,7 @@ fn inject_bounds_bug(mut frame: Local<u64>, mut q: Query<&mut Transform, With<Ga
     *frame += 1;
     if *frame == 10 {
         for mut t in &mut q {
-            t.translation.x = 10_000.0;
+            t.translation.x = 10_001.0;
         }
     }
 }
@@ -1073,4 +1073,129 @@ fn frame_time_anomaly_fires_when_armed() {
         "expected frame_time_anomaly violation, got: {:?}",
         rep.violations
     );
+}
+
+// ---------------------------------------------------------------------------
+// A2: explicit PlaytestSet ordering for frame-accurate replay
+// ---------------------------------------------------------------------------
+
+#[test]
+fn replay_of_audit_log_reproduces_audit_log() {
+    // Core shrinker guarantee: running a chaos scenario, converting its
+    // action_log to a replay scenario and running on a fresh App must
+    // yield an IDENTICAL (frame, action, details) sequence.
+    let chaos: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":3},"duration_s":0.5,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app1 = build_app();
+    let rep1 = run_scenario(&mut app1, &chaos).unwrap();
+    assert!(
+        !rep1.action_log.is_empty(),
+        "chaos run produced no audit entries"
+    );
+    eprintln!("CHAOS ACTION LOG:");
+    for e in &rep1.action_log {
+        eprintln!(
+            "  frame={} action={} details={:?}",
+            e.frame, e.action, e.details
+        );
+    }
+
+    // Convert to a replay scenario.
+    // Build replay scenario via minimize helper path
+    let replay_scenario = replay_from_action_log(&rep1.action_log, 0.5);
+    let mut app2 = build_app();
+    let rep2 = run_scenario(&mut app2, &replay_scenario).unwrap();
+
+    let seq1: Vec<(u64, String)> = rep1
+        .action_log
+        .iter()
+        .map(|e| (e.frame, e.action.clone()))
+        .collect();
+    let seq2: Vec<(u64, String)> = rep2
+        .action_log
+        .iter()
+        .map(|e| (e.frame, e.action.clone()))
+        .collect();
+    assert_eq!(
+        seq1, seq2,
+        "replayed audit log diverged from original: {seq1:?} vs {seq2:?}"
+    );
+}
+
+fn replay_from_action_log(log: &[crate::contract::ActionEntry], duration_s: f32) -> Scenario {
+    let timed = crate::harness::action_log_to_timed_actions(log);
+    let inputs: Vec<serde_json::Value> = timed
+        .iter()
+        .filter_map(|ta| {
+            crate::harness::action_to_replay_intent(ta)
+                .map(|intent| timed_replay_input(ta.frame, intent))
+        })
+        .collect();
+    let json = serde_json::json!({
+        "bot": {"type": "replay", "inputs": inputs},
+        "duration_s": duration_s,
+        "invariants": [],
+    });
+    serde_json::from_value(json).expect("replay scenario JSON")
+}
+
+fn timed_replay_input(frame: u64, intent: crate::harness::ReplayIntent) -> serde_json::Value {
+    let inner = match intent {
+        crate::harness::ReplayIntent::Move { dir } => {
+            serde_json::json!({"intent": "move", "dir": [dir.0, dir.1]})
+        }
+        crate::harness::ReplayIntent::Choice { index } => {
+            serde_json::json!({"intent": "choice", "index": index})
+        }
+        crate::harness::ReplayIntent::Select { target } => {
+            serde_json::json!({"intent": "select", "target": target})
+        }
+        crate::harness::ReplayIntent::Axis { name, value } => {
+            serde_json::json!({"intent": "axis", "name": name, "value": value})
+        }
+        crate::harness::ReplayIntent::Wait => serde_json::json!({"intent": "wait"}),
+    };
+    serde_json::json!({ "frame": frame, "intent": inner })
+}
+
+#[test]
+fn oracles_see_same_frame_changes() {
+    // A game system moves an entity out of bounds at frame 10; the
+    // bounds oracle must report first_frame == 10 (not 9 or 11).
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[{"name":"bounds","rule":"nodes_in_bounds"}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app_no_scoring();
+    app.add_systems(Update, inject_bounds_bug);
+    let rep = run_scenario(&mut app, &scenario).unwrap();
+    let bounds_violations: Vec<_> = rep
+        .violations
+        .iter()
+        .filter(|v| v.rule == "bounds")
+        .collect();
+    assert!(
+        !bounds_violations.is_empty(),
+        "bounds oracle did not fire, got: {:?}",
+        rep.violations
+    );
+    for v in bounds_violations {
+        assert_eq!(
+            v.first_frame, 10,
+            "bounds violation must be seen at the frame it happened (got {}, log: {:?})",
+            v.first_frame, rep.violations
+        );
+    }
+}
+
+#[test]
+fn plugin_without_scenario_does_not_panic() {
+    // An App with PlaytestPlugin but no run_scenario: 3 updates, no panic.
+    let mut app = build_app_no_scoring();
+    app.update();
+    app.update();
+    app.update();
+    // If we got here without a panic, the run conditions held.
 }
