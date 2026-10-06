@@ -3,7 +3,8 @@
 //! Games consume this crate as a dependency instead of copying the
 //! harness into src/. NO game-specific glue here.
 //!
-//! Requires Bevy 0.19 or later. Buffered events are `Message`s
+//! Targets Bevy 0.20 (exactly one minor version per bevy_swarm
+//! release). Buffered events are `Message`s
 //! (`app.add_message`, `MessageWriter`/`MessageReader` in
 //! `bevy::ecs::message`); `Event` refers to the observer system.
 //!

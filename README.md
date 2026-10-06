@@ -2,7 +2,18 @@
 
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
-**Requires Bevy 0.19 or later** (uses the `MessageReader`/`MessageWriter` buffered-event API and `World::iter_entities`/`resource_entities`, both introduced in 0.19).
+**Targets Bevy 0.20** (currently `v0.20.0-rc.2` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
+
+## Bevy compatibility policy
+
+Each bevy_swarm release supports **exactly one Bevy minor version**. No
+cross-version compatibility shims — the harness tracks Bevy's API closely
+(observers, message buffers, diagnostics), and carrying fallbacks doubles the
+surface that can silently diverge from real game behavior.
+
+| bevy_swarm | Bevy |
+|-----------|------|
+| 0.1.0 (unreleased) | 0.20 (`v0.20.0-rc.2` on crates.io) |
 
 ## What it does
 
@@ -66,7 +77,10 @@ flowchart LR
 ## Development
 
 ```
-cargo test    # 23 lib tests (mutation-benchmark-backed)
+cargo test              # 26 lib tests
+cargo test --tests       # integration/regression suites
+cargo test --features agent
+cargo clippy --all-targets -- -D warnings
 ```
 
-Requires Bevy 0.19 or later with the `debug` feature for real system names.
+Requires Bevy 0.20 with the `debug` feature for real system names.
