@@ -23,6 +23,17 @@ pub struct Scenario {
     /// real-time behaviour.
     #[serde(default = "default_true")]
     pub simulated_time: bool,
+    /// Run every schedule on Bevy's SingleThreadedExecutor (deterministic
+    /// system order for a given schedule graph). Default true: playtests
+    /// value reproducibility over throughput. Parallelism comes from
+    /// running many scenarios at once, not from threading one App.
+    #[serde(default = "default_true")]
+    pub single_threaded: bool,
+    /// Fail the run (ScenarioError::Rejected listing the ambiguities) when
+    /// any schedule has conflicting systems with no order. Opt-in: many
+    /// games have benign ambiguities.
+    #[serde(default)]
+    pub deny_ambiguities: bool,
     #[serde(default = "default_duration")]
     pub duration_s: f32,
     #[serde(default)]

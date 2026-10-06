@@ -178,6 +178,8 @@ pub fn minimize_crash(
         let replay_scenario = Scenario {
             tps: scenario.tps,
             simulated_time: scenario.simulated_time,
+            single_threaded: scenario.single_threaded,
+            deny_ambiguities: scenario.deny_ambiguities,
             setup: scenario.setup.clone(),
             duration_s: scenario.duration_s,
             bot: BotConfig {
@@ -211,6 +213,8 @@ pub fn minimize_crash(
     let regression_scenario = Scenario {
         tps: scenario.tps,
         simulated_time: scenario.simulated_time,
+        single_threaded: scenario.single_threaded,
+        deny_ambiguities: scenario.deny_ambiguities,
         setup: scenario.setup.clone(),
         duration_s: scenario.duration_s,
         bot: BotConfig {

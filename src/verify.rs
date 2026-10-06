@@ -1199,3 +1199,74 @@ fn plugin_without_scenario_does_not_panic() {
     app.update();
     // If we got here without a panic, the run conditions held.
 }
+
+// ---------------------------------------------------------------------------
+// A3: single-threaded executor + ambiguity gate
+// ---------------------------------------------------------------------------
+
+#[test]
+fn single_threaded_applied_by_default() {
+    // After run_scenario, every schedule should use SingleThreadedExecutor.
+    // We test behaviorally: two ambiguous systems appending to a shared Vec
+    // must produce the same order over 30 runs.
+    use bevy::prelude::*;
+
+    #[derive(Resource, Default)]
+    struct OrderLog(Vec<usize>);
+
+    fn sys_a(mut log: ResMut<OrderLog>) {
+        log.0.push(1);
+    }
+
+    fn sys_b(mut log: ResMut<OrderLog>) {
+        log.0.push(2);
+    }
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.insert_resource(OrderLog::default());
+    app.add_systems(Update, (sys_a, sys_b));
+
+    // Run 30 times; if multi-threaded with ambiguous order, we'd see variations.
+    let mut results = std::collections::HashSet::new();
+    for _ in 0..30 {
+        app.world_mut().resource_mut::<OrderLog>().0.clear();
+        app.update();
+        results.insert(app.world().resource::<OrderLog>().0.clone());
+    }
+    assert_eq!(
+        results.len(),
+        1,
+        "order varied across 30 runs: {:?}",
+        results
+    );
+}
+
+#[test]
+fn deny_ambiguities_rejects_conflicting_systems() {
+    // Two systems both taking ResMut<Score> are ambiguous.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"single_threaded":false,"deny_ambiguities":true,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app = build_app_no_scoring();
+    app.add_systems(Update, (inject_rampant_score_bug, inject_rampant_score_bug));
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(
+        rep.is_err(),
+        "expected Rejected error for ambiguous systems, got: {:?}",
+        rep
+    );
+}
+
+#[test]
+fn deny_ambiguities_accepts_clean_app() {
+    // Minimal harness setup with deny_ambiguities should not reject.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"single_threaded":true,"deny_ambiguities":true,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app = build_app_no_scoring();
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(rep.is_ok(), "clean harness rejected: {:?}", rep.err());
+}

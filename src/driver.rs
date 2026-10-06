@@ -5,6 +5,7 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::query::With;
 use bevy::ecs::resource::Resource;
+use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings, SingleThreadedExecutor};
 use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::ecs::world::World;
 
@@ -198,8 +199,92 @@ pub struct MinimizeOnCrash;
 ///
 /// Panics are caught: a panic is a violation (no_fatal_errors mapping)
 /// and ends the run with status "crash".
+/// Force deterministic, single-threaded execution on every schedule
+/// currently registered. Call BEFORE the readiness gate and before
+/// snapshot_systems (which initializes schedules). Schedules created
+/// lazily afterward keep the default executor (document this caveat).
+fn force_single_threaded(app: &mut App) {
+    let mut schedules = app
+        .world_mut()
+        .remove_resource::<bevy::ecs::schedule::Schedules>()
+        .unwrap();
+    for (_label, sched) in schedules.iter_mut() {
+        sched.set_executor(SingleThreadedExecutor::new());
+    }
+    app.world_mut().insert_resource(schedules);
+}
+
+/// Split a rendered ambiguity report into individual "-- A and B\n
+/// conflict on: X" entries, dropping pairs whose conflict set is ONLY
+/// the exclusive World access. Returns "" when nothing remains.
+fn filter_world_only_conflicts(rendered: &str) -> String {
+    let mut kept = Vec::new();
+    let mut lines = rendered.lines();
+    while let Some(line) = lines.next() {
+        if line.trim_start().starts_with("-- ") {
+            let conflict_line = lines.next().unwrap_or("");
+            let is_world_only = conflict_line.contains("conflict on:")
+                && conflict_line
+                    .trim_start()
+                    .trim_start_matches("conflict on:")
+                    .trim()
+                    == "bevy_ecs::world::World";
+            if !is_world_only {
+                kept.push(format!("{}\n{}", line, conflict_line));
+            }
+        }
+    }
+    kept.join("\n")
+}
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
+
+    // Ambiguity gate: configure all schedules to error on conflicts.
+    if scenario.deny_ambiguities {
+        app.configure_schedules(ScheduleBuildSettings {
+            ambiguity_detection: LogLevel::Error,
+            ..Default::default()
+        });
+    }
+
+    // Force single-threaded execution on all schedules.
+    if scenario.single_threaded {
+        force_single_threaded(app);
+    }
+
+    // Ambiguity gate (finalize): force schedule initialization NOW so
+    // ambiguity errors surface as a structured rejection instead of a
+    // panic inside Schedule::run during the update loop.
+    if scenario.deny_ambiguities {
+        let mut schedules = app
+            .world_mut()
+            .remove_resource::<bevy::ecs::schedule::Schedules>()
+            .unwrap();
+        let mut errs = Vec::new();
+        for (_label, sched) in schedules.iter_mut() {
+            if let Err(e) = sched.initialize(app.world_mut()) {
+                let rendered = e.to_string(sched.graph(), app.world_mut());
+                // Exclusive systems (&mut World) conflict with EVERYTHING by
+                // construction — they serialize at execution time, so their
+                // "ambiguity" carries no ordering hazard. Engine bookkeeping
+                // systems tick_global_task_pools / message_update_system /
+                // despawn_unused_registered_systems / update_frame_count are
+                // exclusive too. Filter conflicts whose ONLY conflict is
+                // World access; data-access ambiguities still fail the gate.
+                let data_conflicts = filter_world_only_conflicts(&rendered);
+                if !data_conflicts.is_empty() {
+                    errs.push(data_conflicts);
+                }
+            }
+        }
+        app.world_mut().insert_resource(schedules);
+        if !errs.is_empty() {
+            return Err(ScenarioError::Rejected(format!(
+                "schedule ambiguities: {}",
+                errs.join("; ")
+            )));
+        }
+    }
 
     if app.world().get_resource::<TestApi>().is_none() {
         return Err(ScenarioError::ContractMissing(
