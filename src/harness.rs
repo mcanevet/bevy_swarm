@@ -128,7 +128,7 @@ fn default_duration() -> f32 {
 #[serde(deny_unknown_fields)]
 pub struct BotConfig {
     #[serde(rename = "type")]
-    pub bot_type: String, // "chaos" | "pursuit" | "replay" | "synthetic_pointer" | "synthetic_keyboard"
+    pub bot_type: crate::enums::BotType,
     #[serde(default = "default_seed")]
     pub seed: u64,
     #[serde(default = "default_rate")]
@@ -156,7 +156,7 @@ pub struct BotConfig {
     /// (stronger unseen-variant bias), "idle" (mostly waiting, rare
     /// jabs). Different personas find different bugs (MIMIC).
     #[serde(default)]
-    pub persona: Option<String>,
+    pub persona: Option<crate::enums::Persona>,
     #[serde(default)]
     pub key_presses: Vec<KeyPressInput>,
     /// planner: declarative goal tree (aplib-inspired). The scenario
@@ -358,7 +358,7 @@ pub struct TimedAction {
 #[serde(deny_unknown_fields)]
 pub struct Invariant {
     pub name: String,
-    pub rule: String,
+    pub rule: crate::enums::InvariantRule,
     // nodes_in_bounds
     pub min_x: Option<f32>,
     pub max_x: Option<f32>,
@@ -373,13 +373,13 @@ pub struct Invariant {
     pub value: Option<serde_json::Value>,
     // custom: "TestApi.score" (numeric) or "TestApi.game_phase" (string)
     pub path: Option<String>,
-    pub check: Option<String>,
+    pub check: Option<crate::enums::CheckOp>,
     pub after_s: Option<f32>,
     pub before_s: Option<f32>,
     pub max_delta_per_sec: Option<f64>,
-    /// Differential invariants: "no_decrease" (value must never drop) or
-    /// "no_increase" (value must never rise). Requires numeric path.
-    pub differential: Option<String>,
+    /// Differential invariants: no_decrease (value must never drop) or
+    /// no_increase (value must never rise). Requires numeric path.
+    pub differential: Option<crate::enums::DifferentialOp>,
     /// Eventually mode: the rule must hold AT LEAST ONCE within this
     /// deadline (seconds). Unlike always-mode invariants (per-frame),
     /// eventually waits for the first satisfaction and reports failure
@@ -396,7 +396,7 @@ pub struct Invariant {
     /// `requires_value`. Checks game POLICY compliance ("low HP ⇒ heal"),
     /// complementing state invariants.
     pub requires_path: Option<String>,
-    pub requires_check: Option<String>,
+    pub requires_check: Option<crate::enums::CheckOp>,
     pub requires_value: Option<serde_json::Value>,
 }
 
@@ -453,27 +453,28 @@ impl std::fmt::Display for ScenarioError {
 
 impl std::error::Error for ScenarioError {}
 
-const KNOWN_BOT_TYPES: [&str; 6] = [
-    "chaos",
-    "pursuit",
-    "replay",
-    "synthetic_pointer",
-    "synthetic_keyboard",
-    "planner",
+const KNOWN_BOT_TYPES: [crate::enums::BotType; 6] = [
+    crate::enums::BotType::Chaos,
+    crate::enums::BotType::Pursuit,
+    crate::enums::BotType::Replay,
+    crate::enums::BotType::SyntheticPointer,
+    crate::enums::BotType::SyntheticKeyboard,
+    crate::enums::BotType::Planner,
 ];
 
 pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
-    if !KNOWN_BOT_TYPES.contains(&scenario.bot.bot_type.as_str()) {
+    // Bot type validity is enforced by the BotType enum deserialization
+    // itself — unknown strings fail at parse time.
+    if !KNOWN_BOT_TYPES.contains(&scenario.bot.bot_type) {
         return Err(ScenarioError::Rejected(format!(
             "unknown bot type '{}' (expected one of: {})",
-            scenario.bot.bot_type,
-            KNOWN_BOT_TYPES.join(", ")
+            scenario.bot.bot_type, scenario.bot.bot_type
         )));
     }
     for rule in &scenario.invariants {
-        if rule.rule == "custom" {
-            let check = rule.check.as_deref().unwrap_or("below");
-            if check == "below" || check == "above" {
+        if rule.rule == crate::enums::InvariantRule::Custom {
+            let check = rule.check.unwrap_or(crate::enums::CheckOp::Below);
+            if check != crate::enums::CheckOp::Equals {
                 if let Some(v) = &rule.value {
                     if !v.is_number() {
                         return Err(ScenarioError::Rejected(format!(
@@ -482,11 +483,6 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
                         )));
                     }
                 }
-            } else if check != "equals" {
-                return Err(ScenarioError::Rejected(format!(
-                    "invariant '{}' uses unknown check '{}' (below/above/equals)",
-                    rule.name, check
-                )));
             }
         }
         if let Some(mps) = rule.max_delta_per_sec {
@@ -497,19 +493,11 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
                 )));
             }
         }
-        if let Some(diff) = &rule.differential {
-            if diff != "no_decrease" && diff != "no_increase" {
-                return Err(ScenarioError::Rejected(format!(
-                    "invariant '{}' has unknown differential '{}' (no_decrease/no_increase)",
-                    rule.name, diff
-                )));
-            }
-            if rule.path.is_none() {
-                return Err(ScenarioError::Rejected(format!(
-                    "invariant '{}' uses differential without a TestApi path",
-                    rule.name
-                )));
-            }
+        if rule.differential.is_some() && rule.path.is_none() {
+            return Err(ScenarioError::Rejected(format!(
+                "invariant '{}' uses differential without a TestApi path",
+                rule.name
+            )));
         }
         // Expert-rule validation: requires_* only valid when WHEN clause exists
         if (rule.requires_path.is_some() || rule.requires_check.is_some()) && rule.path.is_none() {
@@ -798,15 +786,15 @@ fn chaos_bot_system(
     q: Query<Entity, With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != "chaos" {
+    if scenario.0.bot.bot_type != crate::enums::BotType::Chaos {
         return;
     }
     // Persona bias (MIMIC): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.
-    let persona = scenario.0.bot.persona.as_deref().unwrap_or("");
+    let persona = scenario.0.bot.persona.unwrap_or(crate::enums::Persona::Curious);
     let rate = scenario.0.bot.input_rate_hz.max(1);
-    let effective_rate = if persona == "aggressive" {
+    let effective_rate = if persona == crate::enums::Persona::Aggressive {
         rate.saturating_mul(2)
     } else {
         rate
@@ -816,7 +804,7 @@ fn chaos_bot_system(
         return;
     }
     // Idle persona: skip 7 of 8 fire slots entirely (occasional jabs).
-    if persona == "idle" && !state.next_rand().is_multiple_of(8) {
+    if persona == crate::enums::Persona::Idle && !state.next_rand().is_multiple_of(8) {
         return;
     }
     let Some(surface) = surface else {
@@ -842,7 +830,7 @@ fn chaos_bot_system(
     let mut roll = state.next_rand() % surface.0.len() as u64;
     // Aggressive persona: never Wait (loop — a single reroll can land
     // on Wait again when the surface is small).
-    if persona == "aggressive" {
+    if persona == crate::enums::Persona::Aggressive {
         while matches!(&surface.0[roll as usize], SurfaceVariant::Wait) {
             roll = state.next_rand() % surface.0.len() as u64;
         }
@@ -919,7 +907,7 @@ fn replay_bot_system(
     q_named: Query<(bevy::ecs::entity::Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != "replay" {
+    if scenario.0.bot.bot_type != crate::enums::BotType::Replay {
         return;
     }
     for entry in &scenario.0.bot.inputs {
@@ -1007,7 +995,7 @@ fn synthetic_pointer_bot_system(
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != "synthetic_pointer" {
+    if scenario.0.bot.bot_type != crate::enums::BotType::SyntheticPointer {
         return;
     }
     // Deliver pending gesture halves scheduled for this frame.
@@ -1160,7 +1148,7 @@ fn pursuit_bot_system(
     q: Query<(&Name, &Transform), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != "pursuit" {
+    if scenario.0.bot.bot_type != crate::enums::BotType::Pursuit {
         return;
     }
     let bot = &scenario.0.bot;
@@ -1263,7 +1251,7 @@ fn check_bounds_gameplay_system(
     scenario: Res<ScenarioResource>,
 ) {
     for inv in &scenario.0.invariants {
-        if inv.rule != "nodes_in_bounds" {
+        if inv.rule != crate::enums::InvariantRule::NodesInBounds {
             continue;
         }
         if let Some(after) = inv.after_s {
@@ -1354,8 +1342,8 @@ fn check_frame_times_system(
                 continue;
             }
         }
-        match inv.rule.as_str() {
-            "frame_time_p99_below" => {
+        match inv.rule {
+            crate::enums::InvariantRule::FrameTimeP99Below => {
                 // Headless: no renderer/shader-compile stalls — warm-up
                 // discard skipped. Diagnostic::max() doesn't exist in
                 // 0.20-rc; we use latest value as a conservative proxy
@@ -1379,7 +1367,7 @@ fn check_frame_times_system(
                     }
                 }
             }
-            "fps_floor" => {
+            crate::enums::InvariantRule::FpsFloor => {
                 let min_fps = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(30.0);
                 let threshold_ms = 1000.0 / min_fps;
                 if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
@@ -1595,7 +1583,7 @@ fn check_custom_system(world: &mut World) {
     let api = world.resource::<TestApi>().clone();
 
     for inv in &scenario.invariants {
-        if inv.rule != "custom" {
+        if inv.rule != crate::enums::InvariantRule::Custom {
             continue;
         }
         if let Some(after) = inv.after_s {
@@ -1621,13 +1609,13 @@ fn check_custom_system(world: &mut World) {
                 );
                 continue;
             };
-            let check = inv.check.as_deref().unwrap_or("above");
+            let check = inv.check.unwrap_or(crate::enums::CheckOp::Above);
             let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
 
             let holds_now = match (check, threshold) {
-                ("equals", Some(thr)) => (count as f64 - thr).abs() <= f64::EPSILON,
-                ("below", Some(thr)) => count as f64 <= thr,
-                ("above", Some(thr)) => count as f64 >= thr,
+                (crate::enums::CheckOp::Equals, Some(thr)) => (count as f64 - thr).abs() <= f64::EPSILON,
+                (crate::enums::CheckOp::Below, Some(thr)) => count as f64 <= thr,
+                (crate::enums::CheckOp::Above, Some(thr)) => count as f64 >= thr,
                 _ => false,
             };
 
@@ -1662,14 +1650,12 @@ fn check_custom_system(world: &mut World) {
                             format!(
                                 "query count {} {} {} (threshold: {})",
                                 count,
-                                if check == "equals" {
+                                if check == crate::enums::CheckOp::Equals {
                                     "!="
+                                } else if check == crate::enums::CheckOp::Below {
+                                    ">"
                                 } else {
-                                    if check == "below" {
-                                        ">"
-                                    } else {
-                                        "<"
-                                    }
+                                    "<"
                                 },
                                 threshold.unwrap_or(0.0),
                                 threshold.unwrap_or(0.0)
@@ -1757,13 +1743,13 @@ fn check_custom_system(world: &mut World) {
         }
 
         let Some(current) = numeric else { continue };
-        let check = inv.check.as_deref().unwrap_or("below");
+        let check = inv.check.unwrap_or(crate::enums::CheckOp::Below);
         let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
         if let Some(thr) = threshold {
             // Shared predicate evaluation for both modes.
-            let holds_now = if check == "equals" {
+            let holds_now = if check == crate::enums::CheckOp::Equals {
                 (current - thr).abs() <= f64::EPSILON
-            } else if check == "below" {
+            } else if check == crate::enums::CheckOp::Below {
                 current <= thr
             } else {
                 current >= thr // "above"
@@ -1847,7 +1833,7 @@ fn check_custom_system(world: &mut World) {
             let mut state_mut = world.resource_mut::<PlaytestState>();
             let prev = state_mut.api_history.insert(path.clone(), current);
             if let Some(prev_val) = prev {
-                let violated = if diff == "no_decrease" {
+                let violated = if diff == &crate::enums::DifferentialOp::NoDecrease {
                     current < prev_val
                 } else {
                     current > prev_val // no_increase
@@ -1877,11 +1863,10 @@ fn check_custom_system(world: &mut World) {
             // `check` means an unconditional policy rule.
             let when_holds = if let (Some(check), Some(when_val)) = (&inv.check, &inv.value) {
                 if let (Some(cur), Some(thr)) = (numeric, when_val.as_f64()) {
-                    match check.as_str() {
-                        "below" => cur < thr,
-                        "above" => cur > thr,
-                        "equals" => (cur - thr).abs() <= f64::EPSILON,
-                        _ => false,
+                    match check {
+                        crate::enums::CheckOp::Below => cur < thr,
+                        crate::enums::CheckOp::Above => cur > thr,
+                        crate::enums::CheckOp::Equals => (cur - thr).abs() <= f64::EPSILON,
                     }
                 } else {
                     // Text WHEN: string equality against the field value.
@@ -1901,11 +1886,10 @@ fn check_custom_system(world: &mut World) {
                     .test_api_paths_read
                     .insert(req_path.clone());
                 let violated = match (req_num, req_value.as_f64()) {
-                    (Some(v), Some(thr)) => match req_check.as_str() {
-                        "below" => v > thr,
-                        "above" => v < thr,
-                        "equals" => (v - thr).abs() > f64::EPSILON,
-                        _ => false,
+                    (Some(v), Some(thr)) => match req_check {
+                        crate::enums::CheckOp::Below => v > thr,
+                        crate::enums::CheckOp::Above => v < thr,
+                        crate::enums::CheckOp::Equals => (v - thr).abs() > f64::EPSILON,
                     },
                     _ => match (&req_str, req_value.as_str()) {
                         (Some(s), Some(exp)) => s != exp,
@@ -2092,7 +2076,7 @@ fn check_frame_time_anomaly_system(
         .0
         .invariants
         .iter()
-        .any(|inv| inv.rule == "frame_time_anomaly")
+        .any(|inv| inv.rule == crate::enums::InvariantRule::FrameTimeAnomaly)
     {
         return;
     }
@@ -2157,7 +2141,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PlaytestReport {
-    pub status: String, // "pass" | "fail" | "crash"
+    pub status: crate::enums::PlaytestStatus,
     pub violations: Vec<ViolationEntry>,
     pub metrics: Metrics,
     pub coverage: Coverage,
@@ -2310,7 +2294,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
         scenario: Res<ScenarioResource>,
     ) {
-        if scenario.0.bot.bot_type != "synthetic_keyboard" {
+        if scenario.0.bot.bot_type != crate::enums::BotType::SyntheticKeyboard {
             return;
         }
         let frame = state.frame;
@@ -2385,7 +2369,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // Register the synthetic_pointer bot only when the scenario asks for
     // it: its ResMut<PlaytestState>/ResMut<Violations> params would add
     // scheduler edges that perturb system ordering for OTHER bot types     // registration keeps the default schedule graph byte-identical.
-    if scenario.bot.bot_type == "synthetic_pointer" {
+    if scenario.bot.bot_type == crate::enums::BotType::SyntheticPointer {
         app.add_systems(bevy::app::Update, synthetic_pointer_bot_system);
         // Actionability gate queue processor (only meaningful when the
         // scenario opts in via require_actionable clicks).
@@ -2394,7 +2378,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             synthetic_pointer_actionability_check_system,
         );
     }
-    if scenario.bot.bot_type == "synthetic_keyboard" {
+    if scenario.bot.bot_type == crate::enums::BotType::SyntheticKeyboard {
         app.add_systems(bevy::app::Update, synthetic_keyboard_bot_system);
     }
     // Apply resets once, before the loop (typed registry, no dispatch).
@@ -2522,11 +2506,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     }
     final_metrics.crash_detected = crash_detected;
     let status = if crash_detected {
-        "crash"
+        crate::enums::PlaytestStatus::Crash
     } else if snap.is_empty() {
-        "pass"
+        crate::enums::PlaytestStatus::Pass
     } else {
-        "fail"
+        crate::enums::PlaytestStatus::Fail
     };
     let action_log = app
         .world()
@@ -2549,7 +2533,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // reproducer plus a ready-to-save regression scenario.
 
     Ok(PlaytestReport {
-        status: status.to_string(),
+        status,
         violations: snap,
         metrics: final_metrics,
         coverage: state.coverage,
@@ -2585,7 +2569,7 @@ pub struct BranchOutcome {
 impl BranchOutcome {
     /// Did this branch complete without violations or crashes?
     pub fn passed(&self) -> bool {
-        self.report.status == "pass"
+        self.report.status == crate::enums::PlaytestStatus::Pass
     }
 }
 
@@ -2742,7 +2726,7 @@ pub fn minimize_crash(
             setup: scenario.setup.clone(),
             duration_s: scenario.duration_s,
             bot: BotConfig {
-                bot_type: "replay".into(),
+                bot_type: crate::enums::BotType::Replay,
                 seed: scenario.bot.seed,
                 input_rate_hz: scenario.bot.input_rate_hz,
                 agent_target: None,
@@ -2756,7 +2740,7 @@ pub fn minimize_crash(
             },
             invariants: scenario.invariants.clone(),
         };
-        matches!(run_scenario(&mut app, &replay_scenario), Ok(r) if r.status == "crash")
+        matches!(run_scenario(&mut app, &replay_scenario), Ok(r) if r.status == crate::enums::PlaytestStatus::Crash)
     };
 
     let minimal = ddmin_minimize(&replayable, reproduce);
@@ -2773,7 +2757,7 @@ pub fn minimize_crash(
         setup: scenario.setup.clone(),
         duration_s: scenario.duration_s,
         bot: BotConfig {
-            bot_type: "replay".into(),
+            bot_type: crate::enums::BotType::Replay,
             seed: scenario.bot.seed,
             input_rate_hz: scenario.bot.input_rate_hz,
             agent_target: None,
@@ -3004,8 +2988,8 @@ pub struct PersonaConfig {
 
 /// Extract a persona hint from a scenario bot config. Overrides the
 /// chaos bot's default uniform-ish sampling.
-pub fn persona_of(bot: &BotConfig) -> Option<&str> {
-    bot.persona.as_deref()
+pub fn persona_of(bot: &BotConfig) -> crate::enums::Persona {
+    bot.persona.unwrap_or(crate::enums::Persona::Curious)
 }
 
 /// Probes the world's reflected resources and auto-publishes observable

@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use bevy_swarm::contract::*;
 use bevy_swarm::harness::*;
+use bevy_swarm::enums::PlaytestStatus;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]
@@ -80,5 +81,5 @@ fn frozen_world_buggy_detected() {
         "buggy (stalled) animation must trip frozen-world: {:?}",
         report.violations
     );
-    assert_eq!(report.status, "fail");
+    assert_eq!(report.status, PlaytestStatus::Fail);
 }

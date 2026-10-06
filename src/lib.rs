@@ -34,6 +34,7 @@
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod contract;
+pub mod enums;
 pub mod harness;
 pub mod planner;
 

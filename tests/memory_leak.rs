@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 use bevy_swarm::contract::*;
 use bevy_swarm::harness::*;
+use bevy_swarm::enums::PlaytestStatus;
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]
@@ -57,7 +58,7 @@ fn memory_leak_clean_passes() {
     let mut app = build_clean_app();
     let report = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(
-        report.status, "pass",
+        report.status, PlaytestStatus::Pass,
         "Clean version should pass: {:?}",
         report.violations
     );
@@ -74,7 +75,7 @@ fn memory_leak_buggy_fails() {
 
     let mut app = build_buggy_app();
     let report = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(report.status, "fail", "Buggy version should fail");
+    assert_eq!(report.status, PlaytestStatus::Fail, "Buggy version should fail");
     assert!(
         report
             .violations

@@ -279,7 +279,7 @@ pub fn planner_bot_system(
     api: Res<TestApi>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != "planner" {
+    if scenario.0.bot.bot_type != crate::enums::BotType::Planner {
         return;
     }
     let Some(goal_root) = &scenario.0.bot.goals else {
