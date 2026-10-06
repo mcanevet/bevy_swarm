@@ -38,6 +38,8 @@ pub mod minimize;
 pub mod oracles;
 pub mod planner;
 pub mod scenario;
+pub mod conventions;
+pub mod rules;
 pub mod state;
 
 #[cfg(test)]
