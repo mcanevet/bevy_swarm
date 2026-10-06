@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Input Abstraction — gameplay systems consume these; never ButtonInput.
-/// NOTE (Bevy 0.20.0-rc.2): buffered events are `Message`s — registered via
-/// `app.add_message::<M>()`, written/read via `MessageWriter`/`MessageReader`.
-/// `Event`/observers is the reactive system, NOT the buffered-event path.
+/// Buffered events are `Message`s — registered via `app.add_message::<M>()`,
+/// written/read via `MessageWriter`/`MessageReader`. `Event`/observers is
+/// the reactive system, NOT the buffered-event path.
 #[derive(Message, Debug, Clone)]
 pub enum UserIntent {
     Move { dir: Vec2 },

@@ -299,10 +299,9 @@ games with enum fields implement TestApiResolve on their own TestApi)"
     // picking chain. The minimal app has NO window (MinimalPlugins),
     // no picking backend, and no PointerClick handler — so a click
     // request must produce a LOUD config violation and a failing
-    // report, not a silent no-op. This is exactly the harvestcycle
-    // failure mode where a missing MeshPickingPlugin made clicks dead.
-    // The happy path (real clicks through a real game app) is covered
-    // by harvestcycle's `pointer_chain.json` scenario, not this crate.
+    // report, not a silent no-op. (A real game app that wires the
+    // picking backend exercises the happy path; this crate guarantees
+    // the failure is loud, not silent.)
     let click_scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"synthetic_pointer","pointer_clicks":[
             {"frame":1,"target":"Ball"}
