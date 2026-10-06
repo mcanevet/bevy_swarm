@@ -59,6 +59,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PlaytestReport {
+    /// Schema version: stays 1 until v0.2 release freezes it.
+    pub schema_version: u32,
     pub status: crate::enums::PlaytestStatus,
     pub violations: Vec<ViolationEntry>,
     pub metrics: Metrics,
@@ -323,6 +325,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // reproducer plus a ready-to-save regression scenario.
 
     Ok(PlaytestReport {
+        schema_version: 1,
         status,
         violations: snap,
         metrics: final_metrics,

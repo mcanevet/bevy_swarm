@@ -1,0 +1,10 @@
+{
+  "status": "fail",
+  "scaffold": "adapter",
+  "seeds": [42],
+  "duration_s": 3.0,
+  "must_report": [
+    { "rule": "frozen_world" }
+  ],
+  "must_not_report": []
+}

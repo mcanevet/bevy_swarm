@@ -81,6 +81,25 @@ flowchart LR
 - **Synthetic input** is opt-in: `synthetic_pointer`/`synthetic_keyboard` bots drive the real `PointerInput`/`KeyPressInput` chain when a scenario asks for it
 - The harness itself is pre/post-processing around the Bevy app — `run_scenario()` sets up, pumps the loop, then collects the report
 
+## Testing
+
+Two loops (see docs/conventions.md):
+
+- **Outer loop (acceptance):** plain fixture games with ZERO bevy_swarm
+  plumbing (`fixtures/*`) + JSON expectation files
+  (`tests/swarm/golden/<fixture>/<variant>.json`). The runner
+  (`tests/acceptance.rs`) drives the fixture-runner binary — the same
+  path a user takes — and asserts on the report JSON contract
+  (`docs/report-schema.json`). Bug variants are selected at runtime via
+  the `FIXTURE_BUG` env var, so clean and buggy share one build.
+- **Inner loop (unit):** `src/verify.rs` and module tests for algorithms
+  and semantics.
+
+To add a fixture: create `fixtures/<game>/` (depends on bevy ONLY),
+add an adapter + arm in `tests/fixture-runner`, and write expectation
+files under `tests/swarm/golden/<game>/` (clean.json is the
+false-positive guard; every `bug_<name>.json` documents a planted bug).
+
 ## Development
 
 ```

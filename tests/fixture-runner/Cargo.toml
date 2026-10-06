@@ -1,0 +1,20 @@
+[package]
+name = "fixture-runner"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "In-process acceptance runner for bevy_swarm fixtures: adapter plugins + report writer"
+
+[dependencies]
+bevy_swarm = { path = "../.." }
+bevy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+fixture_spinner = { path = "../../fixtures/spinner" }
+fixture_walker = { path = "../../fixtures/walker" }
+fixture_spawner = { path = "../../fixtures/spawner" }
+
+[[bin]]
+name = "fixture-runner"
+path = "src/main.rs"
