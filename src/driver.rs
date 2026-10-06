@@ -20,6 +20,55 @@ use bevy::picking::pointer::PointerInput;
 // PlaytestPlugin
 //-----------------------------------------------------------------------
 
+/// Harness pipeline phases.
+///
+/// # Frame pipeline
+///
+/// ```text
+/// Schedule  | Set                   | Systems
+/// ----------|-----------------------|----------------------------------------
+/// First     | PlaytestSet::Tick     | tick_counter, cheat_scheduler (chained)
+/// PreUpdate | PlaytestSet::Bots     | chaos, replay, pursuit, planner
+/// Update    | PlaytestSet::RawInput | synthetic pointer/keyboard bots
+/// Last      | PlaytestSet::Oracles  | frozen_world, finite_transforms,
+///           |                       | bounds, custom, intent_audit_log
+/// ```
+///
+/// `state.frame` is incremented in `First`, so bots (PreUpdate), game
+/// systems (Update) and the audit log (Last) all see the SAME frame
+/// number: an intent logged at frame N replays at frame N and is
+/// consumed by the game in the same frame.
+///
+/// Games that consume `UserIntent` in `Update` run after
+/// `PlaytestSet::Bots` automatically (PreUpdate precedes Update).
+/// Games reading `UserIntent` in `PreUpdate` must order themselves
+/// `.after(PlaytestSet::Bots)`.
+///
+/// # Actuator frame semantics (Bevy 0.20)
+///
+/// - Typed intents (`UserIntent`) are written in PreUpdate/Bots and are
+///   readable the same frame.
+/// - Raw keyboard/gamepad input written in Update reaches `ButtonInput`
+///   only at the NEXT frame's PreUpdate (Bevy's input plugin copies the
+///   accumulated buffer in PreUpdate). Raw keyboard injection therefore
+///   belongs in PreUpdate before InputSystems; the synthetic POINTER
+///   gesture stays in Update (bevy_picking reads the previous frame's
+///   hover map).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bevy::ecs::schedule::SystemSet)]
+pub enum PlaytestSet {
+    /// Frame counter: runs first, so every later system in the frame
+    /// sees the same frame number.
+    Tick,
+    /// Typed-intent bots (chaos/replay/pursuit/planner) writing
+    /// `UserIntent`.
+    Bots,
+    /// Raw-input bots (pointer/keyboard) going through the real input
+    /// chain.
+    RawInput,
+    /// World checks, evaluated after ALL game systems of the frame.
+    Oracles,
+}
+
 #[derive(Resource)]
 pub struct ScenarioResource(pub Scenario);
 
@@ -27,26 +76,75 @@ pub struct PlaytestPlugin;
 
 impl bevy::app::Plugin for PlaytestPlugin {
     fn build(&self, app: &mut App) {
+        use bevy::ecs::schedule::IntoScheduleConfigs;
         // PointerInput registration: headless test apps may lack DefaultPlugins,
         // so ensure the synthetic pointer bot can always write. Idempotent.
         app.add_message::<PointerInput>();
-        app.init_resource::<Violations>().add_systems(
+        // Synthetic keyboard bot writes KeyboardInput; register so apps
+        // without DefaultPlugins don't fail parameter validation.
+        app.add_message::<bevy::input::keyboard::KeyboardInput>();
+        app.init_resource::<Violations>();
+
+        // Every harness system is gated on a live scenario so the plugin
+        // is safe to leave in a production App (or an App never driven
+        // by run_scenario): without ScenarioResource + PlaytestState the
+        // sets are skipped entirely.
+        // Both ScenarioResource and PlaytestState must exist for harness
+        // systems to run.
+        let scenario_live = |world: &World| {
+            world.get_resource::<ScenarioResource>().is_some()
+                && world.get_resource::<PlaytestState>().is_some()
+        };
+        app.configure_sets(bevy::app::First, PlaytestSet::Tick.run_if(scenario_live));
+        app.configure_sets(
+            bevy::app::PreUpdate,
+            PlaytestSet::Bots.run_if(scenario_live),
+        );
+        app.configure_sets(
             bevy::app::Update,
+            PlaytestSet::RawInput.run_if(scenario_live),
+        );
+        app.configure_sets(bevy::app::Last, PlaytestSet::Oracles.run_if(scenario_live));
+
+        app.add_systems(
+            bevy::app::First,
+            (tick_counter_system, cheat_scheduler_system)
+                .chain()
+                .in_set(PlaytestSet::Tick),
+        );
+        app.add_systems(
+            bevy::app::PreUpdate,
             (
-                tick_counter_system,
                 chaos_bot_system,
                 replay_bot_system,
                 pursuit_bot_system,
                 crate::planner::planner_bot_system,
+            )
+                .chain()
+                .in_set(PlaytestSet::Bots),
+        );
+        app.add_systems(
+            bevy::app::Update,
+            (
+                synthetic_pointer_bot_system,
+                synthetic_pointer_actionability_check_system,
+                synthetic_keyboard_bot_system,
+            )
+                .chain()
+                .in_set(PlaytestSet::RawInput),
+        );
+        app.add_systems(
+            bevy::app::Last,
+            (
                 frozen_world_oracle_system,
                 check_finite_transforms_system,
                 check_bounds_gameplay_system,
-            ),
+                check_custom_system,
+                intent_audit_log_system,
+            )
+                .chain()
+                .in_set(PlaytestSet::Oracles),
         );
-        // Exclusive system: reads TestApi with &mut World access.
-        app.add_systems(bevy::app::Last, check_custom_system);
-        // Canonical audit-log path: reads all UserIntent messages.
-        app.add_systems(bevy::app::Last, intent_audit_log_system);
     }
 }
 
@@ -153,26 +251,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // their generators, making chaos runs reproducible.
     app.insert_resource(crate::contract::ScenarioSeed(scenario.bot.seed));
 
-    // AUDIT (phase 3): scheduled cheats fire on their due frames,
-    // logged with source BotScenario("cheat-schedule").
-    app.add_systems(bevy::app::Update, cheat_scheduler_system);
-
-    // Register the synthetic_pointer bot only when the scenario asks for
-    // it: its ResMut<PlaytestState>/ResMut<Violations> params would add
-    // scheduler edges that perturb system ordering for OTHER bot types;
-    // conditional registration keeps the default schedule graph identical.
-    if scenario.bot.bot_type == crate::enums::BotType::SyntheticPointer {
-        app.add_systems(bevy::app::Update, synthetic_pointer_bot_system);
-        // Actionability gate queue processor (only meaningful when the
-        // scenario opts in via require_actionable clicks).
-        app.add_systems(
-            bevy::app::Update,
-            synthetic_pointer_actionability_check_system,
-        );
-    }
-    if scenario.bot.bot_type == crate::enums::BotType::SyntheticKeyboard {
-        app.add_systems(bevy::app::Update, synthetic_keyboard_bot_system);
-    }
+    // NOTE: no add_systems here anymore. All harness systems (bots,
+    // oracles, cheat scheduler) are registered once by PlaytestPlugin in
+    // explicit PlaytestSet phases; each bot's system early-returns when
+    // the active bot type is not its own. This also makes calling
+    // run_scenario twice on the same App safe (no duplicate systems).
     // Apply resets once, before the loop (typed registry, no dispatch).
     // Coverage: record each reset kind invoked.
     let mut coverage = Coverage::default();
