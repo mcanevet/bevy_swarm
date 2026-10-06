@@ -45,7 +45,7 @@ impl IntentSurface {
 /// State Exposure — the game's public test surface. This crate ships a
 /// default `TestApi` resource; games normally **keep defining their own**
 /// in `src/test_conventions.rs` (deriving `Reflect`, implementing
-/// `TestApiResolve` — see the testable-conventions skill template).
+/// `TestApiResolve` — games implement this to expose state.
 /// The crate's `TestConventionsPlugin` registers the DEFAULT shape;
 /// games with a custom TestApi register their own instead and simply
 /// satisfy the same resolve interface.
@@ -136,7 +136,7 @@ impl TestFieldValue {
 }
 
 /// Trait a game's TestApi resource implements so the harness can resolve
-/// "TestApi.<field>" paths without knowing the concrete type.
+/// "TestApi.\<field\>" paths without knowing the concrete type.
 pub trait TestApiResolve {
     fn resolve(&self, path: &str) -> Option<TestFieldValue>;
 }
@@ -178,7 +178,7 @@ pub struct Gameplay;
 
 /// Convenience plugin bundling the contract's moving parts.
 ///
-/// COMPOSITION NOTE (2026-10-02 incident): this plugin is convenience
+/// Note: this plugin is convenience
 /// sugar for TEST Apps. The game's own root plugin MUST ALSO call
 /// `add_message::<UserIntent>()` (and init any resource its systems
 /// read) — otherwise the production binary panics at boot with

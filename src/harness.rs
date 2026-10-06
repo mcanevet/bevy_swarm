@@ -10,14 +10,14 @@
 //!
 //! ## Module layout (re-exported here for convenience)
 //!
-//! - [`scenario`] — scenario DTOs, defaults, load-time validation
-//! - [`state`] — runtime state resources (PlaytestState, Violations)
-//! - [`bots`] — chaos/replay/pursuit/synthetic bots
-//! - [`oracles`] — per-frame world checks and invariant evaluation
-//! - [`driver`] — PlaytestPlugin, run_scenario, PlaytestReport
-//! - [`minimize`] — ddmin crash minimization
-//! - [`branch`] — branch-matrix variant testing
-//! - [`diagnostics`] — contract diagnostics and calibration
+//! - [`crate::scenario`] — scenario DTOs, defaults, load-time validation
+//! - [`crate::state`] — runtime state resources (PlaytestState, Violations)
+//! - [`crate::bots`] — chaos/replay/pursuit/synthetic bots
+//! - [`crate::oracles`] — per-frame world checks and invariant evaluation
+//! - [`crate::driver`] — PlaytestPlugin, run_scenario, PlaytestReport
+//! - [`crate::minimize`] — ddmin crash minimization
+//! - [`crate::branch`] — branch-matrix variant testing
+//! - [`crate::diagnostics`] — contract diagnostics and calibration
 
 pub use crate::branch::*;
 pub use crate::diagnostics::*;

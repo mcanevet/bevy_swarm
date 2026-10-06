@@ -213,7 +213,7 @@ pub(crate) fn check_frame_times_system(
 // Custom invariants — resolve TestApi paths (the contract read surface)
 // ---------------------------------------------------------------------------
 
-/// Resolve a "TestApi.<field>" path by delegating to the GAME's
+/// Resolve a `TestApi.<field>` path by delegating to the GAME's
 /// `TestApi::resolve` — the harness holds no field-name knowledge. When a
 /// game extends `TestApi`, it extends its own `resolve` implementation
 /// (see testable-conventions template). Numeric fields feed below/above +
@@ -222,10 +222,10 @@ pub(crate) fn check_frame_times_system(
 /// without game-side boilerplate (the percept layer).
 ///
 /// Supported path forms:
-///   "Resource:<TypePath>.<field>"     — Resource field (single-instance)
-///   "Component:<TypePath>#count"      — count of entities with component
-///   "Component:<TypePath>[<idx>].<f>" — Nth entity's component field
-///   "Component:<TypePath>.<field>"    — first entity's component field
+///   `Resource:<TypePath>.<field>`     — Resource field (single-instance)
+///   `Component:<TypePath>#count`      — count of entities with component
+///   `Component:<TypePath>[N].<field>` — Nth entity's component field
+///   `Component:<TypePath>.<field>`    — first entity's component field
 ///
 /// Enums resolve to variant name as Text. Numeric leaf types → Numeric.
 pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue> {
@@ -675,7 +675,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
             }
         }
 
-        // Expert-rule oracle (TITAN): WHEN `path` satisfies check vs value,
+        // Expert-rule oracle: WHEN `path` satisfies check vs value,
         // REQUIRE `requires_path` to satisfy requires_check vs
         // requires_value. Checks game POLICY compliance ("low HP ⇒ must
         // heal"), complementing state invariants.
@@ -747,7 +747,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
 // Intent audit observer — optional, ECS-native (0.20 observer `Event`s)
 // ---------------------------------------------------------------------------
 
-/// Observer event: fired whenever a bot (or anything) writes a
+/// : fired whenever a bot (or anything) writes a
 /// `UserIntent`. Games/harness extensions can listen to audit intent
 /// traffic without polling. The audit logger (below) counts every intent
 /// by variant for coverage — ECS observers replace the per-bot manual
@@ -793,7 +793,7 @@ pub(crate) fn intent_audit_log_system(
 }
 
 // ---------------------------------------------------------------------------
-// Execution-time oracle (TITAN-inspired): per-FRAME timing anomaly
+// Execution-time oracle: per-frame timing anomaly
 // detection via Welford's online algorithm. Flags frames slower than
 // mean + 3σ after warm-up — catches infinite-loop-in-system,
 // progressive degradation (resource leak), and stalls the static

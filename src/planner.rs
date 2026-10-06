@@ -1,6 +1,6 @@
 //! Planner bot (goal structures, aplib-inspired).
 //!
-//! Ported from the legacy flat script `scripts/playtest_harness.rs`.
+
 //! A declarative tree of TestApi-predicate goals with combinators: a
 //! scenario author writes WHAT to achieve, not WHEN to press. A
 //! primitive goal declares the intents to emit while it is unachieved;

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Declared MSRV 1.97 (Bevy 0.20.0-rc.2 dependency tree requirement), enforced in CI
+
 ### Added
 - Initial (unreleased) version. Contract-first architecture: games
   implement `TestApi`, `UserIntent`, `ResetHooks`, `IntentSurface`,

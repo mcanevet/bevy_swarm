@@ -103,7 +103,7 @@ false-positive guard; every `bug_<name>.json` documents a planted bug).
 ## Development
 
 ```
-cargo test              # 26 lib tests
+cargo test              # 48 lib tests
 cargo test --tests       # integration/regression suites
 cargo test --features agent
 cargo clippy --all-targets -- -D warnings

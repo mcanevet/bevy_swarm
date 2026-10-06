@@ -665,20 +665,20 @@ fn viewport_location(
 
 /// Screenshot capture for visual regression testing.
 /// In windowed mode this captures the real rendered frame (via the
-/// visual-playtest skill's native screenshot mechanism); in headless
+// native screenshot's native screenshot mechanism); in headless
 /// harness mode it returns window geometry only.
 fn playtest_screenshot(_params: In<Option<Value>>, world: &World) -> BrpResult {
     let frame = world.resource::<AgentFrameCounter>().0;
     let mut w = 0u32;
     let mut h = 0u32;
     // Headless harness: no windows. Windowed mode would use
-    // visual-playtest skill's native screenshot mechanism.
+    // native screenshot's native screenshot mechanism.
     // For now just report "no window" in headless mode.
     Ok(json!({
         "frame": frame,
         "width": w,
         "height": h,
-        "note": "visual capture delegated to visual-playtest skill; this endpoint reports geometry"
+        "note": "visual capture delegated to native screenshot; this endpoint reports geometry"
     }))
 }
 
