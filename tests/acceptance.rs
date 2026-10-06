@@ -43,7 +43,11 @@ fn discover_cases() -> Vec<(String, String)> {
         .collect();
     fixtures.sort();
     for fixture_dir in fixtures {
-        let fixture = fixture_dir.file_name().unwrap().to_string_lossy().to_string();
+        let fixture = fixture_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let mut variants: Vec<_> = std::fs::read_dir(&fixture_dir)
             .expect("fixture golden dir readable")
             .filter_map(|e| e.ok())
@@ -64,7 +68,11 @@ fn discover_cases() -> Vec<(String, String)> {
 fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> serde_json::Value {
     let bug_env = match variant {
         "clean" => None,
-        v => Some(v.strip_prefix("bug_").expect("variant is clean or bug_*").to_string()),
+        v => Some(
+            v.strip_prefix("bug_")
+                .expect("variant is clean or bug_*")
+                .to_string(),
+        ),
     };
 
     let scenario = build_scenario(expectation);
@@ -87,8 +95,7 @@ fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> se
         );
     }
 
-    let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(conventions_report_relpath());
+    let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(conventions_report_relpath());
     let json = std::fs::read_to_string(&report_path)
         .unwrap_or_else(|e| panic!("read report {}: {}", report_path.display(), e));
     serde_json::from_str(&json).expect("report is valid JSON")
@@ -158,15 +165,24 @@ fn check_case(report: &serde_json::Value, expectation: &serde_json::Value) -> Ve
 
     if let Some(must) = expectation.get("must_report").and_then(|m| m.as_array()) {
         for entry in must {
-            let rule = entry.get("rule").and_then(|r| r.as_str()).expect("rule name");
+            let rule = entry
+                .get("rule")
+                .and_then(|r| r.as_str())
+                .expect("rule name");
             if !violation_rules.contains(&rule) {
                 errors.push(format!("must_report: '{}' not reported", rule));
             }
         }
     }
-    if let Some(must_not) = expectation.get("must_not_report").and_then(|m| m.as_array()) {
+    if let Some(must_not) = expectation
+        .get("must_not_report")
+        .and_then(|m| m.as_array())
+    {
         for entry in must_not {
-            let rule = entry.get("rule").and_then(|r| r.as_str()).expect("rule name");
+            let rule = entry
+                .get("rule")
+                .and_then(|r| r.as_str())
+                .expect("rule name");
             if violation_rules.contains(&rule) {
                 errors.push(format!("must_not_report: '{}' was reported", rule));
             }
@@ -189,8 +205,8 @@ fn acceptance_suite() {
         let expect_path = golden_dir(fixture).join(format!("{}.json", variant));
         let raw = std::fs::read_to_string(&expect_path)
             .unwrap_or_else(|e| panic!("read {}: {}", expect_path.display(), e));
-        let expectation: serde_json::Value =
-            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {}", expect_path.display(), e));
+        let expectation: serde_json::Value = serde_json::from_str(&raw)
+            .unwrap_or_else(|e| panic!("parse {}: {}", expect_path.display(), e));
 
         let report = run_case(fixture, variant, &expectation);
         let errors = check_case(&report, &expectation);
@@ -198,10 +214,10 @@ fn acceptance_suite() {
         let pending = expectation.get("pending").and_then(|p| p.as_str());
         let outcome = match (errors.is_empty(), pending) {
             (true, None) => Outcome::Passed,
-            (true, Some(bead)) => {
-                Outcome::UnexpectedPass(format!("remove pending: {}", bead))
+            (true, Some(bead)) => Outcome::UnexpectedPass(format!("remove pending: {}", bead)),
+            (false, Some(bead)) => {
+                Outcome::Pending(format!("{} ({}): {:?}", bead, variant, errors))
             }
-            (false, Some(bead)) => Outcome::Pending(format!("{} ({}): {:?}", bead, variant, errors)),
             (false, None) => Outcome::Failed,
         };
         outcomes.push(CaseOutcome {
@@ -211,7 +227,10 @@ fn acceptance_suite() {
         });
     }
 
-    let passed = outcomes.iter().filter(|c| c.outcome == Outcome::Passed).count();
+    let passed = outcomes
+        .iter()
+        .filter(|c| c.outcome == Outcome::Passed)
+        .count();
     let failed = outcomes
         .iter()
         .filter(|c| matches!(c.outcome, Outcome::Failed))
@@ -244,11 +263,20 @@ fn acceptance_suite() {
     for c in &outcomes {
         if let Outcome::Failed = c.outcome {
             let expect_path = golden_dir(&c.fixture).join(format!("{}.json", c.variant));
-            eprintln!("FAILED: {}/{} ({})", c.fixture, c.variant, expect_path.display());
+            eprintln!(
+                "FAILED: {}/{} ({})",
+                c.fixture,
+                c.variant,
+                expect_path.display()
+            );
         }
     }
 
-    assert_eq!(unexpected.len(), 0, "pending cases that pass must lose their pending marker (strict xfail)");
+    assert_eq!(
+        unexpected.len(),
+        0,
+        "pending cases that pass must lose their pending marker (strict xfail)"
+    );
     assert_eq!(failed, 0, "acceptance failures");
     assert!(
         passed + pending.len() + unexpected.len() + failed == outcomes.len(),
@@ -305,10 +333,8 @@ fn fixtures_have_no_harness_plumbing() {
 #[test]
 fn report_matches_schema() {
     let cases = discover_cases();
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../docs/report-schema.json"
-    ))
-    .expect("schema parses");
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../docs/report-schema.json")).expect("schema parses");
 
     let allowed_top: Vec<&str> = schema["properties"]
         .as_object()

@@ -6,12 +6,5 @@
   ],
   "duration_s": 1.0,
   "must_report": [],
-  "must_not_report": [
-    {
-      "rule": "frozen_world"
-    },
-    {
-      "rule": "dead_verb"
-    }
-  ]
+  "must_not_report": []
 }

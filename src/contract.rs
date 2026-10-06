@@ -297,9 +297,7 @@ pub const HARNESS_TYPE_PATHS: &[&str] = &["bevy_swarm::contract::", "bevy_swarm:
 /// the harness will invoke the registered handler. This removes the need
 /// for a custom UserIntent enum when the game has simple named actions.
 #[derive(Resource, Default)]
-pub struct NamedIntents(
-    pub std::collections::HashMap<String, WorldHook>,
-);
+pub struct NamedIntents(pub std::collections::HashMap<String, WorldHook>);
 
 impl NamedIntents {
     pub fn register(&mut self, name: &str, handler: impl Fn(&mut World) + Send + Sync + 'static) {
@@ -332,4 +330,3 @@ impl NamedIntents {
 #[reflect(Resource)]
 #[derive(Default)]
 pub struct ScenarioSeed(pub u64);
-

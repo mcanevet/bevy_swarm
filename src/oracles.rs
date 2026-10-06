@@ -5,16 +5,15 @@ use bevy::ecs::query::{Changed, With};
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::ecs::world::World;
-use bevy::prelude::{Name, Transform};
 use bevy::picking::pointer::PointerId;
+use bevy::prelude::{Name, Transform};
 
 use crate::contract::{Gameplay, TestApi, TestApiResolve, TestFieldValue, UserIntent};
 use crate::scenario::*;
 use crate::state::*;
 
-use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use crate::driver::ScenarioResource;
-
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
 // ---------------------------------------------------------------------------
 // Invariants
@@ -435,7 +434,9 @@ pub(crate) fn check_custom_system(world: &mut World) {
             let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
 
             let holds_now = match (check, threshold) {
-                (crate::enums::CheckOp::Equals, Some(thr)) => (count as f64 - thr).abs() <= f64::EPSILON,
+                (crate::enums::CheckOp::Equals, Some(thr)) => {
+                    (count as f64 - thr).abs() <= f64::EPSILON
+                }
                 (crate::enums::CheckOp::Below, Some(thr)) => count as f64 <= thr,
                 (crate::enums::CheckOp::Above, Some(thr)) => count as f64 >= thr,
                 _ => false,
@@ -452,8 +453,8 @@ pub(crate) fn check_custom_system(world: &mut World) {
                         if entry.1.is_none() {
                             entry.1 = Some(frame);
                         }
-                } else if elapsed_s >= deadline && entry.1.is_none() {
-                    world.resource_mut::<Violations>().report(
+                    } else if elapsed_s >= deadline && entry.1.is_none() {
+                        world.resource_mut::<Violations>().report(
                         &inv.name,
                         &format!("query({:?})", query),
                             format!(

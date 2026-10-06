@@ -1,8 +1,8 @@
 //! Branch testing: run variant scenarios, compare reports.
 
-use bevy::app::App;
 use crate::driver::{run_scenario, PlaytestReport};
 use crate::scenario::{Scenario, ScenarioError};
+use bevy::app::App;
 
 // ---------------------------------------------------------------------------
 // Branch testing — fork the World, run variant scenarios, compare reports.

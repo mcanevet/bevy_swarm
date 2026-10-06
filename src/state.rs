@@ -4,7 +4,6 @@ use bevy::ecs::resource::Resource;
 use bevy::ecs::world::World;
 use std::collections::{HashMap, HashSet};
 
-
 // ---------------------------------------------------------------------------
 // Violations — dedup by (rule, target), ordered by first_frame
 // ---------------------------------------------------------------------------
@@ -88,7 +87,8 @@ pub struct PlaytestState {
     pub(crate) pending_gestures: std::collections::VecDeque<crate::bots::PendingGesture>,
     /// synthetic_pointer actionability gates: gestures whose click must
     /// be verified against the hover map one frame after release.
-    pub(crate) pending_actionability_checks: std::collections::VecDeque<crate::bots::PendingGesture>,
+    pub(crate) pending_actionability_checks:
+        std::collections::VecDeque<crate::bots::PendingGesture>,
     /// synthetic_keyboard bot: key names whose release is due next frame.
     pub(crate) pending_key_releases: Vec<(String, u64)>,
     /// Frozen-world oracle: consecutive frames with zero Gameplay-entity

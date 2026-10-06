@@ -6,9 +6,9 @@ use bevy::prelude::*;
 use serde::Deserialize;
 
 use crate::contract::{IntentSurface, ResetHooks, TestApi, HARNESS_TYPE_PATHS};
-use crate::scenario::{Scenario, ScenarioError, BotConfig};
-use crate::state::{PlaytestState, Violations};
 use crate::driver::ScenarioResource;
+use crate::scenario::{BotConfig, Scenario, ScenarioError};
+use crate::state::{PlaytestState, Violations};
 
 // ---------------------------------------------------------------------------
 // Contract diagnostics — detect contract pieces, warn on gaps
