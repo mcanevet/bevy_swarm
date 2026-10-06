@@ -852,3 +852,76 @@ fn action_log_structured_payloads_roundtrip() {
         Some(ReplayIntent::Wait)
     );
 }
+
+#[test]
+fn duplicate_invariant_names_rejected() {
+    let scen: Scenario = serde_json::from_str(
+        r#"{
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 0.2,
+        "invariants": [
+            {"name": "dup", "rule": "custom", "path": "TestApi.score"},
+            {"name": "dup", "rule": "custom", "path": "TestApi.score"}
+        ],
+        "setup": {}
+    }"#,
+    )
+    .unwrap();
+    let err = validate_scenario(&scen).unwrap_err();
+    assert!(
+        matches!(err, crate::scenario::ScenarioError::Rejected(ref m) if m.contains("duplicate invariant name")),
+        "got: {:?}",
+        err
+    );
+
+    // Same scenario with unique names validates fine.
+    let scen: Scenario = serde_json::from_str(
+        r#"{
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 0.2,
+        "invariants": [
+            {"name": "a", "rule": "custom", "path": "TestApi.score"},
+            {"name": "b", "rule": "custom", "path": "TestApi.score"}
+        ],
+        "setup": {}
+    }"#,
+    )
+    .unwrap();
+    assert!(validate_scenario(&scen).is_ok());
+}
+
+#[test]
+fn missing_contract_is_structured_error() {
+    let mut app = bevy::app::App::new();
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[],"setup":{}}"#,
+    )
+    .unwrap();
+    let err = run_scenario(&mut app, &scen).unwrap_err();
+    assert!(matches!(
+        err,
+        crate::scenario::ScenarioError::ContractMissing(_)
+    ));
+}
+
+#[test]
+fn unknown_reset_kind_is_structured_error() {
+    use crate::contract::ResetHooks;
+    use crate::contract::TestApi;
+    let mut app = bevy::app::App::new();
+    app.insert_resource(ResetHooks::default());
+    app.insert_resource(TestApi::default());
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[],
+            "setup":{"resets":[{"kind":"never_registered"}]}}"#,
+    )
+    .unwrap();
+    let err = run_scenario(&mut app, &scen).unwrap_err();
+    match err {
+        crate::scenario::ScenarioError::UnknownReset { kind, known } => {
+            assert_eq!(kind, "never_registered");
+            assert!(known.is_empty());
+        }
+        other => panic!("expected UnknownReset, got {:?}", other),
+    }
+}

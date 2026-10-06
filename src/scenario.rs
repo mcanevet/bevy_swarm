@@ -1,6 +1,7 @@
 //! Scenario schema: DTOs, defaults, and load-time validation.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 
 
@@ -338,15 +339,43 @@ pub struct ResetCall {
 // Load-time validation (reject, never run)
 // ---------------------------------------------------------------------------
 
+/// Errors rejecting a scenario before/at run start. Structured so
+/// callers can match on the category (e.g. missing contract pieces)
+/// instead of parsing strings.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScenarioError {
+    /// The scenario JSON is structurally invalid (bad field combos).
     Rejected(String),
+    /// The game does not implement the contract (missing TestApi).
+    ContractMissing(String),
+    /// The scenario references a reset kind the game never registered.
+    UnknownReset { kind: String, known: Vec<String> },
+    /// The scenario references a cheat kind the game never registered.
+    UnknownCheat { kind: String, known: Vec<String> },
+    /// A query-target component name failed to resolve.
+    InvalidComponent { name: String, reason: String },
 }
 
 impl std::fmt::Display for ScenarioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ScenarioError::Rejected(msg) => write!(f, "scenario rejected: {}", msg),
+            ScenarioError::ContractMissing(msg) => write!(f, "contract missing: {}", msg),
+            ScenarioError::UnknownReset { kind, known } => write!(
+                f,
+                "unknown reset kind '{}' — known kinds: {}",
+                kind,
+                if known.is_empty() { "(none registered)".to_string() } else { known.join(", ") }
+            ),
+            ScenarioError::UnknownCheat { kind, known } => write!(
+                f,
+                "unknown cheat kind '{}' — known kinds: {}",
+                kind,
+                if known.is_empty() { "(none registered)".to_string() } else { known.join(", ") }
+            ),
+            ScenarioError::InvalidComponent { name, reason } => {
+                write!(f, "invalid component '{}': {}", name, reason)
+            }
         }
     }
 }
@@ -370,6 +399,17 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             "unknown bot type '{}' (expected one of: {})",
             scenario.bot.bot_type, scenario.bot.bot_type
         )));
+    }
+    // Invariant names key the eventual-state and dedup tables —
+    // duplicates would silently shadow each other.
+    let mut seen = HashSet::new();
+    for rule in &scenario.invariants {
+        if !seen.insert(rule.name.as_str()) {
+            return Err(ScenarioError::Rejected(format!(
+                "duplicate invariant name '{}' — names must be unique",
+                rule.name
+            )));
+        }
     }
     for rule in &scenario.invariants {
         if rule.rule == crate::enums::InvariantRule::Custom {
