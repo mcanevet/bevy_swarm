@@ -176,6 +176,8 @@ pub fn minimize_crash(
             })
             .collect();
         let replay_scenario = Scenario {
+            tps: scenario.tps,
+            simulated_time: scenario.simulated_time,
             setup: scenario.setup.clone(),
             duration_s: scenario.duration_s,
             bot: BotConfig {
@@ -207,6 +209,8 @@ pub fn minimize_crash(
         })
         .collect();
     let regression_scenario = Scenario {
+        tps: scenario.tps,
+        simulated_time: scenario.simulated_time,
         setup: scenario.setup.clone(),
         duration_s: scenario.duration_s,
         bot: BotConfig {

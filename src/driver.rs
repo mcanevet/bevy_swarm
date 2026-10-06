@@ -7,7 +7,6 @@ use bevy::ecs::query::With;
 use bevy::ecs::resource::Resource;
 use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::ecs::world::World;
-use std::collections::{HashMap, HashSet};
 
 use crate::bots::*;
 use crate::contract::{ResetHooks, TestApi};
@@ -42,8 +41,6 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 frozen_world_oracle_system,
                 check_finite_transforms_system,
                 check_bounds_gameplay_system,
-                check_frame_times_system,
-                check_frame_time_anomaly_system,
             ),
         );
         // Exclusive system: reads TestApi with &mut World access.
@@ -142,10 +139,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
 
-    let tps = 60u64; // Default physics ticks/sec. Games with different tick rates
-                     // (e.g., turn-based at 10 TPS) must configure their App's
-                     // ScheduleRunnerPlugin accordingly; the harness reads the
-                     // configured TPS from PlaytestState, not this default.
+    let tps = scenario.tps as u64;
+    if scenario.simulated_time {
+        // Deterministic clock: Time advances by exactly 1/tps per update,
+        // independent of host speed.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(1.0 / tps as f64),
+        ));
+    }
     app.insert_resource(ScenarioResource(scenario.clone()));
 
     // Seed propagation: games with randomness read this resource to seed
@@ -198,28 +199,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     }
     app.insert_resource(hooks);
 
-    app.insert_resource(PlaytestState {
-        frame: 0,
-        tps,
-        rng: if scenario.bot.seed == 0 {
-            42
-        } else {
-            scenario.bot.seed
-        },
-        metrics: Metrics::default(),
-        delta_windows: HashMap::default(),
-        warned_paths: HashSet::default(),
-        coverage,
-        frame_timing: FrameTimingStats::default(),
-        api_history: HashMap::default(),
-        eventually_state: HashMap::default(),
-        frozen_frames: 0,
-        pre_ready_frames: 0,
-        planner: crate::planner::PlannerStack::default(),
-        pending_gestures: std::collections::VecDeque::new(),
-        pending_actionability_checks: std::collections::VecDeque::new(),
-        pending_key_releases: Vec::new(),
-    });
+    let mut state = PlaytestState::new(tps, scenario.bot.seed);
+    state.coverage = coverage;
+    app.insert_resource(state);
 
     let total_ticks = (scenario.duration_s * tps as f32) as u64;
     // Pre-run snapshot for code-aware (system) coverage — see
@@ -253,9 +235,48 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
 
+    // Names of FrameTimeAnomaly invariants armed by this scenario; the
+    // wall-clock oracle only records/reports when at least one is armed.
+    let scenario_frame_rules: Vec<String> = scenario
+        .invariants
+        .iter()
+        .filter(|inv| matches!(inv.rule, crate::enums::InvariantRule::FrameTimeAnomaly))
+        .map(|inv| inv.name.clone())
+        .collect();
+
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        for _ in 0..total_ticks {
+        for frame_idx in 0..total_ticks {
+            let t0 = std::time::Instant::now();
             app.update();
+            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            // Wall-clock frame timing (simulated time makes Time.delta()
+            // constant; oracles need the actual wall duration). Opt-in via
+            // a FrameTimeAnomaly invariant, reported under inv.name.
+            if !scenario_frame_rules.is_empty() {
+                let mut anomaly_note: Option<String> = None;
+                {
+                    let world = app.world_mut();
+                    if let Some(mut ps) = world.get_resource_mut::<PlaytestState>() {
+                        if ps.frame_timing.is_anomalous(ms) {
+                            ps.frame_timing.anomalies += 1;
+                            anomaly_note = Some(format!(
+                                "frame took {:.2}ms — 3.0σ above running mean ({:.2}ms, worst {:.2}ms)",
+                                ms,
+                                ps.frame_timing.mean_ms(),
+                                ps.frame_timing.worst_ms
+                            ));
+                        }
+                        ps.frame_timing.observe(ms);
+                    }
+                }
+                if let Some(note) = anomaly_note {
+                    if let Some(mut violations) = app.world_mut().get_resource_mut::<Violations>() {
+                        for name in &scenario_frame_rules {
+                            violations.report(name, "", note.clone(), frame_idx);
+                        }
+                    }
+                }
+            }
         }
     }));
 

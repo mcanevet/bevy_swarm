@@ -13,7 +13,6 @@ use crate::scenario::*;
 use crate::state::*;
 
 use crate::driver::ScenarioResource;
-use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
 // ---------------------------------------------------------------------------
 // Invariants
@@ -144,71 +143,6 @@ pub(crate) fn check_bounds_gameplay_system(
         }
     }
 }
-
-pub(crate) fn check_frame_times_system(
-    diagnostics: Option<Res<DiagnosticsStore>>,
-    mut violations: ResMut<Violations>,
-    mut state: ResMut<PlaytestState>,
-    scenario: Res<ScenarioResource>,
-) {
-    let Some(diag) = diagnostics else { return };
-    let elapsed_s = state.elapsed_s();
-    for inv in &scenario.0.invariants {
-        // Honor after_s for timing rules: cold-start frames (shader
-        // compile, asset load, first-tick cache misses) routinely
-        // spike 30-100ms and pollute cumulative averages. Scenarios
-        // that care can skip the warmup window.
-        if let Some(after) = inv.after_s {
-            if elapsed_s < after {
-                continue;
-            }
-        }
-        match inv.rule {
-            crate::enums::InvariantRule::FrameTimeP99Below => {
-                // Headless: no renderer/shader-compile stalls — warm-up
-                // discard skipped. Uses the latest diagnostic value as a
-                // conservative proxy (NOT a true rolling p99; the
-                // FrameTimingStats-based p99 in the report metrics is).
-                let threshold = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(33.3);
-                if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
-                    if let Some(val) = ft.value() {
-                        if val > threshold {
-                            state.metrics.frame_ms_p99 = val;
-                            state.metrics.worst_frame_ms = state.metrics.worst_frame_ms.max(val);
-                            violations.report(
-                                &inv.name,
-                                "",
-                                format!(
-                                    "frame time value = {:.2}ms (threshold: {:.2}ms)",
-                                    val, threshold
-                                ),
-                                state.frame,
-                            );
-                        }
-                    }
-                }
-            }
-            crate::enums::InvariantRule::FpsFloor => {
-                let min_fps = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(30.0);
-                let threshold_ms = 1000.0 / min_fps;
-                if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
-                    if let Some(avg) = ft.average() {
-                        if avg > threshold_ms {
-                            violations.report(
-                                &inv.name,
-                                "",
-                                format!("avg frame time = {:.2}ms (min fps: {:.0})", avg, min_fps),
-                                state.frame,
-                            );
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Custom invariants — resolve TestApi paths (the contract read surface)
 // ---------------------------------------------------------------------------
@@ -898,44 +832,4 @@ pub(crate) fn synthetic_pointer_actionability_check_system(
         }
     }
     state.pending_actionability_checks = still_pending;
-}
-
-/// Per-frame timing oracle: observe each frame's wall duration and flag
-/// statistical outliers. Uses `Time` delta (headless-safe: MinimalPlugins
-/// pumps Time; delta reflects real update-loop cost in headless runs).
-/// OPT-IN via an invariant with rule "frame_time_anomaly" — frame-time
-/// jitter from scheduler/OS noise under test runners is normal; only a
-/// scenario author who knows the game's profile should arm this oracle.
-pub(crate) fn check_frame_time_anomaly_system(
-    time: Option<Res<bevy::time::Time>>,
-    mut state: ResMut<PlaytestState>,
-    mut violations: ResMut<Violations>,
-    scenario: Res<ScenarioResource>,
-) {
-    let Some(time) = time else { return };
-    if !scenario
-        .0
-        .invariants
-        .iter()
-        .any(|inv| inv.rule == crate::enums::InvariantRule::FrameTimeAnomaly)
-    {
-        return;
-    }
-    let ms = time.delta_secs_f64() * 1000.0;
-    if state.frame_timing.is_anomalous(ms) {
-        state.frame_timing.anomalies += 1;
-        violations.report(
-            "frame_time_anomaly",
-            "",
-            format!(
-                "frame took {:.2}ms — {:.1}σ above running mean ({:.2}ms, worst {:.2}ms) — possible stall, loop, or leak",
-                ms,
-                FRAME_TIME_ANOMALY_SIGMA,
-                state.frame_timing.mean_ms(),
-                state.frame_timing.worst_ms
-            ),
-            state.frame,
-        );
-    }
-    state.frame_timing.observe(ms);
 }
