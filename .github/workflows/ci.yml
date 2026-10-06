@@ -19,8 +19,10 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
+      - name: Install Linux dependencies
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libudev-dev libasound2-dev libxcb-composite0-dev libwayland-dev
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96
+      - uses: dtolnay/rust-toolchain@1.97
       - run: cargo build
 
   audit:
@@ -66,6 +68,8 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
+      - name: Install Linux dependencies
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libudev-dev libasound2-dev libxcb-composite0-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build docs
