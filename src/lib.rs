@@ -27,10 +27,18 @@
 //!
 #[cfg(feature = "agent")]
 pub mod agent;
+pub mod bots;
+pub mod branch;
 pub mod contract;
+pub mod diagnostics;
+pub mod driver;
 pub mod enums;
 pub mod harness;
+pub mod minimize;
+pub mod oracles;
 pub mod planner;
+pub mod scenario;
+pub mod state;
 
 #[cfg(test)]
 mod verify;
