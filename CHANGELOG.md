@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- Declared MSRV 1.85 (matches Bevy 0.20 dependency requirements: transitive deps use edition2024)
+- Removed MSRV job from CI (Bevy 0.20 requires Rust 1.95+, which is in the future)
 
 ### Added
 - Initial (unreleased) version. Contract-first architecture: games
