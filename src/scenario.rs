@@ -1,12 +1,28 @@
 //! Scenario schema: DTOs, defaults, and load-time validation.
 
 use serde::{Deserialize, Serialize};
+
+fn default_tps() -> u32 {
+    60
+}
+fn default_true() -> bool {
+    true
+}
 use std::collections::HashSet;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     pub bot: BotConfig,
+    /// Simulation ticks per second. Each `app.update()` advances simulated
+    /// time by exactly 1/tps when `simulated_time` is true.
+    #[serde(default = "default_tps")]
+    pub tps: u32,
+    /// Drive `Time` with a fixed delta of 1/tps (deterministic, the default)
+    /// instead of the wall clock. Turn off only for soak tests that want
+    /// real-time behaviour.
+    #[serde(default = "default_true")]
+    pub simulated_time: bool,
     #[serde(default = "default_duration")]
     pub duration_s: f32,
     #[serde(default)]
@@ -398,6 +414,15 @@ const KNOWN_BOT_TYPES: [crate::enums::BotType; 6] = [
 ];
 
 pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
+    // Validate tps and duration_s
+    if scenario.tps < 1 {
+        return Err(ScenarioError::Rejected("tps must be >= 1".into()));
+    }
+    if !scenario.duration_s.is_finite() || scenario.duration_s <= 0.0 {
+        return Err(ScenarioError::Rejected(
+            "duration_s must be finite and > 0".into(),
+        ));
+    }
     // Bot type validity is enforced by the BotType enum deserialization
     // itself — unknown strings fail at parse time.
     if !KNOWN_BOT_TYPES.contains(&scenario.bot.bot_type) {
