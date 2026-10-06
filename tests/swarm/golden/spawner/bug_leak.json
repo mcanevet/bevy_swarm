@@ -1,0 +1,19 @@
+{
+  "status": "fail",
+  "scaffold": "adapter",
+  "seeds": [42],
+  "duration_s": 0.5,
+  "invariants": [
+    {
+      "name": "entity_count_bound",
+      "rule": "custom",
+      "query": { "with": ["LeakyEntity"] },
+      "check": "below",
+      "value": 15
+    }
+  ],
+  "must_report": [
+    { "rule": "entity_count_bound" }
+  ],
+  "must_not_report": []
+}

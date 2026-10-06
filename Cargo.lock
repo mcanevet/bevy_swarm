@@ -2782,6 +2782,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
+name = "fixture-runner"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_swarm",
+ "fixture_spawner",
+ "fixture_spinner",
+ "fixture_walker",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fixture_spawner"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "fixture_spinner"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "fixture_walker"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
