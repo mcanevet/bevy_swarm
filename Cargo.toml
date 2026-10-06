@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
-rust-version = "1.96"
 members = [
     ".",
     "fixtures/spinner",
@@ -26,6 +25,7 @@ serde_json = "1"
 [package]
 name = "bevy_swarm"
 version.workspace = true
+rust-version = "1.96"
 license.workspace = true
 edition.workspace = true
 description = "ECS-native headless playtesting harness for Bevy games — contract-driven bots, oracles, and crash minimization"
