@@ -1,13 +1,11 @@
-//! Headless in-process playtest harness for Bevy (port of Godot test_player.gd).
+//! Headless in-process playtest harness for Bevy.
 //!
-//! Lives in the `bevy_swarm` crate — games consume it as a path
-//! dependency instead of copying 1900 lines into src/. NO game-specific
-//! glue in this file.
+//! Games consume this crate as a dependency instead of copying the
+//! harness into src/. NO game-specific glue in this file.
 //!
-//! Verified against Bevy 0.20.0-rc.2 APIs via cargo check + cargo test.
-//! NOTE: in 0.20.0-rc.2, buffered events are `Message`s
+//! Requires Bevy 0.19 or later. Buffered events are `Message`s
 //! (`app.add_message`, `MessageWriter`/`MessageReader` in
-//! `bevy::ecs::message`) — `Event` is now the observer system.
+//! `bevy::ecs::message`); `Event` refers to the observer system.
 
 use crate::contract::{
     IntentSurface, ResetHooks, SurfaceVariant, TestApi, TestApiResolve, UserIntent,
@@ -32,7 +30,7 @@ use crate::contract::TestFieldValue;
 use crate::contract::HARNESS_TYPE_PATHS;
 
 // ---------------------------------------------------------------------------
-// Scenario schema (mirrors test_player.gd JSON)
+// Scenario schema (JSON-defined scenarios, see README)
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -1217,7 +1215,7 @@ fn check_finite_transforms_system(
 }
 
 /// Shared bounds predicate: x/y always; z only when a z bound is declared
-/// (the Godot original checked z for 3D nodes — don't silently drop it).
+/// (check z for 3D nodes — don't silently drop it).
 fn out_of_bounds(t: bevy::math::Vec3, inv: &Invariant) -> bool {
     let (min_x, max_x, min_y, max_y) = (
         inv.min_x.unwrap_or(-10000.0),
@@ -1345,9 +1343,9 @@ fn check_frame_times_system(
         match inv.rule {
             crate::enums::InvariantRule::FrameTimeP99Below => {
                 // Headless: no renderer/shader-compile stalls — warm-up
-                // discard skipped. Diagnostic::max() doesn't exist in
-                // 0.20-rc; we use latest value as a conservative proxy
-                // (NOT a true rolling p99 — see MAPPING-NOTES).
+                // discard skipped. Uses the latest diagnostic value as a
+                // conservative proxy (NOT a true rolling p99; the
+                // FrameTimingStats-based p99 in the report metrics is).
                 let threshold = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(33.3);
                 if let Some(ft) = diag.get(&FrameTimeDiagnosticsPlugin::FRAME_TIME) {
                     if let Some(val) = ft.value() {
@@ -2495,9 +2493,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     let crash_detected = result.is_err();
     let mut final_metrics = state.metrics;
     // Fold the Welford frame-timing worst and the ROLLING p99 into the
-    // report metrics (frame_ms_p99 is now a true nearest-rank p99 over
-    // the last 600 frames — see MAPPING-NOTES history: it was previously
-    // a latest-value proxy).
+    // report metrics (frame_ms_p99 is a true nearest-rank p99 over the
+    // last 600 frames, computed by FrameTimingStats).
     final_metrics.worst_frame_ms = final_metrics
         .worst_frame_ms
         .max(state.frame_timing.worst_ms);
@@ -2549,8 +2546,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
 // ---------------------------------------------------------------------------
 // Branch testing — fork the World, run variant scenarios, compare reports.
-// Bevy-exclusive: cloning a World is cheap; Godot ports pay dearly for
-// this. Enables non-destructive state-space exploration .
+// Bevy-exclusive: cloning a World is cheap. Enables non-destructive
+// state-space exploration.
 // ---------------------------------------------------------------------------
 
 /// Outcome of a single variant in a branch matrix: how many ticks ran
@@ -3181,9 +3178,7 @@ pub fn generate_invariants_from_calibration(snapshot: &CalibrationSnapshot) -> S
             // contract and make brittle invariants.
             let comps: Vec<String> = sig
                 .split('|')
-                .filter(|c| {
-                    !c.starts_with("bevy_") && !c.contains("harvestcycle::state::GameState")
-                })
+                .filter(|c| !c.starts_with("bevy_"))
                 .map(|s| short_type_name(s).to_string())
                 .collect();
             if comps.is_empty() {

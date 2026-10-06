@@ -2,10 +2,10 @@
 //!
 //! ## Usage in a game crate
 //!
-//! Add as a path dependency in your game's `Cargo.toml`:
+//! Add as a dev-dependency in your game's `Cargo.toml`:
 //! ```toml
 //! [dev-dependencies]
-//! bevy_swarm = { path = "../.agents/skills/playtest/crates/bevy_swarm" }
+//! bevy_swarm = "0.1"
 //! ```
 //!
 //! Then in your game's `src/test_conventions.rs` (or wherever you define
@@ -25,12 +25,6 @@
 //! - A `TestApi` resource that implements `TestApiResolve` (provided by your game)
 //! - `ResetHooks` and `IntentSurface` resources (provided by this crate's defaults)
 //!
-//! ## Sync direction
-//!
-//! This crate is the canonical source. Fixes to the harness happen here;
-//! games add it as a path dependency so they always get the latest version
-//! without copy-paste drift.
-
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod contract;
