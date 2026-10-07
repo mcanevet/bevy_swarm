@@ -113,7 +113,7 @@ fn replay_bot_emits_frame_indexed_intents() {
     let mut app = build_app();
     let rep = run_scenario(&mut app, &scen).unwrap();
     assert!(
-        rep.coverage.intents_emitted.contains_key("choice:idx=0"),
+        rep.coverage.intents_emitted.contains_key("choice"),
         "replay emitted no choice intents"
     );
     assert_eq!(
@@ -1877,9 +1877,15 @@ fn system_coverage_excludes_harness() {
     let before = crate::state::snapshot_systems(app.world_mut());
     app.update();
     let cov = crate::state::system_coverage(&before, app.world_mut());
-    // No bevy_swarm:: names in either list
-    assert!(cov.executed.iter().all(|n| !n.contains("bevy_swarm::")));
-    assert!(cov.registered.iter().all(|n| !n.contains("bevy_swarm::")));
+    // No harness-module names in either list
+    assert!(cov
+        .executed
+        .iter()
+        .all(|n| !crate::state::is_harness_system(n)));
+    assert!(cov
+        .registered
+        .iter()
+        .all(|n| !crate::state::is_harness_system(n)));
 }
 
 #[test]
