@@ -37,6 +37,8 @@ keywords = ["bevy", "gamedev", "testing", "playtesting", "ecs"]
 categories = ["game-development", "development-tools::testing"]
 
 [dependencies]
+# Deterministic entropy backend (optional, enabled by CLI)
+getrandom04 = { package = "getrandom", version = "0.4", optional = true }
 bevy = { workspace = true, features = [
     "bevy_picking",
     "bevy_window",
@@ -50,9 +52,14 @@ serde_json = { workspace = true }
 
 [features]
 default = []
+deterministic-entropy = ["getrandom04"]
 agent = ["bevy/bevy_remote", "bevy/bevy_render"]
 gamepad = ["bevy/gamepad"]
 render = ["bevy/bevy_render"]
+
+[dev-dependencies]
+# Z14 entropy tests: uuid uses getrandom 0.4 for v4 generation
+uuid = { version = "1", features = ["v4", "rng-getrandom"] }
 
 [badges]
 maintenance = { status = "actively-developed" }

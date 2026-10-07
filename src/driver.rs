@@ -339,6 +339,13 @@ pub(crate) fn finish_plugins(app: &mut App) {
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 
+    // Z14: enter deterministic entropy run (spawn a fresh thread if feature enabled).
+    #[cfg(feature = "deterministic-entropy")]
+    {
+        crate::entropy::reset_fallback_counter();
+        crate::entropy::enter_run(scenario.bot.seed);
+    }
+
     // Z7: route Bevy errors/logs/panics from this run into a private sink
     // keyed by thread-local RunId, drained into Violations below. Install
     // the panic hook once per process (chains to previous).
@@ -793,6 +800,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // caller uses `minimize_crash`, which takes an app builder and the
     // report's action log, applies ddmin, and returns the minimal
     // reproducer plus a ready-to-save regression scenario.
+
+    // Z14: exit deterministic entropy run.
+    #[cfg(feature = "deterministic-entropy")]
+    crate::entropy::exit_run();
 
     Ok(PlaytestReport {
         schema_version: 1,

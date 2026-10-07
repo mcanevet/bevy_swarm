@@ -1472,8 +1472,10 @@ name = "bevy_swarm"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "getrandom",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -4950,7 +4952,17 @@ dependencies = [
  "getrandom",
  "js-sys",
  "serde_core",
+ "uuid-rng-internal",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "uuid-rng-internal"
+version = "1.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41792896a8681503d839b89f31aa4b0d6f752b0054ae86bab412ea09dcb9fc6c"
+dependencies = [
+ "getrandom",
 ]
 
 [[package]]
