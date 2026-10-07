@@ -87,8 +87,12 @@ impl Violations {
                     .map(|end| &e.detail["[intent: ".len() + end + 2..])
                     .unwrap_or(e.detail.as_str());
                 let norm = crate::fingerprint::default_normalizer();
-                e.fingerprint =
-                    Some(norm.fingerprint("violation", &e.rule, std::slice::from_ref(&e.target), raw_detail));
+                e.fingerprint = Some(norm.fingerprint(
+                    "violation",
+                    &e.rule,
+                    std::slice::from_ref(&e.target),
+                    raw_detail,
+                ));
                 e.fingerprint_scheme = 1;
             }
         }
