@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- `sweep_seeds` + `SweepConfig`/`SweepReport` (E3): seed sweeps deduped by
+  fingerprint (lowest seed wins), early-stop at max_failures
+- Persisted regressions: `RegressionRecord` (versioned, one file per
+  fingerprint: regression_<fp>.json), `write_regression`,
+  `load_regressions` (record + legacy bare-Scenario forms),
+  `run_regressions_and_sweep`
 - Fingerprinting (T1): stable failure identity across seeds/frames/entities;
   `Normalizer` strips entity IDs, frame numbers, floats, hex addresses,
   seeds, paths; `Fingerprint` computed at report snapshot time (scheme 1)
