@@ -37,6 +37,7 @@ pub mod driver;
 pub mod enums;
 pub mod fingerprint;
 pub mod harness;
+pub mod headless;
 pub mod minimize;
 pub mod oracles;
 pub mod planner;
