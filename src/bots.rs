@@ -33,6 +33,7 @@ pub(crate) fn chaos_bot_system(
     mut violations: ResMut<Violations>,
     surface: Option<Res<IntentSurface>>,
     q: Query<Entity, With<Gameplay>>,
+    q_named: Query<(Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
     if scenario.0.bot.bot_type != crate::enums::BotType::Chaos {
@@ -116,8 +117,8 @@ pub(crate) fn chaos_bot_system(
             variant_name = "select".into();
             // Draw from live Gameplay entities; zero entities = surface
             // declaration mismatch (declared Select but nothing selectable)
-            let candidates: Vec<Entity> = q.iter().collect();
-            if candidates.is_empty() {
+            let all: Vec<Entity> = q.iter().collect();
+            if all.is_empty() {
                 violations.report(
                     "chaos_bot_config",
                     "",
@@ -127,10 +128,27 @@ pub(crate) fn chaos_bot_system(
                 );
                 return;
             }
-            let idx = (state.next_rand() % candidates.len() as u64) as usize;
-            UserIntent::Select {
-                target: candidates[idx],
-            }
+            // Prefer NAMED candidates: Select on an unnamed entity is
+            // recorded as entity bits only and is NOT replayable
+            // (counted via unreplayable_actions). Warn once per run.
+            let named: Vec<Entity> = q_named.iter().map(|(e, _)| e).collect();
+            let pool = if named.is_empty() {
+                if !state.warned_select_unnamed {
+                    state.warned_select_unnamed = true;
+                    violations.report(
+                        "chaos_select_unnamed",
+                        "",
+                        "Select targets have no Name — runs are not replayable; add Name to Gameplay entities"
+                            .to_string(),
+                        state.frame,
+                    );
+                }
+                &all
+            } else {
+                &named
+            };
+            let idx = (state.next_rand() % pool.len() as u64) as usize;
+            UserIntent::Select { target: pool[idx] }
         }
         SurfaceVariant::Wait => {
             variant_name = "wait".into();
@@ -195,10 +213,17 @@ pub(crate) fn replay_bot_system(
                     match q_named.iter().find(|(_, n)| n.as_str() == target) {
                         Some((entity, _)) => UserIntent::Select { target: entity },
                         None => {
-                            violations.set_context(format!(
-                                "replay:frame={},select-target-miss={}",
-                                entry.frame, target
-                            ));
+                            // Loud miss: a replay referencing a missing
+                            // target is a contract break, not a skip.
+                            violations.report(
+                                "replay_target_missing",
+                                target,
+                                format!(
+                                    "frame {}: no Gameplay entity named '{}'",
+                                    entry.frame, target
+                                ),
+                                state.frame,
+                            );
                             continue;
                         }
                     }
