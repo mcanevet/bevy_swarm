@@ -52,6 +52,7 @@ serde_json = { workspace = true }
 default = []
 agent = ["bevy/bevy_remote", "bevy/bevy_render"]
 gamepad = ["bevy/gamepad"]
+render = ["bevy/bevy_render"]
 
 [badges]
 maintenance = { status = "actively-developed" }

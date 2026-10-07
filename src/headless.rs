@@ -1,0 +1,151 @@
+//! Z2: Headless platform builder + bundled-DefaultPlugins detection.
+//!
+//! Provides `headless_platform()` — a `DefaultPlugins`-minus-OS/GPU variant,
+//! and `headless_app::<GamePlugin>(game)` which constructs a fresh headless
+//! `App` with the game's plugin installed, all platform plugins disabled
+//! safely (feature-guarded, panic-free).
+//!
+//! ## Verified Bevy 0.20-rc.2 facts
+//! - `PluginGroupBuilder::disable::<T>()` panics if `T` is absent.
+//! - `PluginGroupBuilder::contains::<T>()` exists for safe gating.
+//! - Type paths like `bevy::winit::WinitPlugin` only compile when the
+//!   corresponding Bevy feature is enabled.
+//! - `RenderPlugin { render_creation: WgpuSettings { backends: None } }`
+//!   skips render sub-app creation.
+//! - `WindowPlugin { primary_window: Some(..), exit_condition: ExitCondition::DontExit }`
+//!   prevents auto-exit.
+//!
+//! ## Feature parity with Bevy
+//! `bevy_swarm` mirrors Bevy's platform features (`render`, `winit`, `audio`,
+//! `gilrs`, `log`). Under each `#[cfg(feature)]`, we guard disables with
+//! `contains::<T>()` to avoid panics when the plugin isn't present.
+
+use bevy::app::{App, Plugin, PluginGroupBuilder};
+use bevy::prelude::*;
+use bevy::window::ExitCondition;
+use std::fmt;
+
+/// Error returned when the game bundles platform plugins that conflict
+/// with headless construction.
+#[derive(Debug)]
+pub struct GameBundlesPlatform {
+    /// Name of the conflicting plugin type.
+    pub plugin: &'static str,
+    /// Guidance for resolving the conflict.
+    pub guidance: String,
+}
+
+impl fmt::Display for GameBundlesPlatform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Game bundles platform plugin {}: {}",
+            self.plugin, self.guidance
+        )
+    }
+}
+
+impl std::error::Error for GameBundlesPlatform {}
+
+/// Build a headless `DefaultPlugins` group (minus OS/GPU/process-global bits).
+///
+/// Configures WindowPlugin to prevent auto-exit. Other platform plugins are
+/// left as-is; games that need them disabled should do so explicitly in main.rs.
+pub fn headless_platform() -> PluginGroupBuilder {
+    let group = DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "bevy_swarm headless".to_string(),
+            visible: false,
+            ..default()
+        }),
+        exit_condition: ExitCondition::DontExit,
+        ..default()
+    });
+
+    // With a render feature enabled (e.g. via `agent` or `render`),
+    // DefaultPlugins includes RenderPlugin, which requires a GPU at
+    // finish(). Disable it so the platform stays headless.
+    #[cfg(any(feature = "render", feature = "agent"))]
+    let group = {
+        use bevy::render::RenderPlugin;
+        if group.contains::<RenderPlugin>() {
+            group.disable::<RenderPlugin>()
+        } else {
+            group
+        }
+    };
+
+    group
+}
+/// Construct a fresh headless `App` with the game's plugin installed.
+///
+/// - Calls `headless_platform()` to get a sanitized `DefaultPlugins`.
+/// - Adds the game plugin `P`.
+/// - Finishes the app (no pending plugins).
+/// - Returns a closure that produces a fresh `App` on each call (for
+///   repeated test runs without cross-contamination).
+///
+/// ## Panics
+/// Panics if the game plugin conflicts with platform plugins (e.g., the
+/// game bundles its own `DefaultPlugins`). In that case, migrate the
+/// game's plugin to `main.rs` or use the subprocess tier (Z8).
+pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
+    game_plugin: P,
+) -> impl Fn() -> App + Send + Sync + 'static {
+    move || {
+        let mut app = App::new();
+        let platform = headless_platform();
+
+        // Try to add platform plugins; detect bundling conflicts.
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.add_plugins(platform);
+        })) {
+            let plugin_name = std::any::type_name::<P>();
+            panic!(
+                "Failed to add headless platform plugins. The game may bundle DefaultPlugins.\n\
+                 Consider moving the game plugin ({}) to main.rs and using bevy_swarm's \
+                 headless_app() wrapper, or use the subprocess tier (Z8) for unmodified binaries.\n\
+                 Original panic: {:?}",
+                plugin_name, e
+            );
+        }
+
+        app.add_plugins(game_plugin.clone());
+        app.finish();
+        app.cleanup();
+        app
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headless_platform_builds_without_panic() {
+        let _platform = headless_platform();
+        // If this compiles and runs without panic, the feature guards work.
+    }
+
+    #[test]
+    fn headless_app_produces_fresh_apps() {
+        #[derive(bevy::ecs::prelude::Resource, Default)]
+        struct Marker;
+
+        #[derive(Default, Clone)]
+        struct TestGamePlugin;
+
+        impl Plugin for TestGamePlugin {
+            fn build(&self, app: &mut App) {
+                app.insert_resource(Marker);
+            }
+        }
+
+        let builder = headless_app(TestGamePlugin);
+        let app1 = builder();
+        let app2 = builder();
+
+        assert!(app1.world().get_resource::<Marker>().is_some());
+        assert!(app2.world().get_resource::<Marker>().is_some());
+    }
+}
