@@ -192,9 +192,10 @@ impl SystemCoverage {
 }
 
 /// Snapshot every scheduled system's identity + last_run tick, keyed by
-/// "schedule::system". Requires the schedules to be initialized
-/// (app.finish() + app.cleanup() must have run) — the harness driver
-/// ensures this before scenarios start.
+/// "schedule::system". Schedules initialize lazily on first run OR via
+/// app.finish(); this function initializes any that have not run yet
+/// (see initialize() call below). run_scenario finishes plugin building
+/// before the first snapshot.
 pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
     let mut out = HashMap::new();
     // Take Schedules out of the world so each schedule can borrow the

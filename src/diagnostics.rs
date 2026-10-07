@@ -301,6 +301,8 @@ pub fn calibrate_world_opts(
     app: &mut App,
     opts: &CalibrationOptions,
 ) -> Result<CalibrationSnapshot, ScenarioError> {
+    crate::driver::finish_plugins(app);
+
     // Contract check: PlaytestPlugin must be added (its systems make
     // ScenarioResource observable by bots). A missing TestApi is NOT a
     // rejection — numeric percepts fall back to archetype envelopes only.

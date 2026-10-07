@@ -265,8 +265,27 @@ fn has_rule(
     }
 }
 
+/// Finish plugin building exactly like App::run would: App::update()
+/// does NOT call finish()/cleanup(), so plugins doing work in
+/// Plugin::finish never complete in test Apps. Idempotent: skips when
+/// the caller already finished.
+pub(crate) fn finish_plugins(app: &mut App) {
+    use bevy::app::PluginsState;
+    while app.plugins_state() == PluginsState::Adding {
+        bevy::tasks::tick_global_task_pools_on_main_thread();
+    }
+    if app.plugins_state() == PluginsState::Ready {
+        app.finish();
+        app.cleanup();
+    }
+}
+
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
+
+    // Finish plugin building exactly like App::run (Plugin::finish
+    // hooks: render app links, late registrations).
+    finish_plugins(app);
 
     // Ambiguity gate: configure all schedules to error on conflicts.
     if scenario.deny_ambiguities {
