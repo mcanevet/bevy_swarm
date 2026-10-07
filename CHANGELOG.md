@@ -63,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- CI `features` job printing `cargo tree -e features -i bevy` (feature
+  regressions visible)
+
+### Changed
+- Slimmed the Bevy dependency (H2): default-features = false with exactly
+  bevy_picking, bevy_window, bevy_camera, bevy_log, debug,
+  reflect_auto_register — no more forced render/audio/winit on consumers'
+  test builds; CI no longer installs libasound2/libudev/libxcb/libwayland
 - Determinism self-check (A4): `check_determinism` runs a scenario
   several times on fresh Apps and compares per-frame canonical state
   digests (TestApi surface, bit-exact Gameplay transforms, entity
