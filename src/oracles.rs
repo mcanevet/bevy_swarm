@@ -11,6 +11,7 @@ use bevy::prelude::{Name, Transform};
 use crate::contract::{Gameplay, TestFieldValue, UserIntent};
 use crate::scenario::*;
 use crate::state::*;
+use bevy::transform::components::GlobalTransform;
 
 use crate::driver::ScenarioResource;
 
@@ -30,6 +31,29 @@ pub(crate) fn check_finite_transforms_system(
                 "nodes_finite",
                 &format!("entity:{}", entity),
                 format!("non-finite translation ({}, {}, {})", t.x, t.y, t.z),
+                state.frame,
+            );
+        }
+        // Rotation/scale: NaN quaternions (normalising a zero vector)
+        // and zero/NaN scale are classic bugs the translation-only
+        // check missed.
+        if !transform.rotation.is_finite() || !transform.scale.is_finite() {
+            violations.report(
+                "nodes_finite",
+                &format!("entity:{}", entity),
+                format!(
+                    "non-finite rotation ({:?}) or scale ({:?})",
+                    transform.rotation, transform.scale
+                ),
+                state.frame,
+            );
+        } else if (transform.rotation.length_squared() - 1.0).abs() > 1e-4 {
+            // Separate rule: denormalized quats cost precision but are
+            // not NaN — games may legitimately ignore this one.
+            violations.report(
+                "nodes_rotation_unnormalized",
+                &format!("entity:{}", entity),
+                format!("rotation not normalized: {:?}", transform.rotation),
                 state.frame,
             );
         }
@@ -64,8 +88,8 @@ fn out_of_bounds(t: bevy::math::Vec3, inv: &Invariant) -> bool {
 /// per-tick poll affordable.
 #[allow(clippy::type_complexity)]
 pub(crate) fn check_bounds_gameplay_system(
-    q_changed: Query<(&Name, &Transform), (With<Gameplay>, Changed<Transform>)>,
-    q_all: Query<(&Name, &Transform), With<Gameplay>>,
+    q_changed: Query<(&Name, &GlobalTransform), (With<Gameplay>, Changed<GlobalTransform>)>,
+    q_all: Query<(&Name, &GlobalTransform), With<Gameplay>>,
     mut violations: ResMut<Violations>,
     state: Res<PlaytestState>,
     scenario: Res<ScenarioResource>,
@@ -89,15 +113,15 @@ pub(crate) fn check_bounds_gameplay_system(
             // are legitimately positioned and would flood reports.
             // Only re-check entities whose Transform changed this tick.
             for (name, transform) in q_changed.iter() {
-                if out_of_bounds(transform.translation, inv) {
+                if out_of_bounds(transform.translation(), inv) {
                     violations.report(
                         &inv.name,
                         name.as_ref(),
                         format!(
                             "out of bounds ({}, {}, {})",
-                            transform.translation.x,
-                            transform.translation.y,
-                            transform.translation.z
+                            transform.translation().x,
+                            transform.translation().y,
+                            transform.translation().z
                         ),
                         state.frame,
                     );
@@ -109,11 +133,11 @@ pub(crate) fn check_bounds_gameplay_system(
             // Existence + bounds both checked here; existence every tick,
             // bounds only on change.
             for target in &inv.targets {
-                let matched_changed: Vec<(&Name, &Transform)> = q_changed
+                let matched_changed: Vec<(&Name, &GlobalTransform)> = q_changed
                     .iter()
                     .filter(|(n, _)| n.as_str() == target)
                     .collect();
-                let matched_all: Vec<(&Name, &Transform)> =
+                let matched_all: Vec<(&Name, &GlobalTransform)> =
                     q_all.iter().filter(|(n, _)| n.as_str() == target).collect();
                 if matched_all.is_empty() {
                     violations.report(
@@ -125,15 +149,15 @@ pub(crate) fn check_bounds_gameplay_system(
                     );
                 }
                 for (name, transform) in matched_changed {
-                    if out_of_bounds(transform.translation, inv) {
+                    if out_of_bounds(transform.translation(), inv) {
                         violations.report(
                             &inv.name,
                             name.as_ref(),
                             format!(
                                 "out of bounds ({}, {}, {})",
-                                transform.translation.x,
-                                transform.translation.y,
-                                transform.translation.z
+                                transform.translation().x,
+                                transform.translation().y,
+                                transform.translation().z
                             ),
                             state.frame,
                         );
@@ -157,11 +181,27 @@ pub(crate) fn check_bounds_gameplay_system(
 ///
 /// Supported path forms:
 ///   `Resource:<TypePath>.<field>`     — Resource field (single-instance)
-///   `Component:<TypePath>#count`      — count of entities with component
-///   `Component:<TypePath>[N].<field>` — Nth entity's component field
-///   `Component:<TypePath>.<field>`    — first entity's component field
+///   `Component:<TypePath>#count`          — count of entities with component
+///   `Component:<TypePath>{<Name>}.<field>` — named entity's field (STABLE)
+///   `Component:<TypePath>@<id>.<field>`   — entity-id-addressed field
+///   `Component:<TypePath>[N].<field>`     — Nth of Entity-SORTED candidates
+///     (unstable across despawns; prefer {Name})
+///   `Component:<TypePath>.<field>`        — first Entity-sorted candidate
 ///
 /// Enums resolve to variant name as Text. Numeric leaf types → Numeric.
+/// Read an entity's Name without a pre-built query (World APIs are
+/// enough — avoids init requirements inside &World contexts).
+fn name_ref(entity: bevy::ecs::world::EntityRef<'_>) -> Option<&'_ str> {
+    entity.get::<Name>().map(|n| n.as_str())
+}
+
+/// Component-percept entity selector (see resolve_world_percept).
+enum Selector<'a> {
+    Name(&'a str),
+    StableId(u64),
+    Index(usize, bool),
+}
+
 pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue> {
     use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::reflect::GetPath;
@@ -209,31 +249,92 @@ pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue
             }
             return Some(TestFieldValue::Numeric(count as f64));
         }
-        // Field: "Component:<TypePath>.<field>" or "Component:<TypePath>[<i>].<field>"
-        let (type_path, idx, field) = if let Some(bracket_end) = rest.find('[') {
+        // Field addressing forms:
+        //   "Component:<TypePath>{<Name>}.<field>" — STABLE: entity by Name
+        //   "Component:<TypePath>@<stable_id>.<field>" — stable id (I1)
+        //   "Component:<TypePath>[<i>].<field>" — index into Entity-sorted
+        //     candidates (UNSTABLE across despawns; one-time warning)
+        //   "Component:<TypePath>.<field>" — first of Entity-sorted candidates
+        let (type_path, selector, field) = if let Some(brace) = rest.find('{') {
+            // {Name} addressing
+            let close = rest[brace..].find('}')? + brace;
+            let name = &rest[brace + 1..close];
+            let field = rest.get(close + 1..)?.strip_prefix('.')?;
+            (&rest[..brace], Selector::Name(name), field)
+        } else if let Some(at) = rest.find('@') {
+            // @<stable_id> addressing (requires Name for now — I1 maps
+            // stable ids; fall through to None when unmatched)
+            let field = rest[at + 1..].split_once('.')?;
+            let sid: u64 = rest[at + 1..rest.find('.').unwrap_or(rest.len())]
+                .parse()
+                .ok()?;
+            (&rest[..at], Selector::StableId(sid), field.1)
+        } else if let Some(bracket_end) = rest.find('[') {
             let idx_start = bracket_end + 1;
             let idx_end = rest[idx_start..].find(']')? + idx_start;
             let idx: usize = rest[idx_start..idx_end].parse().ok()?;
             let field = rest.get(idx_end + 1..)?.strip_prefix('.')?;
-            (&rest[..bracket_end], idx, field)
+            (&rest[..bracket_end], Selector::Index(idx, true), field)
         } else {
             let dot_idx = rest.find('.')?;
-            (&rest[..dot_idx], 0usize, &rest[dot_idx + 1..])
+            (
+                &rest[..dot_idx],
+                Selector::Index(0, false),
+                &rest[dot_idx + 1..],
+            )
         };
 
         let comp_id = comp_id_for(type_path)?;
         let reflect_component = registry
             .get_with_short_type_path(type_path)?
             .data::<bevy::ecs::reflect::ReflectComponent>()?;
-        let mut seen = 0usize;
-        for entity in world.iter_entities() {
-            if entity.contains_id(comp_id) {
-                if seen == idx {
-                    let reflect = reflect_component.reflect(entity)?;
-                    let val = reflect.reflect_path(field).ok()?;
-                    return Some(value_from_reflect(val));
+
+        // Collect candidates SORTED by Entity — iter_entities() order
+        // changes with spawns/despawns, so a positional index would
+        // silently read different entities over time. Entity has a
+        // stable total order.
+        let mut candidates: Vec<bevy::ecs::entity::Entity> = world
+            .iter_entities()
+            .filter(|e| e.contains_id(comp_id))
+            .map(|e| e.id())
+            .collect();
+        candidates.sort();
+
+        match selector {
+            Selector::Name(name) => {
+                // Read the Name component directly via reflection-free
+                // lookup: world.get() with the component's ReflectComponent.
+                for entity in &candidates {
+                    let matches_name = world
+                        .get_entity(*entity)
+                        .ok()
+                        .and_then(|e| name_ref(e))
+                        .is_some_and(|n| n == name);
+                    if matches_name {
+                        let Ok(entity_ref) = world.get_entity(*entity) else {
+                            continue;
+                        };
+                        let reflect = reflect_component.reflect(entity_ref)?;
+                        let val = reflect.reflect_path(field).ok()?;
+                        return Some(value_from_reflect(val));
+                    }
                 }
-                seen += 1;
+            }
+            Selector::StableId(_sid) => {
+                // Stable-ID addressing deferred to I1 (requires stable ID
+                // infrastructure). For now, this selector form is a no-op.
+            }
+            Selector::Index(idx, _warn) => {
+                // Both [N] and the implicit first form use the sorted
+                // candidate list; the caller-visible warning about index
+                // instability is emitted where the report is built.
+                if let Some(entity) = candidates.get(idx) {
+                    if let Ok(entity_ref) = world.get_entity(*entity) {
+                        let reflect = reflect_component.reflect(entity_ref)?;
+                        let val = reflect.reflect_path(field).ok()?;
+                        return Some(value_from_reflect(val));
+                    }
+                }
             }
         }
         return None;
@@ -731,7 +832,7 @@ pub(crate) fn intent_audit_log_system(
 /// waiting between turns is by design, not a soft-lock.
 /// Zero contract: pure ECS change detection, O(changes) per tick.
 pub(crate) fn frozen_world_oracle_system(
-    q_changed: Query<(), (With<crate::contract::Gameplay>, Changed<Transform>)>,
+    q_changed: Query<(), (With<crate::contract::Gameplay>, Changed<GlobalTransform>)>,
     q_turn_based: Query<(), With<crate::contract::TurnBased>>,
     mut state: ResMut<PlaytestState>,
     mut violations: ResMut<Violations>,

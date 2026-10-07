@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot rebuild the App — use `minimize_failure` with an app builder)
 
 ### Fixed
+- Bounds/frozen-world/pursuit oracles read GLOBAL Transform (children of
+  moved parents were checked in parent-relative space: false passes and
+  wrong steering)
+- Finite check covers rotation and scale (NaN quats, NaN/zero scale),
+  plus a separate `nodes_rotation_unnormalized` rule for denormalized
+  quaternions
+- run_scenario/calibrate_world finish plugin building (Plugin::finish
+  hooks now run — App::update alone never called finish/cleanup)
 - ViolationEntry gains  (detail at most recent occurrence);
    stays anchored to the FIRST occurrence (reproduction anchor)
 - System coverage excludes harness-owned systems (bevy_swarm::) to avoid
@@ -55,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- `Component:<Type>{<Name>}.<field>` percept addressing — stable across
+  despawns; `[N]` indices now sort candidates by Entity (documented as
+  unstable; prefer {Name}); stable-id addressing reserved for I1
 - `resolve_path(world, path)` — one path-resolution entry point: the
   registered type-erased resolver (if any) first, then world percepts
   (Resource:/Component: grammar)

@@ -6,7 +6,7 @@ use bevy::ecs::query::With;
 use bevy::ecs::system::{Query, Res, ResMut};
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::Camera;
-use bevy::prelude::{GlobalTransform, Name, Transform};
+use bevy::prelude::{GlobalTransform, Name};
 
 use crate::contract::{Gameplay, IntentSurface, SurfaceVariant, UserIntent};
 use crate::driver::ScenarioResource;
@@ -427,7 +427,7 @@ pub(crate) fn pursuit_bot_system(
     state: ResMut<PlaytestState>,
     mut violations: ResMut<Violations>,
     mut intents: MessageWriter<UserIntent>,
-    q: Query<(&Name, &Transform), With<Gameplay>>,
+    q: Query<(&Name, &GlobalTransform), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
     let bot = &scenario.0.bot;
@@ -455,8 +455,8 @@ pub(crate) fn pursuit_bot_system(
         return;
     };
 
-    let dx = target_t.translation.x - agent_t.translation.x;
-    let dy = target_t.translation.y - agent_t.translation.y;
+    let dx = target_t.translation().x - agent_t.translation().x;
+    let dy = target_t.translation().y - agent_t.translation().y;
     if dx.abs() > bot.deadzone || dy.abs() > bot.deadzone {
         violations.set_context(format!(
             "pursuit:agent={} target={} dist=({:.1},{:.1})",
