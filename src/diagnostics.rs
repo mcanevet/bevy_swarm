@@ -405,8 +405,8 @@ pub fn generate_invariants_from_calibration(snapshot: &CalibrationSnapshot) -> S
                     "with": comps,
                     "without": []
                 },
-                "check": "above",
-                "value": (*min - 1) as f64,
+                "check": "ge",
+                "value": *min as f64,
                 "eventually_s": null
             }));
         }

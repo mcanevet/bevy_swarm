@@ -455,15 +455,14 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
     }
     for rule in &scenario.invariants {
         if rule.rule == crate::enums::InvariantRule::Custom {
-            let check = rule.check.unwrap_or(crate::enums::CheckOp::Below);
-            if check != crate::enums::CheckOp::Equals {
-                if let Some(v) = &rule.value {
-                    if !v.is_number() {
-                        return Err(ScenarioError::Rejected(format!(
-                            "invariant '{}' uses check='{}' with a non-numeric value ({}) — use check:'equals' or a numeric threshold",
-                            rule.name, check, v
-                        )));
-                    }
+            let check = rule.check.unwrap_or(crate::enums::CheckOp::Le);
+            // Text comparison: only Equals/Ne accept string values.
+            if let Some(v) = &rule.value {
+                if !v.is_number() && check.holds_text("", "").is_none() {
+                    return Err(ScenarioError::Rejected(format!(
+                        "invariant '{}' uses check='{}' with a non-numeric value ({}) — use check:'equals'/'ne' or a numeric threshold",
+                        rule.name, check, v
+                    )));
                 }
             }
         }

@@ -364,16 +364,12 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 );
                 continue;
             };
-            let check = inv.check.unwrap_or(crate::enums::CheckOp::Above);
+            let check = inv.check.unwrap_or(crate::enums::CheckOp::Ge);
             let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
 
-            let holds_now = match (check, threshold) {
-                (crate::enums::CheckOp::Equals, Some(thr)) => {
-                    (count as f64 - thr).abs() <= f64::EPSILON
-                }
-                (crate::enums::CheckOp::Below, Some(thr)) => count as f64 <= thr,
-                (crate::enums::CheckOp::Above, Some(thr)) => count as f64 >= thr,
-                _ => false,
+            let holds_now = match threshold {
+                Some(thr) => check.holds(count as f64, thr),
+                None => false,
             };
 
             match inv.eventually_s {
@@ -405,16 +401,9 @@ pub(crate) fn check_custom_system(world: &mut World) {
                             &inv.name,
                             &format!("query({:?})", query),
                             format!(
-                                "query count {} {} {} (threshold: {})",
+                                "query count {} violates {} {}",
                                 count,
-                                if check == crate::enums::CheckOp::Equals {
-                                    "!="
-                                } else if check == crate::enums::CheckOp::Below {
-                                    ">"
-                                } else {
-                                    "<"
-                                },
-                                threshold.unwrap_or(0.0),
+                                check.symbol(),
                                 threshold.unwrap_or(0.0)
                             ),
                             frame,
@@ -500,17 +489,11 @@ pub(crate) fn check_custom_system(world: &mut World) {
         }
 
         let Some(current) = numeric else { continue };
-        let check = inv.check.unwrap_or(crate::enums::CheckOp::Below);
+        let check = inv.check.unwrap_or(crate::enums::CheckOp::Le);
         let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
         if let Some(thr) = threshold {
             // Shared predicate evaluation for both modes.
-            let holds_now = if check == crate::enums::CheckOp::Equals {
-                (current - thr).abs() <= f64::EPSILON
-            } else if check == crate::enums::CheckOp::Below {
-                current <= thr
-            } else {
-                current >= thr // "above"
-            };
+            let holds_now = check.holds(current, thr);
             match inv.eventually_s {
                 // Eventually-mode: satisfied on first hold; report only at
                 // deadline expiry if never held. Semantics mirror
@@ -620,11 +603,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
             // `check` means an unconditional policy rule.
             let when_holds = if let (Some(check), Some(when_val)) = (&inv.check, &inv.value) {
                 if let (Some(cur), Some(thr)) = (numeric, when_val.as_f64()) {
-                    match check {
-                        crate::enums::CheckOp::Below => cur < thr,
-                        crate::enums::CheckOp::Above => cur > thr,
-                        crate::enums::CheckOp::Equals => (cur - thr).abs() <= f64::EPSILON,
-                    }
+                    check.holds(cur, thr)
                 } else {
                     // Text WHEN: string equality against the field value.
                     string_val
@@ -643,13 +622,9 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     .test_api_paths_read
                     .insert(req_path.clone());
                 let violated = match (req_num, req_value.as_f64()) {
-                    (Some(v), Some(thr)) => match req_check {
-                        crate::enums::CheckOp::Below => v > thr,
-                        crate::enums::CheckOp::Above => v < thr,
-                        crate::enums::CheckOp::Equals => (v - thr).abs() > f64::EPSILON,
-                    },
+                    (Some(v), Some(thr)) => !req_check.holds(v, thr),
                     _ => match (&req_str, req_value.as_str()) {
-                        (Some(s), Some(exp)) => s != exp,
+                        (Some(s), Some(exp)) => !req_check.holds_text(s, exp).unwrap_or(true),
                         _ => false,
                     },
                 };

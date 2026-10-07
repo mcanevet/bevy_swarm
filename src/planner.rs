@@ -51,7 +51,7 @@ pub enum GoalNode {
     Primitive {
         path: String,
         /// "below" | "above" | "equals" (numeric), "equals" (text)
-        check: String,
+        check: crate::enums::CheckOp,
         value: serde_json::Value,
         #[serde(default)]
         emit: Vec<ReplayIntent>,
@@ -142,7 +142,7 @@ impl PlannerStack {
         self.0.iter().rev().find_map(|e| match &e.goal {
             GoalNode::Primitive {
                 path, check, value, ..
-            } => Some((path.clone(), check.clone(), value.to_string())),
+            } => Some((path.clone(), check.to_string(), value.to_string())),
             _ => None,
         })
     }
@@ -247,23 +247,23 @@ fn replay_ctx(ri: &ReplayIntent) -> String {
 }
 
 /// Check whether a primitive goal's TestApi path satisfies its check.
-fn primitive_achieved(api: &TestApi, path: &str, check: &str, value: &serde_json::Value) -> bool {
+fn primitive_achieved(
+    api: &TestApi,
+    path: &str,
+    check: &crate::enums::CheckOp,
+    value: &serde_json::Value,
+) -> bool {
     match api.resolve(path) {
-        Some(TestFieldValue::Numeric(n)) => {
-            if let Some(thr) = value.as_f64() {
-                match check {
-                    "below" => n < thr,
-                    "above" => n > thr,
-                    "equals" => (n - thr).abs() <= f64::EPSILON,
-                    _ => false,
-                }
-            } else {
-                false
-            }
-        }
-        Some(TestFieldValue::Text(s)) => {
-            matches!(value, serde_json::Value::String(expect) if check == "equals" && *s == *expect)
-        }
+        Some(TestFieldValue::Numeric(n)) => value
+            .as_f64()
+            .map(|thr| check.holds(n, thr))
+            .unwrap_or(false),
+        Some(TestFieldValue::Text(s)) => match value {
+            serde_json::Value::String(expect) => check
+                .holds_text(s.as_str(), expect.as_str())
+                .unwrap_or(false),
+            _ => false,
+        },
         None => false,
     }
 }
