@@ -19,8 +19,6 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libudev-dev libasound2-dev libxcb-composite0-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97
       - run: cargo build
@@ -33,12 +31,17 @@ jobs:
         with:
           command: check
 
+  features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Print enabled Bevy features (H2)
+        run: cargo tree -e features -i bevy
+
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libudev-dev libasound2-dev libxcb-composite0-dev libwayland-dev
-      
       - uses: actions/checkout@v4
       
       - name: Install Rust
@@ -68,8 +71,6 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libudev-dev libasound2-dev libxcb-composite0-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build docs
