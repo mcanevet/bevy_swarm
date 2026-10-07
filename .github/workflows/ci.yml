@@ -42,6 +42,8 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     steps:
+      - name: Install Linux dependencies (bevy_render via agent feature)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build + test (agent feature)
