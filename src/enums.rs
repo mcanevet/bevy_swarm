@@ -46,7 +46,11 @@ impl From<BotType> for String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Persona {
+    /// Default: uniform sampling over the declared surface.
     #[default]
+    Uniform,
+    /// Reserved for F1 (coverage-guided curiosity); currently behaves
+    /// as uniform.
     Curious,
     Aggressive,
     Idle,
@@ -55,6 +59,7 @@ pub enum Persona {
 impl std::fmt::Display for Persona {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Persona::Uniform => write!(f, "uniform"),
             Persona::Curious => write!(f, "curious"),
             Persona::Aggressive => write!(f, "aggressive"),
             Persona::Idle => write!(f, "idle"),

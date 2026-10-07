@@ -81,6 +81,11 @@ struct PlannerEntry {
     deadline: Option<u64>,
     /// Tick this entry was activated (for diagnostics).
     activated: u64,
+    /// Cursor into the primitive's `emit` list: the pursuit sequence
+    /// always starts at emit[0] when a primitive activates (previously
+    /// indexed by the ABSOLUTE frame, so the first intent depended on
+    /// when the goal was activated).
+    emit_cursor: usize,
 }
 
 /// Persistent planner state stored in PlaytestState across ticks. Keeping
@@ -114,6 +119,7 @@ impl PlannerStack {
             snap,
             deadline,
             activated: frame,
+            emit_cursor: 0,
         });
     }
 
@@ -236,6 +242,19 @@ fn replay_intent_to_user(ri: &ReplayIntent) -> Option<UserIntent> {
 }
 
 /// Coverage-variant name for an emitted replay intent.
+fn replay_variant(ri: &ReplayIntent) -> &'static str {
+    match ri {
+        ReplayIntent::Move { .. } => "move",
+        ReplayIntent::Choice { .. } => "choice",
+        ReplayIntent::Axis { .. } => "axis",
+        ReplayIntent::Select { .. } => "select",
+        ReplayIntent::Wait => "wait",
+    }
+}
+
+/// Detailed per-intent string (kept for violation CONTEXT only —
+/// coverage keys stay variant-level, comparable across bots).
+#[allow(dead_code)]
 fn replay_ctx(ri: &ReplayIntent) -> String {
     match ri {
         ReplayIntent::Move { dir } => format!("move:x={:.2},y={:.2}", dir.0, dir.1),
@@ -281,9 +300,20 @@ pub fn planner_bot_system(world: &mut World) {
     if !is_planner {
         return;
     }
-    let (planner_stack, frame, tps) = {
+    let (planner_stack, frame, tps, fire_every) = {
         let state = world.resource::<PlaytestState>();
-        (state.planner.clone(), state.frame, state.tps)
+        let rate = world
+            .resource::<ScenarioResource>()
+            .0
+            .bot
+            .input_rate_hz
+            .max(1) as u64;
+        (
+            state.planner.clone(),
+            state.frame,
+            state.tps,
+            (state.tps / rate).max(1),
+        )
     };
     let Some(goal_root) = world.resource::<ScenarioResource>().0.bot.goals.clone() else {
         world.resource_mut::<Violations>().report(
@@ -335,19 +365,25 @@ pub fn planner_bot_system(world: &mut World) {
             }
         }
 
-        let Some(entry) = planner.0.last() else { break };
-        match &entry.goal {
+        if planner.0.is_empty() {
+            break;
+        }
+        // Dispatch on the top entry by index (avoids holding a borrow
+        // of planner across the mutable cursor update below).
+        let top_idx = planner.0.len() - 1;
+        let entry_kind = planner.0[top_idx].goal.clone();
+        match &entry_kind {
             GoalNode::Seq { children } => {
-                if entry.child >= children.len() {
+                if planner.0[top_idx].child >= children.len() {
                     pop_success(&mut planner, &api, &mut violations, frame);
                 } else {
-                    let child = children[entry.child].clone();
+                    let child = children[planner.0[top_idx].child].clone();
                     planner.0.last_mut().unwrap().child += 1;
                     planner.push(&child, &api, frame, None);
                 }
             }
             GoalNode::Any { children, max_s } => {
-                if entry.child >= children.len() {
+                if planner.0[top_idx].child >= children.len() {
                     let tr = planner.trace();
                     violations.report(
                         "planner_any_exhausted",
@@ -360,7 +396,7 @@ pub fn planner_bot_system(world: &mut World) {
                     );
                     break;
                 }
-                let child = children[entry.child].clone();
+                let child = children[planner.0[top_idx].child].clone();
                 let dl = frame + (max_s * tps as f32) as u64;
                 planner.0.last_mut().unwrap().child += 1;
                 planner.push(&child, &api, frame, Some(dl));
@@ -369,7 +405,7 @@ pub fn planner_bot_system(world: &mut World) {
                 // Push the child once (child == 0); afterwards this frame
                 // sits under the active child until it completes or the
                 // deadline sweep abandons it.
-                if entry.child == 0 {
+                if planner.0[top_idx].child == 0 {
                     let c = child.as_ref().clone();
                     let dl = frame + (max_s * tps as f32) as u64;
                     planner.0.last_mut().unwrap().child = 1;
@@ -389,12 +425,18 @@ pub fn planner_bot_system(world: &mut World) {
                     pop_success(&mut planner, &api, &mut violations, frame);
                     goals_done += 1;
                 } else {
-                    // Unachieved: emit pursuit intents (one per tick).
-                    if !emit.is_empty() {
-                        let idx = (frame as usize) % emit.len();
+                    // Unachieved: emit pursuit intents, PACED by
+                    // bot.input_rate_hz (same fire_every computation as
+                    // chaos — previously fired every frame at tps rate),
+                    // sequenced by a per-entry cursor starting at emit[0].
+                    let due = frame.is_multiple_of(fire_every);
+                    let cursor = planner.0.last().unwrap().emit_cursor;
+                    if due && !emit.is_empty() && cursor < emit.len() {
+                        let idx = cursor;
+                        planner.0.last_mut().unwrap().emit_cursor += 1;
                         let ri = &emit[idx];
                         if let Some(intent) = replay_intent_to_user(ri) {
-                            let ctx = replay_ctx(ri);
+                            let ctx = replay_variant(ri).to_string();
                             emitted = Some((intent, ctx, planner.trace()));
                         }
                     }
@@ -455,6 +497,7 @@ pub fn planner_unfinished_check(
         first_frame: top.activated,
         last_frame: state.frame,
         count: 1,
+        last_detail: String::new(),
         detail: format!(
             "[goal {}] run ended with goal unfinished: {} {} {} never became true — pursued but never achieved",
             trace, ppath, pcheck, pvalue

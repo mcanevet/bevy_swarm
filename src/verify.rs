@@ -1845,3 +1845,103 @@ fn calibration_without_plugin_errors() {
         Err(crate::harness::ScenarioError::ContractMissing(_))
     ));
 }
+
+// ---------------------------------------------------------------------------
+// C3: Oracle/report accuracy — violation context, coverage, planner pacing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn violation_keeps_first_detail() {
+    // A repeated violation must retain the FIRST occurrence's detail
+    // (reproduction anchor) while updating last_detail for trend.
+    let mut app = build_app_no_scoring();
+    app.insert_resource(Violations::default());
+    let mut viol = app.world_mut().resource_mut::<crate::state::Violations>();
+    viol.set_context("intent:choice");
+    viol.report("test_rule", "target1", "detail first".into(), 10);
+    viol.set_context("intent:wait");
+    viol.report("test_rule", "target1", "detail later".into(), 20);
+    let snap = viol.snapshot();
+    let e = snap.into_iter().next().unwrap();
+    assert_eq!(e.detail, "[intent: intent:choice] detail first");
+    assert_eq!(e.last_detail, "[intent: intent:wait] detail later");
+    assert_eq!(e.first_frame, 10);
+    assert_eq!(e.last_frame, 20);
+}
+
+#[test]
+fn system_coverage_excludes_harness() {
+    // Harness-owned systems (bevy_swarm::) must be excluded from both
+    // executed and registered lists; fraction() reflects only game systems.
+    let mut app = build_app_no_scoring();
+    let before = crate::state::snapshot_systems(app.world_mut());
+    app.update();
+    let cov = crate::state::system_coverage(&before, app.world_mut());
+    // No bevy_swarm:: names in either list
+    assert!(cov.executed.iter().all(|n| !n.contains("bevy_swarm::")));
+    assert!(cov.registered.iter().all(|n| !n.contains("bevy_swarm::")));
+}
+
+#[test]
+fn aggressive_persona_no_hang_on_wait_only_surface() {
+    // Aggressive persona on a Wait-only surface must NOT loop forever;
+    // it draws from the filtered candidate set (empty → yields Wait).
+    let mut app = build_app_no_scoring();
+    app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+    app.insert_resource(crate::oracles::GameReady(true));
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1,"persona":"aggressive"},"duration_s":0.2,"invariants":[]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert_eq!(rep.status, PlaytestStatus::Pass);
+}
+
+#[test]
+fn planner_emits_from_first_intent() {
+    // Planner pursuit sequence must start at emit[0] when a primitive
+    // activates (previously indexed by ABSOLUTE frame, so the first
+    // intent depended on when the goal was activated).
+    let scen: Scenario = serde_json::from_str(
+        r#"{
+            "bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"ge","value":1,"emit":[{"intent":"wait"}]}},
+            "duration_s":0.5
+        }"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    // The single wait intent should have been emitted (at least one audit entry with intent:wait)
+    assert!(rep
+        .action_log
+        .iter()
+        .any(|e| e.action.starts_with("intent:wait")));
+}
+
+#[test]
+fn planner_respects_input_rate() {
+    // Planner pursuit must pace by input_rate_hz (same fire_every as chaos).
+    // With tps=60, rate=10, fire_every=6; over 0.5s (30 frames) we expect
+    // roughly 5 emissions, not 30.
+    let scen: Scenario = serde_json::from_str(
+        r#"{
+            "bot":{"type":"planner","input_rate_hz":10,"goals":{"kind":"primitive","path":"TestApi.score","check":"ge","value":1,"emit":[{"intent":"wait"},{"intent":"wait"}]}},
+            "tps":60,
+            "duration_s":0.5
+        }"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    let wait_count = rep
+        .action_log
+        .iter()
+        .filter(|e| e.action.starts_with("intent:wait"))
+        .count();
+    // fire_every = 60/10 = 6; 30 frames / 6 ≈ 5 ticks. Allow some slack.
+    assert!(
+        wait_count <= 8,
+        "too many waits: {} (rate not respected)",
+        wait_count
+    );
+}

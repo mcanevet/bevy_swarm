@@ -78,14 +78,27 @@ pub(crate) fn chaos_bot_system(
         );
         return;
     }
-    let mut roll = state.next_rand() % surface.0.len() as u64;
-    // Aggressive persona: never Wait (loop — a single reroll can land
-    // on Wait again when the surface is small).
-    if persona == crate::enums::Persona::Aggressive {
-        while matches!(&surface.0[roll as usize], SurfaceVariant::Wait) {
-            roll = state.next_rand() % surface.0.len() as u64;
+    let roll_uniform = (state.next_rand() % surface.0.len() as u64) as usize;
+    // Aggressive persona: never Wait — draw from the FILTERED candidate
+    // set (no reject loops anywhere; a Wait-only surface still yields
+    // Wait rather than hanging).
+    let roll = if persona == crate::enums::Persona::Aggressive {
+        let candidates: Vec<usize> = surface
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !matches!(v, SurfaceVariant::Wait))
+            .map(|(i, _)| i)
+            .collect();
+        if candidates.is_empty() {
+            roll_uniform
+        } else {
+            candidates[(state.next_rand() % candidates.len() as u64) as usize]
         }
-    }
+    } else {
+        roll_uniform
+    };
+    let roll = roll as u64;
     let variant_name: String;
     let intent = match &surface.0[roll as usize] {
         SurfaceVariant::Move => {
@@ -98,13 +111,13 @@ pub(crate) fn chaos_bot_system(
             }
         }
         SurfaceVariant::Choice(max_index) => {
-            variant_name = format!("choice:max={}", max_index);
+            variant_name = "choice".into();
             UserIntent::Choice {
                 index: (state.next_rand() % (*max_index as u64 + 1)) as usize,
             }
         }
         SurfaceVariant::Axis(name) => {
-            variant_name = format!("axis:{}", name);
+            variant_name = "axis".into();
             UserIntent::Axis {
                 name: name.clone(),
                 value: (state.next_rand() % 100) as f32 / 50.0 - 1.0,
@@ -180,17 +193,17 @@ pub(crate) fn replay_bot_system(
             let variant_name: String;
             let intent = match &entry.intent {
                 ReplayIntent::Move { dir } => {
-                    variant_name = format!("move:x={:.2},y={:.2}", dir.0, dir.1);
+                    variant_name = "move".into();
                     UserIntent::Move {
                         dir: bevy::math::Vec2::new(dir.0, dir.1),
                     }
                 }
                 ReplayIntent::Choice { index } => {
-                    variant_name = format!("choice:idx={}", index);
+                    variant_name = "choice".into();
                     UserIntent::Choice { index: *index }
                 }
                 ReplayIntent::Axis { name, value } => {
-                    variant_name = format!("axis:{}={:.2}", name, value);
+                    variant_name = "axis".into();
                     UserIntent::Axis {
                         name: name.clone(),
                         value: *value,
@@ -201,7 +214,7 @@ pub(crate) fn replay_bot_system(
                     UserIntent::Wait
                 }
                 ReplayIntent::Select { target } => {
-                    variant_name = format!("select:name={}", target);
+                    variant_name = "select".into();
                     // Resolve by Name against live Gameplay entities —
                     // stable across resets, unlike raw entity ids.
                     match q_named.iter().find(|(_, n)| n.as_str() == target) {

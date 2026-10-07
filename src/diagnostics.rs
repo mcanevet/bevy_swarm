@@ -3,11 +3,10 @@
 use bevy::app::App;
 use bevy::ecs::world::World;
 use bevy::prelude::*;
-use serde::Deserialize;
 
 use crate::contract::{IntentSurface, ResetHooks, TestApi, HARNESS_TYPE_PATHS};
 use crate::driver::ScenarioResource;
-use crate::scenario::{BotConfig, Scenario, ScenarioError};
+use crate::scenario::{Scenario, ScenarioError};
 use crate::state::{PlaytestState, Violations};
 
 // ---------------------------------------------------------------------------
@@ -185,22 +184,6 @@ fn detect_features(world: &World) -> Vec<DetectedFeature> {
         }
     }
     found
-}
-
-/// Persona-flavored chaos bot configuration — different exploration
-/// biases find different bugs.
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct PersonaConfig {
-    /// "aggressive" (high rate, many selects/choices), "curious" (bias
-    /// toward unseen variants), "idle" (mostly Wait, occasional jabs).
-    #[serde(default)]
-    pub persona: Option<String>,
-}
-
-/// Extract a persona hint from a scenario bot config. Overrides the
-/// chaos bot's default uniform-ish sampling.
-pub fn persona_of(bot: &BotConfig) -> crate::enums::Persona {
-    bot.persona.unwrap_or(crate::enums::Persona::Curious)
 }
 
 /// Probes the world's reflected resources and auto-publishes observable

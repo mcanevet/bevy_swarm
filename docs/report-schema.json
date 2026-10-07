@@ -93,7 +93,9 @@
         "first_frame",
         "last_frame",
         "count",
-        "detail"
+        "detail",
+        "last_detail",
+        "last_detail"
       ],
       "properties": {
         "rule": {
@@ -117,6 +119,10 @@
         },
         "detail": {
           "type": "string"
+        },
+        "last_detail": {
+          "type": "string",
+          "description": "Detail at the most recent occurrence (trend/debug)"
         }
       },
       "additionalProperties": false
@@ -241,6 +247,10 @@
             "string",
             "null"
           ]
+        },
+        "last_detail": {
+          "type": "string",
+          "description": "Detail at the most recent occurrence (trend/debug)"
         }
       },
       "additionalProperties": false
@@ -268,6 +278,10 @@
             "string",
             "null"
           ]
+        },
+        "last_detail": {
+          "type": "string",
+          "description": "Detail at the most recent occurrence (trend/debug)"
         }
       },
       "additionalProperties": false
