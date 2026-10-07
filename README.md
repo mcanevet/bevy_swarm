@@ -22,6 +22,28 @@ surface that can silently diverge from real game behavior.
 |-----------|------|
 | 0.1.0 (unreleased) | 0.20 (`v0.20.0-rc.2` on crates.io) |
 
+## Gameplay Snapshot Testing (Z11)
+
+Record and compare per-frame state digests to detect gameplay regressions across versions:
+
+```rust
+use bevy_swarm::golden::{record_golden, check_golden, GoldenSet, Tolerance};
+
+// Record a baseline (once):
+let scenarios = vec![/* ... */];
+record_golden(|| App::new(), &scenarios, "tests/swarm/golden").unwrap();
+
+// Check against goldens (in CI or tests):
+let set = GoldenSet::load("tests/swarm/golden").unwrap();
+let report = check_golden(|| App::new(), &set, &Tolerance::default()).unwrap();
+assert!(report.all_same(), "no regressions");
+```
+
+- **Approval workflow**: Set `BEVY_SWARM_UPDATE_GOLDEN=1` to rewrite golden files; commit the diff for review.
+- **Determinism required**: Run `check_determinism` first; nondeterministic scenarios are flagged.
+- **Cross-platform tolerance**: Float tolerance applies only when comparing across platforms; same-platform digest mismatches are failures.
+- **Readable diffs**: If your game exposes state via `TestApi`, diffs show field names/values instead of raw hashes.
+
 ## What it does
 
 - **Typed intent bots** — chaos (with uniform/aggressive/curious/idle personas), replay, pursuit, planner (aplib-style goal trees), synthetic_pointer and synthetic_keyboard (drive the REAL input chain through picking/ButtonInput, not shortcuts)

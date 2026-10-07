@@ -37,6 +37,7 @@ pub mod diagnostics;
 pub mod driver;
 pub mod enums;
 pub mod fingerprint;
+pub mod golden;
 pub mod harness;
 pub mod headless;
 pub mod minimize;
