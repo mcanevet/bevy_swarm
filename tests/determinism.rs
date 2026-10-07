@@ -70,9 +70,9 @@ fn wall_clock_game_detected() {
                     .unwrap()
                     .subsec_nanos();
                 // Accumulate full nanos as f32 — two back-to-back runs are
-            // essentially guaranteed to diverge within a few frames
-            // (subsec_nanos % 7 could collide between adjacent runs).
-            t.translation.x += (nanos % 1_000_000) as f32 * 0.001;
+                // essentially guaranteed to diverge within a few frames
+                // (subsec_nanos % 7 could collide between adjacent runs).
+                t.translation.x += (nanos % 1_000_000) as f32 * 0.001;
             }
         });
         app
