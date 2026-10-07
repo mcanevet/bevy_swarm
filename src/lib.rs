@@ -42,6 +42,7 @@ pub mod planner;
 pub mod rules;
 pub mod scenario;
 pub mod state;
+pub mod sweep;
 
 #[cfg(test)]
 mod verify;

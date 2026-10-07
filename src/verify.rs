@@ -2464,3 +2464,132 @@ fn same_bug_across_seeds_shares_fingerprint() {
     let uniq: std::collections::HashSet<_> = fps.iter().collect();
     assert_eq!(uniq.len(), 1, "one fingerprint for one bug across seeds");
 }
+
+// ---------------------------------------------------------------------------
+// E3: Seed sweep + persisted regressions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sweep_dedupes_by_fingerprint() {
+    // The planted bounds bug fires across seeds but produces ONE
+    // fingerprint → one sweep failure.
+    let mut base: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.3,"invariants":[
+            {"name":"ball_in_bounds","rule":"nodes_in_bounds",
+             "min_x":-100,"max_x":100,"min_y":-100,"max_y":100}
+        ],"setup":{}}"#,
+    )
+    .unwrap();
+    base.bot.seed = 1;
+    let runner = crate::branch::InProcess {
+        factory: build_app_with_bounds_bug,
+    };
+    let cfg = crate::sweep::SweepConfig {
+        start_seed: 1,
+        end_seed: 6,
+        max_failures: Some(3),
+        parallel: 1,
+        minimize: false,
+    };
+    let report = crate::sweep::sweep_seeds(&runner, base, cfg).unwrap();
+    assert!(report.seeds_run >= 1);
+    assert_eq!(
+        report.failures.len(),
+        1,
+        "one fingerprint for one bug: {:?}",
+        report.failures
+    );
+    assert_eq!(report.failures[0].seed, 1, "lowest seed wins");
+}
+
+fn build_app_with_bounds_bug() -> App {
+    let mut app = build_app();
+    app.add_systems(Update, inject_bounds_bug);
+    app
+}
+
+#[test]
+fn regression_roundtrip_one_file_per_fingerprint() {
+    let dir = std::env::temp_dir().join(format!("bevy_swarm_regr_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Write two records with different fingerprints.
+    let fp1 = crate::fingerprint::Fingerprint("aaaa1111aaaa1111".into());
+    let fp2 = crate::fingerprint::Fingerprint("bbbb2222bbbb2222".into());
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":7},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    for fp in [&fp1, &fp2] {
+        let rec = crate::sweep::RegressionRecord {
+            schema_version: 1,
+            fingerprint: fp.clone(),
+            found_by_seeds: vec![7],
+            status: "staging".into(),
+            scenario: scenario.clone(),
+        };
+        crate::sweep::write_regression(&rec, &dir).unwrap();
+    }
+    // Two files, one per fingerprint, named by fingerprint.
+    let files: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert_eq!(files.len(), 2);
+    let names: Vec<String> = files
+        .iter()
+        .map(|f| {
+            f.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(names.contains(&"regression_aaaa1111aaaa1111.json".to_string()));
+    assert!(names.contains(&"regression_bbbb2222bbbb2222.json".to_string()));
+
+    // Roundtrip: load_regressions parses both forms (record + bare scenario).
+    let loaded = crate::sweep::load_regressions(&dir).unwrap();
+    assert_eq!(loaded.len(), 2);
+    assert!(loaded.iter().any(|r| r.fingerprint == fp1));
+    assert!(loaded.iter().any(|r| r.fingerprint == fp2));
+    assert_eq!(loaded[0].schema_version, 1);
+    assert_eq!(loaded[0].status, "staging");
+
+    // Legacy bare Scenario file also loads.
+    std::fs::write(
+        dir.join("legacy.json"),
+        serde_json::to_string(&scenario).unwrap(),
+    )
+    .unwrap();
+    let loaded2 = crate::sweep::load_regressions(&dir).unwrap();
+    assert_eq!(loaded2.len(), 3);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn sweep_replays_regressions_first() {
+    // run_regressions_and_sweep loads persisted records, replays them,
+    // then sweeps. The regression dir here is empty → pure sweep.
+    let dir = std::env::temp_dir().join(format!("bevy_swarm_regr_empty_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let base: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    let runner = crate::branch::InProcess { factory: build_app };
+    let cfg = crate::sweep::SweepConfig {
+        start_seed: 1,
+        end_seed: 3,
+        max_failures: None,
+        parallel: 1,
+        minimize: false,
+    };
+    let (records, sweep) =
+        crate::sweep::run_regressions_and_sweep(&runner, base, cfg, &dir).unwrap();
+    assert!(records.is_empty(), "empty dir → no regressions loaded");
+    assert_eq!(sweep.seeds_run, 3);
+    assert!(sweep.failures.is_empty(), "clean game → no failures");
+    let _ = std::fs::remove_dir_all(&dir);
+}
