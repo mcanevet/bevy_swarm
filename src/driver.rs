@@ -494,6 +494,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
 
+    // I2: compile invariants once — unknown component/query types
+    // reject at LOAD time, before any frame runs.
+    let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
+    app.insert_resource(compiled);
+
     let tps = scenario.tps as u64;
     if scenario.simulated_time {
         // Deterministic clock: Time advances by exactly 1/tps per update,

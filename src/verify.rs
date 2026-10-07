@@ -652,7 +652,8 @@ fn query_target_with_eventually_passes_on_late_spawn() {
 
 #[test]
 fn query_target_invalid_component_reports_error() {
-    // Typo'd component name → unresolved → violation.
+    // I2: typo'd component name rejects at LOAD time (ScenarioError::
+    // InvalidComponent) — no frames run, before the scenario starts.
     let scenario: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
             {"name":"typo_test","rule":"custom","query":{"with":["Gamepla"],"without":[]},
@@ -661,12 +662,13 @@ fn query_target_invalid_component_reports_error() {
     )
     .unwrap();
     let mut app = build_app();
-    let rep = run_scenario(&mut app, &scenario).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Fail);
-    assert!(rep
-        .violations
-        .iter()
-        .any(|v| v.rule == "typo_test" && v.detail.contains("unresolved")));
+    let err = run_scenario(&mut app, &scenario).unwrap_err();
+    match err {
+        crate::scenario::ScenarioError::InvalidComponent { name, .. } => {
+            assert_eq!(name, "Gamepla")
+        }
+        other => panic!("expected InvalidComponent, got: {:?}", other),
+    }
 }
 
 #[test]

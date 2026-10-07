@@ -203,10 +203,12 @@ enum Selector<'a> {
 }
 
 pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue> {
-    use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::reflect::GetPath;
 
-    let registry = world.resource::<AppTypeRegistry>().0.read();
+    let registry = world
+        .resource::<bevy::ecs::reflect::AppTypeRegistry>()
+        .0
+        .read();
 
     // Helper: look up a registered type by short path and resolve its world
     // ComponentId (may not exist if never inserted as component/resource).
@@ -392,9 +394,10 @@ fn value_from_reflect(val: &dyn bevy::reflect::PartialReflect) -> TestFieldValue
 /// short type paths to ComponentIds, then iterates entities checking
 /// presence/absence.
 fn count_query_target(world: &World, target: &QueryTarget) -> Option<usize> {
-    use bevy::ecs::reflect::AppTypeRegistry;
-
-    let registry = world.resource::<AppTypeRegistry>().0.read();
+    let registry = world
+        .resource::<bevy::ecs::reflect::AppTypeRegistry>()
+        .0
+        .read();
 
     let resolve_ids = |names: &[String]| -> Option<Vec<bevy::ecs::component::ComponentId>> {
         names
@@ -424,6 +427,32 @@ fn count_query_target(world: &World, target: &QueryTarget) -> Option<usize> {
 /// Resolve via the type-erased resolver (registered first, then world
 /// percepts) — a custom TestApi type works without the crate's own
 /// TestApi resource.
+/// Evaluate a compiled reflect-field accessor (resource or entity
+/// singleton) with a pre-parsed path (I2 fast path).
+fn eval_reflect_field(
+    world: &World,
+    registry: &bevy::reflect::TypeRegistry,
+    component_id: bevy::ecs::component::ComponentId,
+    reflect: &bevy::ecs::reflect::ReflectComponent,
+    parsed_path: &bevy::reflect::ParsedPath,
+) -> Option<(Option<f64>, Option<String>)> {
+    let _ = registry;
+    let _ = registry;
+    let resource_entity = world
+        .resource_entities()
+        .iter()
+        .find(|(id, _)| *id == component_id)
+        .map(|(_, e)| e)?;
+    let entity = world.get_entity(resource_entity).ok()?;
+    let reflect_val = reflect.reflect(entity)?;
+    use bevy::reflect::GetPath;
+    let val = reflect_val.reflect_path(parsed_path).ok()?;
+    Some(match value_from_reflect(val) {
+        crate::contract::TestFieldValue::Numeric(n) => (Some(n), None),
+        crate::contract::TestFieldValue::Text(s) => (None, Some(s)),
+    })
+}
+
 fn resolve_field(world: &World, path: &str) -> (Option<f64>, Option<String>) {
     match crate::contract::resolve_path(world, path) {
         Some(TestFieldValue::Numeric(n)) => (Some(n), None),
@@ -458,7 +487,30 @@ pub(crate) fn check_custom_system(world: &mut World) {
         // Query-target invariants: component-filtered entity counts.
         // ECS-native analogue of Playwright's `toHaveCount`.
         if let Some(query) = &inv.query {
-            let Some(count) = count_query_target(world, query) else {
+            // I2: compiled QueryState — O(matched archetypes) counting,
+            // load-time rejection of unknown component types.
+            let count = {
+                if world.contains_resource::<crate::compiled::CompiledScenario>() {
+                    let mut result = None;
+                    world.resource_scope(
+                        |world,
+                         mut cs: bevy::ecs::change_detection::Mut<
+                            crate::compiled::CompiledScenario,
+                        >| {
+                            result = cs
+                                .invariants
+                                .iter_mut()
+                                .find(|ci| ci.name == inv.name)
+                                .and_then(|ci| ci.accessor.as_mut())
+                                .and_then(|acc| acc.eval_count(world));
+                        },
+                    );
+                    result
+                } else {
+                    count_query_target(world, query)
+                }
+            };
+            let Some(count) = count else {
                 world.resource_mut::<Violations>().report(
                     &inv.name,
                     &format!("query({:?})", query),
@@ -467,8 +519,25 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 );
                 continue;
             };
-            let check = inv.check.unwrap_or(crate::enums::CheckOp::Ge);
-            let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
+            // I2: use the compiled kind when available (pre-parsed op
+            // + threshold); fall back to per-frame JSON interpretation.
+            let (check, threshold) = {
+                let cs = world.resource::<crate::compiled::CompiledScenario>();
+                match cs
+                    .invariants
+                    .iter()
+                    .find(|ci| ci.name == inv.name)
+                    .map(|ci| &ci.kind)
+                {
+                    Some(crate::compiled::CompiledKind::QueryCount { op, threshold }) => {
+                        (*op, Some(*threshold))
+                    }
+                    _ => (
+                        inv.check.unwrap_or(crate::enums::CheckOp::Ge),
+                        inv.value.as_ref().and_then(|v| v.as_f64()),
+                    ),
+                }
+            };
 
             let holds_now = match threshold {
                 Some(thr) => check.holds(count as f64, thr),
@@ -518,7 +587,41 @@ pub(crate) fn check_custom_system(world: &mut World) {
         }
 
         let Some(path) = &inv.path else { continue };
-        let (numeric, string_val) = resolve_field(world, path);
+        // I2: compiled accessor fast paths (Resource/Component reflect
+        // fields with pre-parsed paths) when available; TestApi and
+        // unresolved fall back to the resolver chain.
+        let (numeric, string_val) =
+            if world.contains_resource::<crate::compiled::CompiledScenario>() {
+                let mut result = None;
+                world.resource_scope(
+                |world, cs: bevy::ecs::change_detection::Mut<crate::compiled::CompiledScenario>| {
+                    let ci = cs.invariants.iter().find(|ci| ci.name == inv.name);
+                    result = match ci.and_then(|ci| ci.accessor.as_ref()) {
+                        Some(crate::compiled::Accessor::ResourceField {
+                            component_id,
+                            reflect,
+                            parsed_path,
+                        }) => {
+                            let registry = world
+                                .resource::<bevy::ecs::reflect::AppTypeRegistry>()
+                                .0
+                                .read();
+                            eval_reflect_field(
+                                world,
+                                &registry,
+                                *component_id,
+                                reflect,
+                                parsed_path,
+                            )
+                        }
+                        _ => None,
+                    };
+                },
+            );
+                result.unwrap_or_else(|| resolve_field(world, path))
+            } else {
+                resolve_field(world, path)
+            };
         world
             .resource_mut::<PlaytestState>()
             .coverage
@@ -635,10 +738,10 @@ pub(crate) fn check_custom_system(world: &mut World) {
         if let Some(max_dps) = inv.max_delta_per_sec {
             let mut state_mut = world.resource_mut::<PlaytestState>();
             let samples = state_mut.delta_windows.entry(inv.name.clone()).or_default();
-            samples.push((frame, current));
+            samples.push_back((frame, current));
             let window_ticks = tps.max(1);
             while samples.len() > 1 && frame - samples[0].0 > window_ticks {
-                samples.remove(0);
+                samples.pop_front();
             }
             let oldest = samples[0];
             let dt_ticks = frame - oldest.0;

@@ -118,7 +118,7 @@ pub struct PlaytestState {
     /// [`PlaytestState::next_rand`].
     pub rng: u64,
     pub metrics: Metrics,
-    pub delta_windows: HashMap<String, Vec<(u64, f64)>>, // rule -> samples
+    pub delta_windows: HashMap<String, std::collections::VecDeque<(u64, f64)>>, // rule -> samples
     pub(crate) warned_paths: HashSet<String>,
     /// One-shot flag: chaos Select sampled unnamed entities (warn once).
     pub(crate) warned_select_unnamed: bool,
