@@ -34,6 +34,7 @@ pub mod conventions;
 pub mod diagnostics;
 pub mod driver;
 pub mod enums;
+pub mod fingerprint;
 pub mod harness;
 pub mod minimize;
 pub mod oracles;

@@ -510,6 +510,8 @@ pub fn planner_unfinished_check(
     let trace = planner.trace();
     let (ppath, pcheck, pvalue) = planner.deepest_unfinished_primitive().unwrap_or_default();
     Some(crate::harness::ViolationEntry {
+        fingerprint: None,
+        fingerprint_scheme: 1,
         rule: "planner_goal_unfinished".into(),
         target: ppath.clone(),
         first_frame: top.activated,
