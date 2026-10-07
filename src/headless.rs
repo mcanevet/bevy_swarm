@@ -52,7 +52,7 @@ impl std::error::Error for GameBundlesPlatform {}
 /// Configures WindowPlugin to prevent auto-exit. Other platform plugins are
 /// left as-is; games that need them disabled should do so explicitly in main.rs.
 pub fn headless_platform() -> PluginGroupBuilder {
-    DefaultPlugins.set(WindowPlugin {
+    let mut group = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "bevy_swarm headless".to_string(),
             visible: false,
@@ -60,9 +60,21 @@ pub fn headless_platform() -> PluginGroupBuilder {
         }),
         exit_condition: ExitCondition::DontExit,
         ..default()
-    })
-}
+    });
 
+    // With a render feature enabled (e.g. via `agent` or `render`),
+    // DefaultPlugins includes RenderPlugin, which requires a GPU at
+    // finish(). Disable it so the platform stays headless.
+    #[cfg(any(feature = "render", feature = "agent"))]
+    {
+        use bevy::render::RenderPlugin;
+        if group.contains::<RenderPlugin>() {
+            group = group.disable::<RenderPlugin>();
+        }
+    }
+
+    group
+}
 /// Construct a fresh headless `App` with the game's plugin installed.
 ///
 /// - Calls `headless_platform()` to get a sanitized `DefaultPlugins`.
