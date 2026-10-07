@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- Scenario load-time validation (C6): reject duration_s <= 0 / non-finite,
+  tps < 1, planner without goals, pursuit without agent_target/target,
+  synthetic_pointer/keyboard with empty lists, unknown key names; warn
+  on replay with empty inputs; eventually_s > 0, after_s < before_s,
+  bounds min <= max; PointerClickInput.button now typed as
+  enums::PointerButton
 - Agent BRP endpoint security (R2): `AgentConfig` (loopback default,
   port 15702, token from config or `BEVY_SWARM_AGENT_TOKEN` env,
   `allow_remote`, `deny_in_release`), `AgentPlugin::new/bind`;
