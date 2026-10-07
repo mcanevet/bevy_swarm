@@ -243,7 +243,11 @@ impl Plugin for TestConventionsPlugin {
             .init_resource::<IntentSurface>()
             .init_resource::<CheatHooks>()
             .init_resource::<ActionLog>()
-            .init_resource::<GameVersion>();
+            .init_resource::<GameVersion>()
+            .init_resource::<crate::identity::IdentityIndex>();
+        // I1: also register identity observers here (idempotent) so the
+        // game-side contract plugin covers game-only Apps.
+        crate::identity::install_identity(app);
 
         // Default semantic-tier resolver: the crate's TestApi shape.
         // Games with custom TestApis use `register_test_api::<TheirType>()`

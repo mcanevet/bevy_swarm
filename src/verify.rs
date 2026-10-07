@@ -864,7 +864,7 @@ fn action_log_structured_payloads_roundtrip() {
     assert_eq!(
         action_to_replay_intent(&select_action),
         Some(ReplayIntent::Select {
-            target: "end_turn".into()
+            target: crate::scenario::SelectTarget::Name("end_turn".into())
         })
     );
 
@@ -1518,8 +1518,9 @@ fn replay_select_target_missing_is_violation() {
 
 #[test]
 fn unnamed_select_counts_unreplayable() {
-    // Chaos Select over UNNAMED entities: unreplayable_actions > 0 and
-    // the chaos_select_unnamed warning fires.
+    // I1 changed semantics: unnamed Gameplay entities get StableIds, so
+    // chaos Selects over them are now REPLAYABLE (unreplayable_actions == 0).
+    // The warning only fires for genuinely untracked (non-Gameplay) targets.
     let chaos: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":4},"duration_s":0.3,"invariants":[]}"#,
     )
@@ -1547,14 +1548,12 @@ fn unnamed_select_counts_unreplayable() {
         commands.spawn((Gameplay, Transform::default()));
     });
     let rep2 = run_scenario(&mut app2, &chaos).unwrap();
-    assert!(
-        rep2.unreplayable_actions > 0,
-        "unnamed selects not counted: {:#?}",
+    // Unnamed Gameplay entities have StableIds (I1) — Selects over them
+    // round-trip via {"stable_id": n}, so nothing is unreplayable.
+    assert_eq!(
+        rep2.unreplayable_actions, 0,
+        "unnamed-but-Gameplay selects should be replayable via StableId: {:#?}",
         rep2.action_log
-    );
-    assert!(
-        !rep2.warnings.is_empty(),
-        "no warning for unnamed select targets"
     );
 }
 

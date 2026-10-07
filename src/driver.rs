@@ -85,6 +85,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
         // without DefaultPlugins don't fail parameter validation.
         app.add_message::<bevy::input::keyboard::KeyboardInput>();
         app.init_resource::<Violations>();
+        // I1: identity index + observers (idempotent).
+        crate::identity::install_identity(app);
 
         // Every harness system is gated on a live scenario so the plugin
         // is safe to leave in a production App (or an App never driven
@@ -533,6 +535,13 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     for k in &kinds {
         coverage.resets_invoked.insert(k.clone());
     }
+    // I1: reset identity index before resets (ids are relative to run start).
+    if let Some(mut idx) = app
+        .world_mut()
+        .get_resource_mut::<crate::identity::IdentityIndex>()
+    {
+        idx.reset();
+    }
     let hooks = app
         .world_mut()
         .remove_resource::<ResetHooks>()
@@ -786,7 +795,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     }
     if unreplayable_actions > 0 {
         warnings.push(format!(
-            "{} audit-log intents cannot be converted to replay intents (Select on unnamed entity?) — name your Gameplay entities for full replayability",
+            "{} audit-log intents cannot be converted to replay intents (Select on non-Gameplay entity?) — mark entities Gameplay for full replayability",
             unreplayable_actions
         ));
     }

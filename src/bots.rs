@@ -187,6 +187,7 @@ pub(crate) fn replay_bot_system(
     mut violations: ResMut<Violations>,
     q_named: Query<(bevy::ecs::entity::Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
+    idx: Res<crate::identity::IdentityIndex>,
 ) {
     for entry in &scenario.0.bot.inputs {
         if entry.frame == state.frame {
@@ -215,19 +216,34 @@ pub(crate) fn replay_bot_system(
                 }
                 ReplayIntent::Select { target } => {
                     variant_name = "select".into();
-                    // Resolve by Name against live Gameplay entities —
-                    // stable across resets, unlike raw entity ids.
-                    match q_named.iter().find(|(_, n)| n.as_str() == target) {
-                        Some((entity, _)) => UserIntent::Select { target: entity },
+                    // Resolve against the identity index (I1): StableId
+                    // first (unnamed entities), then Name. Stable across
+                    // resets, unlike raw entity ids.
+                    let resolved: Option<bevy::ecs::entity::Entity> = match &target {
+                        crate::scenario::SelectTarget::Stable { stable_id } => idx
+                            .by_stable(crate::identity::StableId(*stable_id))
+                            .filter(|e| q_named.get(*e).is_ok()),
+                        crate::scenario::SelectTarget::Name(name) => {
+                            idx.by_name(name).filter(|e| q_named.get(*e).is_ok())
+                        }
+                    };
+                    match resolved {
+                        Some(entity) => UserIntent::Select { target: entity },
                         None => {
                             // Loud miss: a replay referencing a missing
                             // target is a contract break, not a skip.
+                            let display = match &target {
+                                crate::scenario::SelectTarget::Name(n) => n.clone(),
+                                crate::scenario::SelectTarget::Stable { stable_id } => {
+                                    format!("#{}", stable_id)
+                                }
+                            };
                             violations.report(
                                 "replay_target_missing",
-                                target,
+                                &display,
                                 format!(
-                                    "frame {}: no Gameplay entity named '{}'",
-                                    entry.frame, target
+                                    "frame {}: no Gameplay entity for target '{}'",
+                                    entry.frame, display
                                 ),
                                 state.frame,
                             );
@@ -271,6 +287,7 @@ pub(crate) struct PendingGesture {
 /// A game whose picking wiring is broken (e.g. missing
 /// MeshPickingPlugin) produces clicks that hit nothing — caught by the
 /// scenario's invariants, not silently skipped.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn synthetic_pointer_bot_system(
     mut state: ResMut<PlaytestState>,
     mut violations: ResMut<Violations>,
@@ -279,6 +296,7 @@ pub(crate) fn synthetic_pointer_bot_system(
     q_camera: Query<(&Camera, &GlobalTransform)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     scenario: Res<ScenarioResource>,
+    idx: Res<crate::identity::IdentityIndex>,
 ) {
     // Deliver pending gesture halves scheduled for this frame.
     let frame = state.frame;
@@ -334,7 +352,16 @@ pub(crate) fn synthetic_pointer_bot_system(
             crate::enums::PointerButton::Secondary => PointerButton::Secondary,
             crate::enums::PointerButton::Middle => PointerButton::Middle,
         };
-        let Some((_, transform)) = q_named.iter().find(|(n, _)| n.as_str() == click.target) else {
+        let Some(entity) = idx.by_name(&click.target) else {
+            violations.report(
+                "synthetic_pointer_config",
+                &click.target,
+                "click target not found in identity index".to_string(),
+                state.frame,
+            );
+            continue;
+        };
+        let Ok((_, transform)) = q_named.get(entity) else {
             violations.report(
                 "synthetic_pointer_config",
                 &click.target,
@@ -420,6 +447,7 @@ pub(crate) fn pursuit_bot_system(
     mut intents: MessageWriter<UserIntent>,
     q: Query<(&Name, &GlobalTransform), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
+    idx: Res<crate::identity::IdentityIndex>,
 ) {
     let bot = &scenario.0.bot;
     let (Some(agent_name), Some(target_name)) = (&bot.agent_target, &bot.target) else {
@@ -431,8 +459,10 @@ pub(crate) fn pursuit_bot_system(
         );
         return;
     };
-    let agent = q.iter().find(|(n, _)| n.as_str() == agent_name);
-    let target = q.iter().find(|(n, _)| n.as_str() == target_name);
+    let agent = idx.by_name(agent_name);
+    let target = idx.by_name(target_name);
+    let agent = agent.and_then(|e| q.get(e).ok());
+    let target = target.and_then(|e| q.get(e).ok());
     let (Some((_, agent_t)), Some((_, target_t))) = (agent, target) else {
         violations.report(
             "pursuit_bot_config",
