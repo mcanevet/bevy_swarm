@@ -46,6 +46,7 @@ pub mod planner;
 pub mod raw_input;
 pub mod rules;
 pub mod scenario;
+pub mod sinks;
 pub mod state;
 pub mod sweep;
 

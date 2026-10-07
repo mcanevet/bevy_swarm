@@ -28,10 +28,7 @@ fn fallible_system_error_reported() {
         .expect("expected a bevy_warning violation");
     assert!(v.detail.contains("boom"), "detail: {}", v.detail);
     // Target should carry the system name (context).
-    assert!(
-        !v.target.is_empty(),
-        "target must carry the system context"
-    );
+    assert!(!v.target.is_empty(), "target must carry the system context");
 }
 
 #[test]
@@ -87,5 +84,8 @@ fn parallel_runs_route_errors_independently() {
         .iter()
         .any(|v| v.detail.contains("from run A"));
     assert!(a_has, "run A must have its own error");
-    assert!(!b_has, "run B must not see run A's error (routing by thread)");
+    assert!(
+        !b_has,
+        "run B must not see run A's error (routing by thread)"
+    );
 }
