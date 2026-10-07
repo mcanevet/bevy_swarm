@@ -162,7 +162,7 @@ pub fn load_regressions(dir: &Path) -> Result<Vec<RegressionRecord>, std::io::Er
     Ok(records)
 }
 
-/// Write a regression record to disk (filename: regression_<fp>.json).
+/// Write a regression record to disk (filename: `regression_<fp>.json`).
 pub fn write_regression(record: &RegressionRecord, dir: &Path) -> Result<(), std::io::Error> {
     fs::create_dir_all(dir)?;
     let filename = format!("regression_{}.json", record.fingerprint.0);
