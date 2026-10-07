@@ -18,7 +18,6 @@ use std::cell::RefCell;
 /// different bevy_swarm subsystems.
 const ENTROPY_DOMAIN: u64 = 0xBEAF_57A2;
 
-
 // Thread-local deterministic RNG stream. None = fallback to the
 // process-global stream (unattributed entropy).
 thread_local! {
@@ -111,8 +110,7 @@ pub fn in_deterministic_run() -> bool {
 }
 
 /// Count of fallback entropy draws (unattributed).
-static FALLBACK_COUNT: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static FALLBACK_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Get the fallback draw count for diagnostics.
 pub fn fallback_draw_count() -> usize {
@@ -128,10 +126,7 @@ pub fn reset_fallback_counter() {
 // identical symbol name and ABI). Defined only when the cfg is set.
 #[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn __getrandom_v03_custom(
-    dest: *mut u8,
-    len: usize,
-) -> Result<(), ()> {
+unsafe extern "C" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), ()> {
     // Safety: caller guarantees dest points to len valid bytes.
     let buf = unsafe { std::slice::from_raw_parts_mut(dest, len) };
 

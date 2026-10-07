@@ -75,10 +75,8 @@ fn run_scenario_provides_entropy_scope() {
         res.0 = uuid::Uuid::new_v4();
     }
 
-    let scenario: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":99},"duration_s":0.05}"#,
-    )
-    .unwrap();
+    let scenario: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":99},"duration_s":0.05}"#).unwrap();
 
     let run = || {
         let mut app = App::new();
@@ -103,7 +101,10 @@ fn run_scenario_provides_entropy_scope() {
 
     let d1 = run();
     let d2 = run();
-    assert_eq!(d1, d2, "same scenario seed must reproduce identical digests");
+    assert_eq!(
+        d1, d2,
+        "same scenario seed must reproduce identical digests"
+    );
     assert!(!d1.is_empty());
 }
 
