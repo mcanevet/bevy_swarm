@@ -363,7 +363,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // handler so panics propagate as crashes.
     #[derive(bevy::ecs::resource::Resource)]
     struct SwarmErrorHandlerInstalled;
-    if app.world().get_resource::<SwarmErrorHandlerInstalled>().is_none() {
+    if app
+        .world()
+        .get_resource::<SwarmErrorHandlerInstalled>()
+        .is_none()
+    {
         app.set_error_handler(|mut err, ctx| {
             let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
             // Capture first (severity/context/message), then resume
@@ -709,9 +713,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 }
             }
             crate::sinks::Captured::Panic {
-                message,
-                location,
-                ..
+                message, location, ..
             } => {
                 let entry = crate::state::ViolationEntry {
                     rule: "panic".to_string(),

@@ -32,9 +32,9 @@
 
 use bevy::ecs::error::{BevyError, ErrorContext};
 use bevy::log::Level;
-use std::sync::Mutex;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 
 thread_local! {
