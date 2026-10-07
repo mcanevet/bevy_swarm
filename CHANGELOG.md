@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- Agent feature (C4): real screenshot capture via bevy_render (async write),
+  pointer button + hold_frames parameters, reset audited in ActionLog,
+  elapsed_ms from Time resource (was 0.0), safe resource probing
+  (get_resource everywhere), METHODS const driving schema output
+- CI: agent job (build/test/clippy --features agent)
 - Scenario load-time validation (C6): reject duration_s <= 0 / non-finite,
   tps < 1, planner without goals, pursuit without agent_target/target,
   synthetic_pointer/keyboard with empty lists, unknown key names; warn
