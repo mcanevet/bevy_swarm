@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Declared MSRV 1.97 (Bevy 0.20.0-rc.2 dependency tree requirement), enforced in CI
+- `minimize_crash` replaced by `minimize_failure`: shrinks any failure
+  signature (crash OR invariant violation, matched by rule/target to
+  prevent slippage to a different bug), trims the regression duration to
+  the failure frame + 1s, and returns `Err(NotReproducible)` instead of a
+  bogus "minimal" log when the full log does not reproduce the failure
+- Removed dead `MinimizeOnCrash` resource and
+  `PlaytestReport.minimized_actions` (never populated; `run_scenario`
+  cannot rebuild the App — use `minimize_failure` with an app builder)
 
 ### Added
 - Initial (unreleased) version. Contract-first architecture: games

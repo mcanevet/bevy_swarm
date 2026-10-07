@@ -180,21 +180,11 @@ pub struct PlaytestReport {
     /// unnamed Select targets, harness deprecations, ...). Reused by
     /// later beads (C2/C3).
     pub warnings: Vec<String>,
-    /// If the run CRASHED and minimization was requested via
-    /// [`MinimizeOnCrash`], the ddmin-minimal reproducing action
-    /// subsequence — a permanent regression scenario's raw material.
-    pub minimized_actions: Vec<TimedAction>,
     /// Code-aware coverage (CA²): which scheduled systems executed
     /// during the run, vs every registered system. Unexecuted systems
     /// are coverage gaps to target with new scenarios.
     pub system_coverage: SystemCoverage,
 }
-
-/// Insert this resource before `run_scenario` to enable automatic
-/// ddmin minimization when the run crashes. The minimized action
-/// sequence lands in `PlaytestReport.minimized_actions`.
-#[derive(Resource, Clone, Debug)]
-pub struct MinimizeOnCrash;
 
 /// Run a validated scenario against an already-built headless App.
 ///
@@ -546,7 +536,6 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         cheat_count,
         unreplayable_actions,
         warnings,
-        minimized_actions: Vec::new(),
         system_coverage: system_coverage(&systems_before, app.world_mut()),
     })
 }
