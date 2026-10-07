@@ -8,7 +8,7 @@ use bevy::ecs::world::World;
 use bevy::picking::pointer::PointerId;
 use bevy::prelude::{Name, Transform};
 
-use crate::contract::{Gameplay, TestApi, TestApiResolve, TestFieldValue, UserIntent};
+use crate::contract::{Gameplay, TestFieldValue, UserIntent};
 use crate::scenario::*;
 use crate::state::*;
 

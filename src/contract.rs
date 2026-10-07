@@ -141,7 +141,7 @@ pub trait TestApiResolve {
     fn resolve(&self, path: &str) -> Option<TestFieldValue>;
 }
 
-/// Type-erased TestApi resolution function: resolves a "TestApi.<field>"
+/// Type-erased TestApi resolution function: resolves a `TestApi.<field>`
 /// path against the world WITHOUT the harness knowing the concrete
 /// resource type. Games (or semantic adapters) register one; the LAST
 /// registered resolver wins.

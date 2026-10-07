@@ -466,8 +466,7 @@ pub fn planner_bot_system(world: &mut World) {
     }
 
     // Re-insert the taken-out Violations before the write-back block
-    // (it reads them), dropping the resolve closure's world borrow.
-    drop(resolve);
+    // (it reads them); the resolve closure's world borrow ends here.
     world.insert_resource(violations);
     // Write results back into state (single mutable borrow region).
     {
