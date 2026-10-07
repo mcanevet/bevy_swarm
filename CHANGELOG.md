@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- Determinism self-check (A4): `check_determinism` runs a scenario
+  several times on fresh Apps and compares per-frame canonical state
+  digests (TestApi surface, bit-exact Gameplay transforms, entity
+  census, game `DigestHooks`); reports first divergent frame + fields
+- `StateTrace` resource: opt-in per-frame digests, surfaced on
+  `PlaytestReport.state_trace`; zero cost when absent
 - `sweep_seeds` + `SweepConfig`/`SweepReport` (E3): seed sweeps deduped by
   fingerprint (lowest seed wins), early-stop at max_failures
 - Persisted regressions: `RegressionRecord` (versioned, one file per

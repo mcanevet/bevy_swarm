@@ -31,6 +31,7 @@ pub mod bots;
 pub mod branch;
 pub mod contract;
 pub mod conventions;
+pub mod determinism;
 pub mod diagnostics;
 pub mod driver;
 pub mod enums;
