@@ -55,7 +55,10 @@ fn wall_clock_game_detected() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .subsec_nanos();
-            t.translation.x += (nanos % 7) as f32;
+            // Accumulate full nanos as f32 — two back-to-back runs are
+            // essentially guaranteed to diverge within a few frames
+            // (subsec_nanos % 7 could collide between adjacent runs).
+            t.translation.x += (nanos % 1_000_000) as f32 * 0.001;
         }
     });
     let builder = move || {
@@ -66,7 +69,10 @@ fn wall_clock_game_detected() {
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .subsec_nanos();
-                t.translation.x += (nanos % 7) as f32;
+                // Accumulate full nanos as f32 — two back-to-back runs are
+                // essentially guaranteed to diverge within a few frames
+                // (subsec_nanos % 7 could collide between adjacent runs).
+                t.translation.x += (nanos % 1_000_000) as f32 * 0.001;
             }
         });
         app
