@@ -25,6 +25,9 @@
 //! - A `TestApi` resource that implements `TestApiResolve` (provided by your game)
 //! - `ResetHooks` and `IntentSurface` resources (provided by this crate's defaults)
 //!
+// Z14: getrandom_backend cfg is set via RUSTFLAGS by cargo swarm run.
+#![allow(unknown_lints)]
+#![allow(unexpected_cfgs)]
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod autotest;
@@ -35,6 +38,7 @@ pub mod conventions;
 pub mod determinism;
 pub mod diagnostics;
 pub mod driver;
+pub mod entropy;
 pub mod enums;
 pub mod fingerprint;
 pub mod golden;
