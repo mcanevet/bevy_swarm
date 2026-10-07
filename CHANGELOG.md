@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot rebuild the App — use `minimize_failure` with an app builder)
 
 ### Fixed
+- ViolationEntry gains  (detail at most recent occurrence);
+   stays anchored to the FIRST occurrence (reproduction anchor)
+- System coverage excludes harness-owned systems (bevy_swarm::) to avoid
+  inflated fraction() and spurious unexecuted gaps; new
+  SystemCoverage::game_only() drops bevy_ engine systems too
+- Aggressive persona no longer hangs on Wait-only surfaces (draws from
+  filtered candidate set; empty → yields Wait)
+- Planner pursuit sequences pace by input_rate_hz and start at emit[0]
+  when a primitive activates (previously indexed by absolute frame)
+- Coverage keys are variant-level (move/choice/axis/select/wait) for
+  all bots; detailed values kept in violation context only
+- Deleted dead PersonaConfig/persona_of
 - Readiness gate now runs INSIDE the panic boundary: a game that panics
   while loading yields status crash (previously could hang or pass).
   Bots and oracles no longer run before `GameReady(true)`; when the gate

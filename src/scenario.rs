@@ -147,7 +147,11 @@ pub struct BotConfig {
     /// the FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`
     /// → game adapter) that intent-injection bots bypass. A dead
     /// adapter or wrong key mapping fails the scenario's invariants.
-    /// Chaos persona: "aggressive" (2x rate, never Wait), "curious"
+    /// Chaos persona: "uniform" (default), "aggressive" (2x rate, never
+    /// Wait), "curious" (reserved for F1 coverage-guided curiosity;
+    /// currently behaves as uniform), "idle" (mostly Wait, occasional
+    /// jabs). REPLACES the legacy text: "curious" previously meant
+    /// bias toward unseen variants (not implemented).
     /// (stronger unseen-variant bias), "idle" (mostly waiting, rare
     /// jabs). Different personas find different bugs.
     #[serde(default)]

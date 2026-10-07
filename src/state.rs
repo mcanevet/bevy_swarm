@@ -15,7 +15,10 @@ pub struct ViolationEntry {
     pub first_frame: u64,
     pub last_frame: u64,
     pub count: u64,
+    /// Detail + intent context at FIRST occurrence (reproduction anchor).
     pub detail: String,
+    /// Detail at the most recent occurrence (trend/debug).
+    pub last_detail: String,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -33,17 +36,21 @@ impl Violations {
 
     pub fn report(&mut self, rule: &str, target: &str, detail: String, frame: u64) {
         let key = (rule.to_string(), target.to_string());
-        let entry = self.entries.entry(key).or_insert(ViolationEntry {
+        let prefixed = format!("[intent: {}] {}", self.context, detail);
+        let entry = self.entries.entry(key).or_insert_with(|| ViolationEntry {
             rule: rule.to_string(),
             target: target.to_string(),
             first_frame: frame,
             last_frame: frame,
             count: 0,
-            detail: detail.clone(),
+            detail: prefixed.clone(),
+            last_detail: prefixed.clone(),
         });
         entry.count += 1;
         entry.last_frame = frame;
-        entry.detail = format!("[intent: {}] {}", self.context, detail);
+        // FIRST occurrence's detail stays (reproduction anchor); only
+        // the trend copy updates.
+        entry.last_detail = prefixed;
     }
 
     /// Snapshot sorted by first_frame — callers store reports across
@@ -144,6 +151,26 @@ pub struct SystemCoverage {
 }
 
 impl SystemCoverage {
+    /// View excluding this harness's own systems (they run every frame
+    /// and would inflate fraction()); the bevy_ engine's systems are
+    /// kept for engine-level debugging. Raw lists stay on self.
+    pub fn game_only(&self) -> SystemCoverage {
+        SystemCoverage {
+            executed: self
+                .executed
+                .iter()
+                .filter(|n| !is_harness_system(n))
+                .cloned()
+                .collect(),
+            registered: self
+                .registered
+                .iter()
+                .filter(|n| !is_harness_system(n))
+                .cloned()
+                .collect(),
+        }
+    }
+
     /// Registered-but-never-executed systems — the coverage gaps.
     pub fn unexecuted(&self) -> Vec<String> {
         let exec: std::collections::HashSet<&str> =
@@ -202,8 +229,36 @@ pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
 /// systems whose last_run tick ADVANCED past the pre-run snapshot.
 /// A `before` snapshot of None-entry means the system was added
 /// mid-run (still counts as executed).
+/// Harness module paths: systems defined in these bevy_swarm modules
+/// are the harness's own (they run every frame or under run conditions
+/// and would inflate fraction()). Test-fixture or game systems defined
+/// elsewhere in the crate (e.g. bevy_swarm::verify:: under cfg(test))
+/// are NOT excluded.
+const HARNESS_MODULES: &[&str] = &[
+    "bevy_swarm::bots::",
+    "bevy_swarm::oracles::",
+    "bevy_swarm::planner::",
+    "bevy_swarm::state::",
+    "bevy_swarm::driver::",
+    "bevy_swarm::scenario::",
+    "bevy_swarm::contract::",
+    "bevy_swarm::diagnostics::",
+];
+
+pub fn is_harness_system(name: &str) -> bool {
+    HARNESS_MODULES.iter().any(|m| name.contains(m))
+}
+
 pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> SystemCoverage {
     let after = snapshot_systems(world);
+    // Harness-owned systems are excluded: bots/oracles run every frame
+    // and would inflate fraction(), or show up as spurious "unexecuted"
+    // gaps when gated by run conditions. Engine systems (bevy_) are
+    // kept; use SystemCoverage::game_only to drop them too.
+    let after: HashMap<String, u32> = after
+        .into_iter()
+        .filter(|(name, _)| !is_harness_system(name))
+        .collect();
     let mut cov = SystemCoverage {
         registered: after.keys().cloned().collect(),
         ..Default::default()
