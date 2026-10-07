@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- Fingerprinting (T1): stable failure identity across seeds/frames/entities;
+  `Normalizer` strips entity IDs, frame numbers, floats, hex addresses,
+  seeds, paths; `Fingerprint` computed at report snapshot time (scheme 1)
+- `ViolationEntry.fingerprint` + `fingerprint_scheme` fields;
+  informational rules exempt from fingerprint gating
 - `ScenarioRunner` trait + `InProcess` runner + `run_matrix` (parallel:
   one fresh scoped thread per scenario, max_parallel cap, input-order
   output); `run_branch_matrix` is now `run_matrix(.., 1)` semantics

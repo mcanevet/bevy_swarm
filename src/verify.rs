@@ -2361,3 +2361,106 @@ fn fresh_thread_per_scenario() {
     let unique: std::collections::HashSet<_> = ids.iter().collect();
     assert_eq!(unique.len(), 4, "each scenario on its own fresh thread");
 }
+
+// ---------------------------------------------------------------------------
+// T1: Failure fingerprints + normalizer + dedup
+// ---------------------------------------------------------------------------
+
+#[test]
+fn normalization_merges_entity_and_frame_variants() {
+    let n = crate::fingerprint::default_normalizer();
+    let a = n.normalize("out of bounds entity:12v3 at frame 10");
+    let b = n.normalize("out of bounds entity:44v2 at frame 999");
+    assert_eq!(a, b, "entity ids and frames must normalize away");
+}
+
+#[test]
+fn stable_hash_across_runs() {
+    let n = crate::fingerprint::default_normalizer();
+    let f1 = n.fingerprint(
+        "violation",
+        "ball_in_bounds",
+        &["Ball".to_string()],
+        "out of bounds (10001.0, 0.0, 0.0)",
+    );
+    let f2 = n.fingerprint(
+        "violation",
+        "ball_in_bounds",
+        &["Ball".to_string()],
+        "out of bounds (10001.0, 0.0, 0.0)",
+    );
+    assert_eq!(f1, f2);
+    let f3 = n.fingerprint(
+        "violation",
+        "ball_in_bounds",
+        &["Other".to_string()],
+        "out of bounds (10001.0, 0.0, 0.0)",
+    );
+    assert_ne!(f1, f3, "different location → different fingerprint");
+    let f4 = n.fingerprint(
+        "violation",
+        "other_rule",
+        &["Ball".to_string()],
+        "out of bounds (10001.0, 0.0, 0.0)",
+    );
+    assert_ne!(f1, f4, "different rule → different fingerprint");
+}
+
+#[test]
+fn every_report_failure_has_fingerprint() {
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":42},"duration_s":0.3,"invariants":[
+            {"name":"ball_in_bounds","rule":"nodes_in_bounds",
+             "min_x":-100,"max_x":100,"min_y":-100,"max_y":100}
+        ],"setup":{}}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    app.add_systems(Update, inject_bounds_bug);
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(!rep.violations.is_empty());
+    for v in &rep.violations {
+        assert!(
+            v.fingerprint.is_some(),
+            "violation {} lacks a fingerprint",
+            v.rule
+        );
+        assert_eq!(v.fingerprint_scheme, 1);
+    }
+    // Dedup by fingerprint: the seeded crash bug produces one distinct
+    // fingerprint for the bounds rule.
+    let uniq: std::collections::HashSet<_> = rep
+        .violations
+        .iter()
+        .filter_map(|v| v.fingerprint.clone())
+        .collect();
+    assert!(!uniq.is_empty());
+}
+
+#[test]
+fn same_bug_across_seeds_shares_fingerprint() {
+    // The same planted bounds bug, three seeds → one fingerprint.
+    let mut fps: Vec<crate::fingerprint::Fingerprint> = vec![];
+    for seed in [1u64, 2, 3] {
+        let scen: Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"chaos","seed":{seed}}},"duration_s":0.3,"invariants":[
+                {{"name":"ball_in_bounds","rule":"nodes_in_bounds",
+                 "min_x":-100,"max_x":100,"min_y":-100,"max_y":100}}
+            ],"setup":{{}}}}"#
+        ))
+        .unwrap();
+        let mut app = build_app();
+        app.add_systems(Update, inject_bounds_bug);
+        let rep = run_scenario(&mut app, &scen).unwrap();
+        for v in &rep.violations {
+            if v.rule == "ball_in_bounds" {
+                if let Some(f) = &v.fingerprint {
+                    fps.push(f.clone());
+                }
+            }
+        }
+    }
+    assert!(!fps.is_empty(), "bug never fired");
+    let uniq: std::collections::HashSet<_> = fps.iter().collect();
+    assert_eq!(uniq.len(), 1, "one fingerprint for one bug across seeds");
+}

@@ -19,6 +19,13 @@ pub struct ViolationEntry {
     pub detail: String,
     /// Detail at the most recent occurrence (trend/debug).
     pub last_detail: String,
+    /// Stable failure identity (T1): computed at snapshot time from
+    /// kind/rule/location/normalized detail. Informational (wall-clock
+    /// frame-time) rules are exempt.
+    pub fingerprint: Option<crate::fingerprint::Fingerprint>,
+    /// Which fingerprint scheme produced `fingerprint` (frozen at 1
+    /// for v0.2; a documented migration bumps this).
+    pub fingerprint_scheme: u32,
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -45,6 +52,8 @@ impl Violations {
             count: 0,
             detail: prefixed.clone(),
             last_detail: prefixed.clone(),
+            fingerprint: None,
+            fingerprint_scheme: 1,
         });
         entry.count += 1;
         entry.last_frame = frame;
@@ -54,12 +63,40 @@ impl Violations {
     }
 
     /// Snapshot sorted by first_frame — callers store reports across
-    /// scenarios; never hand out the live map.
+    /// scenarios; never hand out the live map. Fingerprints (T1) are
+    /// computed HERE so every report consumer sees them without the
+    /// oracle systems needing the normalizer.
     pub fn snapshot(&self) -> Vec<ViolationEntry> {
         let mut v: Vec<ViolationEntry> = self.entries.values().cloned().collect();
         v.sort_by_key(|e| e.first_frame);
+        for e in &mut v {
+            // Informational rules (wall-clock frame-time) are NOT
+            // fingerprint-gated (U1 rule 9).
+            if Self::INFORMATIONAL_RULES.contains(&e.rule.as_str()) {
+                e.fingerprint = None;
+                e.fingerprint_scheme = 1;
+            } else {
+                // Strip "[intent: ...]" prefix from detail before
+                // fingerprinting — that prefix varies by seed. The
+                // closing bracket is the first "] " boundary, not the
+                // string end.
+                let raw_detail = e
+                    .detail
+                    .strip_prefix("[intent: ")
+                    .and_then(|rest| rest.find("] "))
+                    .map(|end| &e.detail["[intent: ".len() + end + 2..])
+                    .unwrap_or(e.detail.as_str());
+                let norm = crate::fingerprint::default_normalizer();
+                e.fingerprint =
+                    Some(norm.fingerprint("violation", &e.rule, std::slice::from_ref(&e.target), raw_detail));
+                e.fingerprint_scheme = 1;
+            }
+        }
         v
     }
+
+    /// Wall-clock/informational rules excluded from fingerprint gating.
+    pub const INFORMATIONAL_RULES: &[&str] = &["frame_time_p99", "frame_time_worst"];
 }
 
 // ---------------------------------------------------------------------------

@@ -123,6 +123,18 @@
         "last_detail": {
           "type": "string",
           "description": "Detail at the most recent occurrence (trend/debug)"
+        },
+        "fingerprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable failure identity (T1); null for informational rules"
+        },
+        "fingerprint_scheme": {
+          "type": "integer",
+          "const": 1,
+          "description": "Fingerprint scheme version (frozen at 1 for v0.2)"
         }
       },
       "additionalProperties": false
