@@ -141,6 +141,48 @@ pub trait TestApiResolve {
     fn resolve(&self, path: &str) -> Option<TestFieldValue>;
 }
 
+/// Type-erased TestApi resolution function: resolves a `TestApi.<field>`
+/// path against the world WITHOUT the harness knowing the concrete
+/// resource type. Games (or semantic adapters) register one; the LAST
+/// registered resolver wins.
+pub type ResolveFn = fn(&World, &str) -> Option<TestFieldValue>;
+
+/// The optional type-erased resolver resource. Absent = no semantic tier;
+/// world percepts (Resource:/Component:) still work without it.
+#[derive(Resource, Clone, Copy)]
+pub struct TestApiResolver(pub ResolveFn);
+
+/// One path-resolution entry point: the registered resolver (if any)
+/// first, then world percepts (I2 grammar: Resource:/Component:).
+/// A missing resolver is NOT an error — only scenarios referencing
+/// TestApi.* paths while no resolver is registered fail at load time.
+pub fn resolve_path(world: &World, path: &str) -> Option<TestFieldValue> {
+    if let Some(resolver) = world.get_resource::<TestApiResolver>() {
+        if let Some(v) = (resolver.0)(world, path) {
+            return Some(v);
+        }
+    }
+    crate::oracles::resolve_world_percept(world, path)
+}
+
+/// Extension for registering a custom TestApi resolver on an App.
+/// The concrete resource type only needs to exist and be readable from
+/// `&World`; it does NOT have to be the crate's `TestApi` type.
+pub trait RegisterTestApi {
+    /// Register a type-erased resolver for `TestApi.*` paths.
+    /// Multiple calls: the last one wins.
+    fn register_test_api<A: Resource + TestApiResolve>(&mut self) -> &mut Self;
+}
+
+impl RegisterTestApi for App {
+    fn register_test_api<A: Resource + TestApiResolve>(&mut self) -> &mut Self {
+        self.insert_resource(TestApiResolver(|world: &World, path: &str| {
+            world.get_resource::<A>()?.resolve(path)
+        }));
+        self
+    }
+}
+
 /// Hook closure type shared by ResetHooks, CheatHooks, and NamedIntents.
 pub type WorldHook = Box<dyn Fn(&mut World) + Send + Sync>;
 
@@ -202,6 +244,15 @@ impl Plugin for TestConventionsPlugin {
             .init_resource::<CheatHooks>()
             .init_resource::<ActionLog>()
             .init_resource::<GameVersion>();
+
+        // Default semantic-tier resolver: the crate's TestApi shape.
+        // Games with custom TestApis use `register_test_api::<TheirType>()`
+        // (last call wins).
+        app.insert_resource(TestApiResolver(|world: &World, path: &str| {
+            world
+                .get_resource::<TestApi>()
+                .and_then(|api| api.resolve(path))
+        }));
 
         // Register reflective types for query-target invariants.
         let registry = app.world_mut().resource_mut::<AppTypeRegistry>();

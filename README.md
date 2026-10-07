@@ -53,7 +53,7 @@ assert_eq!(report.status, "pass");
 
 ## Game-side contract (deliberately thin)
 
-1. `TestApi` resource implementing `TestApiResolve` — publish observable state (score, phase, hp...) for invariants and planner goals
+1. Optional: a `TestApi` resource implementing `TestApiResolve` (or `app.register_test_api::<YourType>()` for a custom type) — publish observable state (score, phase, hp...) for invariants and planner goals; world percepts (`Resource:`/`Component:` paths) work with ZERO game-side setup
 2. `IntentSurface` — declare your game's input verbs; the chaos bot samples only from it
 3. Optional: `ResetHooks`, `CheatHooks`, genre markers (`TurnBased`/`RealTime`), `Gameplay` marker component
 

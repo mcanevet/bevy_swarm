@@ -315,9 +315,25 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
 
-    if app.world().get_resource::<TestApi>().is_none() {
+    // D1: a resolver is OPTIONAL (zero-contract percepts work alone).
+    // Only a scenario that references TestApi.* paths while no resolver
+    // is registered fails, at load time, with guidance.
+    let needs_test_api = scenario.invariants.iter().any(|inv| {
+        inv.path
+            .as_deref()
+            .or(inv.requires_path.as_deref())
+            .is_some_and(|p| p.starts_with("TestApi."))
+    }) || matches!(scenario.bot.bot_type, crate::enums::BotType::Planner);
+    if needs_test_api
+        && app
+            .world()
+            .get_resource::<crate::contract::TestApiResolver>()
+            .is_none()
+        && app.world().get_resource::<TestApi>().is_none()
+    {
         return Err(ScenarioError::ContractMissing(
-            "game does not implement testable-conventions: TestApi resource missing — custom invariants cannot be evaluated"
+            "scenario references TestApi.* paths (or uses the planner bot) but no resolver is registered — \
+             call register_test_api::<YourApi>() or add TestConventionsPlugin (or use Resource:/Component: percept paths)"
                 .to_string(),
         ));
     }
@@ -395,7 +411,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     let hooks = app
         .world_mut()
         .remove_resource::<ResetHooks>()
-        .expect("presence checked above");
+        .unwrap_or_default();
     for k in &kinds {
         if let Some(hook) = hooks.0.get(k) {
             hook(app.world_mut());
