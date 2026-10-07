@@ -6,7 +6,7 @@
 //! primitive goal declares the intents to emit while it is unachieved;
 //! combinators control ordering, alternatives, and retries.
 
-use crate::contract::{TestApi, TestApiResolve, TestFieldValue, UserIntent};
+use crate::contract::{TestFieldValue, UserIntent};
 use crate::harness::{PlaytestState, ReplayIntent, ScenarioResource, Violations};
 use bevy::ecs::world::World;
 use serde::{Deserialize, Serialize};
@@ -100,14 +100,20 @@ impl PlannerStack {
         self.0.is_empty()
     }
 
-    fn push(&mut self, goal: &GoalNode, api: &TestApi, frame: u64, deadline: Option<u64>) {
+    fn push(
+        &mut self,
+        goal: &GoalNode,
+        resolve: &dyn Fn(&str) -> Option<TestFieldValue>,
+        frame: u64,
+        deadline: Option<u64>,
+    ) {
         let snap = match goal {
             GoalNode::Primitive {
                 path,
                 min_gain,
                 max_gain,
                 ..
-            } if min_gain.is_some() || max_gain.is_some() => match api.resolve(path) {
+            } if min_gain.is_some() || max_gain.is_some() => match resolve(path) {
                 Some(TestFieldValue::Numeric(n)) => Some(n),
                 _ => None,
             },
@@ -158,9 +164,14 @@ impl PlannerStack {
 /// completes its Any/Repeat parent immediately; a Seq parent keeps
 /// going (its own child index already advanced). Post-conditions
 /// (min_gain/max_gain vs snapshot) are checked per popped primitive.
-fn pop_success(stack: &mut PlannerStack, api: &TestApi, violations: &mut Violations, frame: u64) {
+fn pop_success(
+    stack: &mut PlannerStack,
+    resolve: &dyn Fn(&str) -> Option<TestFieldValue>,
+    violations: &mut Violations,
+    frame: u64,
+) {
     while let Some(entry) = stack.0.pop() {
-        check_postcondition(&entry, api, violations, frame, &stack.trace());
+        check_postcondition(&entry, resolve, violations, frame, &stack.trace());
         match stack.0.last() {
             Some(parent)
                 if matches!(parent.goal, GoalNode::Any { .. } | GoalNode::Repeat { .. }) =>
@@ -177,7 +188,7 @@ fn pop_success(stack: &mut PlannerStack, api: &TestApi, violations: &mut Violati
 /// goal activation and completion.
 fn check_postcondition(
     entry: &PlannerEntry,
-    api: &TestApi,
+    resolve: &dyn Fn(&str) -> Option<TestFieldValue>,
     violations: &mut Violations,
     frame: u64,
     trace: &str,
@@ -191,7 +202,7 @@ fn check_postcondition(
     else {
         return;
     };
-    let (Some(TestFieldValue::Numeric(curr)), Some(start)) = (api.resolve(path), entry.snap) else {
+    let (Some(TestFieldValue::Numeric(curr)), Some(start)) = (resolve(path), entry.snap) else {
         return;
     };
     let delta = curr - start;
@@ -267,12 +278,12 @@ fn replay_ctx(ri: &ReplayIntent) -> String {
 
 /// Check whether a primitive goal's TestApi path satisfies its check.
 fn primitive_achieved(
-    api: &TestApi,
+    resolve: &dyn Fn(&str) -> Option<TestFieldValue>,
     path: &str,
     check: &crate::enums::CheckOp,
     value: &serde_json::Value,
 ) -> bool {
-    match api.resolve(path) {
+    match resolve(path) {
         Some(TestFieldValue::Numeric(n)) => value
             .as_f64()
             .map(|thr| check.holds(n, thr))
@@ -327,16 +338,21 @@ pub fn planner_bot_system(world: &mut World) {
 
     // planner_stack copied out; written back before returning. First
     // tick initializes with the root.
+    //
+    // Take Violations out of the world so the resolve closure can hold
+    // an immutable world borrow for the whole loop; re-inserted below.
+    let mut violations = world.remove_resource::<Violations>().unwrap_or_default();
+    // D1: resolution goes through resolve_path (registered resolver
+    // first, then world percepts) — a custom TestApi type works without
+    // the crate's TestApi resource.
+    let resolve = |path: &str| crate::contract::resolve_path(world, path);
     let mut planner = planner_stack;
     if planner.is_empty() {
-        let api = world.resource::<TestApi>().clone();
-        planner.push(&goal_root, &api, frame, None);
+        planner.push(&goal_root, &resolve, frame, None);
     }
 
     // Intent to emit this tick (at most one): (intent, variant ctx, trace).
     let mut emitted: Option<(UserIntent, String, String)> = None;
-    let api = world.resource::<TestApi>().clone();
-    let mut violations = world.resource_mut::<Violations>();
     let mut goals_done: u64 = 0;
 
     loop {
@@ -375,11 +391,11 @@ pub fn planner_bot_system(world: &mut World) {
         match &entry_kind {
             GoalNode::Seq { children } => {
                 if planner.0[top_idx].child >= children.len() {
-                    pop_success(&mut planner, &api, &mut violations, frame);
+                    pop_success(&mut planner, &resolve, &mut violations, frame);
                 } else {
                     let child = children[planner.0[top_idx].child].clone();
                     planner.0.last_mut().unwrap().child += 1;
-                    planner.push(&child, &api, frame, None);
+                    planner.push(&child, &resolve, frame, None);
                 }
             }
             GoalNode::Any { children, max_s } => {
@@ -399,7 +415,7 @@ pub fn planner_bot_system(world: &mut World) {
                 let child = children[planner.0[top_idx].child].clone();
                 let dl = frame + (max_s * tps as f32) as u64;
                 planner.0.last_mut().unwrap().child += 1;
-                planner.push(&child, &api, frame, Some(dl));
+                planner.push(&child, &resolve, frame, Some(dl));
             }
             GoalNode::Repeat { child, max_s } => {
                 // Push the child once (child == 0); afterwards this frame
@@ -409,7 +425,7 @@ pub fn planner_bot_system(world: &mut World) {
                     let c = child.as_ref().clone();
                     let dl = frame + (max_s * tps as f32) as u64;
                     planner.0.last_mut().unwrap().child = 1;
-                    planner.push(&c, &api, frame, Some(dl));
+                    planner.push(&c, &resolve, frame, Some(dl));
                 } else {
                     break; // child is in flight on the stack above us
                 }
@@ -421,8 +437,8 @@ pub fn planner_bot_system(world: &mut World) {
                 emit,
                 ..
             } => {
-                if primitive_achieved(&api, path, check, value) {
-                    pop_success(&mut planner, &api, &mut violations, frame);
+                if primitive_achieved(&resolve, path, check, value) {
+                    pop_success(&mut planner, &resolve, &mut violations, frame);
                     goals_done += 1;
                 } else {
                     // Unachieved: emit pursuit intents, PACED by
@@ -449,7 +465,10 @@ pub fn planner_bot_system(world: &mut World) {
         }
     }
 
-    // Write results back into state (single mutable borrow region).
+    // Re-insert the taken-out Violations before the write-back block
+    // (it reads them), dropping the resolve closure's world borrow.
+    drop(resolve);
+    world.insert_resource(violations);
     // Write results back into state (single mutable borrow region).
     {
         let state = &mut world.resource_mut::<PlaytestState>();

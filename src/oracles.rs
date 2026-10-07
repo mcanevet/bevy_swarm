@@ -320,8 +320,11 @@ fn count_query_target(world: &World, target: &QueryTarget) -> Option<usize> {
     Some(count)
 }
 
-fn resolve_test_api(api: &TestApi, path: &str) -> (Option<f64>, Option<String>) {
-    match api.resolve(path) {
+/// Resolve via the type-erased resolver (registered first, then world
+/// percepts) — a custom TestApi type works without the crate's own
+/// TestApi resource.
+fn resolve_field(world: &World, path: &str) -> (Option<f64>, Option<String>) {
+    match crate::contract::resolve_path(world, path) {
         Some(TestFieldValue::Numeric(n)) => (Some(n), None),
         Some(TestFieldValue::Text(s)) => (None, Some(s)),
         None => (None, None),
@@ -335,7 +338,6 @@ pub(crate) fn check_custom_system(world: &mut World) {
     let frame = world.resource::<PlaytestState>().frame;
     let elapsed_s = world.resource::<PlaytestState>().elapsed_s();
     let tps = world.resource::<PlaytestState>().tps;
-    let api = world.resource::<TestApi>().clone();
 
     for inv in &scenario.invariants {
         if inv.rule != crate::enums::InvariantRule::Custom {
@@ -415,16 +417,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
         }
 
         let Some(path) = &inv.path else { continue };
-        let (numeric, string_val) = match resolve_test_api(&api, path) {
-            (Some(n), s) => (Some(n), s),
-            (None, Some(s)) => (None, Some(s)),
-            // TestApi miss → try world reflection percept (generic layer).
-            (None, None) => match resolve_world_percept(world, path) {
-                Some(TestFieldValue::Numeric(n)) => (Some(n), None),
-                Some(TestFieldValue::Text(s)) => (None, Some(s)),
-                None => (None, None),
-            },
-        };
+        let (numeric, string_val) = resolve_field(world, path);
         world
             .resource_mut::<PlaytestState>()
             .coverage
@@ -615,7 +608,10 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 true
             };
             if when_holds {
-                let (req_num, req_str) = resolve_test_api(&api, req_path);
+                // requires_path resolves through the SAME entry point:
+                // registered resolver first, then world percepts
+                // (previously skipped percepts entirely).
+                let (req_num, req_str) = resolve_field(world, req_path);
                 world
                     .resource_mut::<PlaytestState>()
                     .coverage

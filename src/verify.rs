@@ -918,9 +918,12 @@ fn duplicate_invariant_names_rejected() {
 
 #[test]
 fn missing_contract_is_structured_error() {
+    // Missing harness plugin / contract pieces produce a structured
+    // ContractMissing error, never a panic or a vacuous pass.
+    // A bare app without PlaytestPlugin cannot run a scenario at all.
     let mut app = bevy::app::App::new();
     let scen: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[],"setup":{}}"#,
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[{"name":"c","rule":"custom","path":"TestApi.score","check":"above","value":1}],"setup":{"resets":[{"kind":"anything"}]}}"#,
     )
     .unwrap();
     let err = run_scenario(&mut app, &scen).unwrap_err();
@@ -928,6 +931,21 @@ fn missing_contract_is_structured_error() {
         err,
         crate::scenario::ScenarioError::ContractMissing(_)
     ));
+
+    // A TestApi.* path without any registered resolver is also a
+    // structured load error (D1).
+    let mut app2 = bevy::app::App::new();
+    app2.add_plugins((bevy::MinimalPlugins, crate::harness::PlaytestPlugin));
+    let scen2: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[{"name":"c","rule":"custom","path":"TestApi.score","check":"above","value":1}],"setup":{}}"#,
+    )
+    .unwrap();
+    let err2 = run_scenario(&mut app2, &scen2).unwrap_err();
+    assert!(
+        matches!(err2, crate::scenario::ScenarioError::ContractMissing(_)),
+        "got {:?}",
+        err2
+    );
 }
 
 #[test]
@@ -1949,5 +1967,103 @@ fn planner_respects_input_rate() {
         wait_count <= 8,
         "too many waits: {} (rate not respected)",
         wait_count
+    );
+}
+
+// ---------------------------------------------------------------------------
+// D1: resolve_path + optional type-erased TestApi resolver
+// ---------------------------------------------------------------------------
+
+/// A game-defined TestApi type entirely distinct from the crate's.
+#[derive(Resource, Default)]
+struct InventoryApi {
+    gold: i64,
+    gems: i64,
+}
+impl crate::contract::TestApiResolve for InventoryApi {
+    fn resolve(&self, path: &str) -> Option<crate::contract::TestFieldValue> {
+        match path.strip_prefix("TestApi.")? {
+            "gold" => Some(crate::contract::TestFieldValue::Numeric(self.gold as f64)),
+            "gems" => Some(crate::contract::TestFieldValue::Numeric(self.gems as f64)),
+            _ => None,
+        }
+    }
+}
+
+#[test]
+fn custom_test_api_type_works() {
+    // A game with its OWN TestApi resource type: inventory resolver
+    // registered via register_test_api; invariant on TestApi.gold works
+    // WITHOUT the crate's TestApi resource.
+    let mut app = build_app_no_scoring();
+    app.init_resource::<InventoryApi>()
+        .register_test_api::<InventoryApi>();
+    app.add_systems(
+        bevy::app::Update,
+        |mut api: bevy::ecs::system::ResMut<InventoryApi>| {
+            api.gold += 1; // grows past any ceiling -> violation
+        },
+    );
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.3,"invariants":[{"name":"gold_cap","rule":"custom","path":"TestApi.gold","check":"above","value":3}]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "gold_cap"),
+        "custom resolver not used: {:#?}",
+        rep.violations
+    );
+}
+
+#[test]
+fn testapi_path_without_resolver_is_load_error() {
+    // No resolver, no crate TestApi resource, but the scenario uses a
+    // TestApi.* path -> structured load error with guidance.
+    let mut app = bevy::app::App::new();
+    app.add_plugins((bevy::MinimalPlugins, crate::harness::PlaytestPlugin));
+    // NOTE: no TestConventionsPlugin -> no default resolver.
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.2,"invariants":[{"name":"cap","rule":"custom","path":"TestApi.score","check":"above","value":3}]}"#,
+    )
+    .unwrap();
+    match run_scenario(&mut app, &scen) {
+        Err(crate::harness::ScenarioError::ContractMissing(msg)) => {
+            assert!(msg.contains("resolver"), "{}", msg);
+        }
+        other => panic!("expected ContractMissing, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn requires_path_uses_percepts() {
+    // requires_path now resolves through resolve_path: world percepts
+    // (Resource:) work for expert-rule REQUIRE clauses without any
+    // TestApi resolver at all.
+    #[derive(Resource, Reflect, Default)]
+    #[reflect(Resource)]
+    struct Policy {
+        health: f64,
+    }
+    let mut app = build_app_no_scoring();
+    app.init_resource::<Policy>();
+    {
+        use bevy::ecs::reflect::AppTypeRegistry;
+        let registry = app.world_mut().resource_mut::<AppTypeRegistry>();
+        registry.0.write().register::<Policy>();
+    }
+    // Fixtures have the default TestApi (resolver present via
+    // TestConventionsPlugin); this run proves percepts ALSO work for
+    // requires_path: health=10 violates requires below 5.
+    app.world_mut().resource_mut::<Policy>().health = 10.0;
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.3,"invariants":[{"name":"heal_policy","rule":"custom","path":"TestApi.score","check":"below","value":9999,"requires_path":"Resource:Policy.health","requires_check":"below","requires_value":5}]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut app, &scen).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "heal_policy"),
+        "requires_path did not use percepts: {:#?}",
+        rep.violations
     );
 }

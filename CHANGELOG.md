@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- `resolve_path(world, path)` — one path-resolution entry point: the
+  registered type-erased resolver (if any) first, then world percepts
+  (Resource:/Component: grammar)
+- `TestApiResolver` resource + `RegisterTestApi::register_test_api::<A>()`
+  — games register a custom TestApi type; last call wins
+- TestApi is now OPTIONAL (zero-contract): only scenarios referencing
+  TestApi.* paths (or the planner bot) fail at load time with guidance
+  when no resolver is registered
+- `requires_path` (expert REQUIRE) resolves through percepts too
+- planner bot resolves goals through resolve_path (custom TestApi types
+  work for pursuit/goal conditions)
 - Initial (unreleased) version. Contract-first architecture: games
   implement `TestApi`, `UserIntent`, `ResetHooks`, `IntentSurface`,
   and `Gameplay` marker; the harness drives `App::update()` headlessly
