@@ -333,14 +333,26 @@ pub enum ReplayIntent {
         name: String,
         value: f32,
     },
-    /// Select a tile/entity BY NAME — resolved against live `Name` +
-    /// `Gameplay` entities at fire time. Unlike raw-entity Selects, this
-    /// survives reset cycles (fresh entity ids) — the replay scenario
-    /// refers to stable scene names.
+    /// Select a tile/entity BY NAME or StableId — resolved against live
+    /// `Name` + `Gameplay` entities at fire time. Unlike raw-entity
+    /// Selects, this survives reset cycles (fresh entity ids) — the
+    /// replay scenario refers to stable scene identities. StableId
+    /// targets work for unnamed Gameplay entities (I1).
     Select {
-        target: String,
+        target: SelectTarget,
     },
     Wait,
+}
+
+/// Target of a replay Select: Name (plain string, back-compat) or
+/// StableId (unnamed Gameplay entities; I1).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum SelectTarget {
+    /// Plain string name (existing JSON scenarios keep working).
+    Name(String),
+    /// StableId object form: {"stable_id": n}.
+    Stable { stable_id: u64 },
 }
 
 /// Timed action for replay from ActionLog. Frame-aligned with the original

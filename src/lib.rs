@@ -44,6 +44,7 @@ pub mod fingerprint;
 pub mod golden;
 pub mod harness;
 pub mod headless;
+pub mod identity;
 pub mod minimize;
 pub mod oracles;
 pub mod planner;

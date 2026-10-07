@@ -8,6 +8,7 @@
 
 use crate::contract::{TestFieldValue, UserIntent};
 use crate::harness::{PlaytestState, ReplayIntent, ScenarioResource, Violations};
+use crate::scenario::SelectTarget;
 use bevy::ecs::world::World;
 use serde::{Deserialize, Serialize};
 
@@ -271,7 +272,10 @@ fn replay_ctx(ri: &ReplayIntent) -> String {
         ReplayIntent::Move { dir } => format!("move:x={:.2},y={:.2}", dir.0, dir.1),
         ReplayIntent::Choice { index } => format!("choice:idx={}", index),
         ReplayIntent::Axis { name, value } => format!("axis:{}={:.2}", name, value),
-        ReplayIntent::Select { target } => format!("select:name={}", target),
+        ReplayIntent::Select { target } => match target {
+            SelectTarget::Name(n) => format!("select:name={}", n),
+            SelectTarget::Stable { stable_id } => format!("select:stable={}", stable_id),
+        },
         ReplayIntent::Wait => "wait".into(),
     }
 }

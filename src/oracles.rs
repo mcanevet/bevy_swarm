@@ -768,6 +768,7 @@ pub(crate) fn intent_audit_log_system(
     state: Res<PlaytestState>,
     mut reader: bevy::ecs::message::MessageReader<UserIntent>,
     names: Query<&Name>,
+    ids: Query<&crate::identity::StableId>,
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
 ) {
     for intent in reader.read() {
@@ -790,12 +791,26 @@ pub(crate) fn intent_audit_log_system(
                 Some(serde_json::json!({"name": name, "value": value}).to_string())
             }
             UserIntent::Select { target } => Some(
-                match names.get(*target) {
-                    Ok(n) => serde_json::json!({"target": n.as_str(), "entity": target.to_bits()}),
-                    // No Name: keep the bits for diagnostics; the replay
-                    // decoder treats a missing "target" as unreplayable
-                    // (counted via unreplayable_actions).
-                    Err(_) => serde_json::json!({"entity": target.to_bits()}),
+                match (names.get(*target), ids.get(*target)) {
+                    // Named: record both name and stable_id (I1).
+                    (Ok(n), Ok(&sid)) => serde_json::json!({
+                        "target": n.as_str(),
+                        "stable_id": sid.0,
+                        "entity": target.to_bits(),
+                    }),
+                    // Unnamed but tracked: stable_id alone is replayable
+                    // (I1) — no longer counted as unreplayable.
+                    (Err(_), Ok(&sid)) => serde_json::json!({
+                        "stable_id": sid.0,
+                        "entity": target.to_bits(),
+                    }),
+                    // Genuinely untracked (non-Gameplay): diagnostics only;
+                    // the replay decoder treats a missing "target"/"stable_id"
+                    // as unreplayable (counted via unreplayable_actions).
+                    (Err(_), Err(_)) => serde_json::json!({"entity": target.to_bits()}),
+                    (Ok(n), Err(_)) => {
+                        serde_json::json!({"target": n.as_str(), "entity": target.to_bits()})
+                    }
                 }
                 .to_string(),
             ),

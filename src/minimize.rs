@@ -106,9 +106,17 @@ pub fn action_to_replay_intent(entry: &TimedAction) -> Option<ReplayIntent> {
                         name: v.get("name")?.as_str()?.to_string(),
                         value: v.get("value")?.as_f64()? as f32,
                     }),
-                    "select" => Some(ReplayIntent::Select {
-                        target: v.get("target")?.as_str()?.to_string(),
-                    }),
+                    "select" => {
+                        // Prefer StableId (works for unnamed entities, I1);
+                        // fall back to Name.
+                        let target = if let Some(sid) = v.get("stable_id").and_then(|s| s.as_u64())
+                        {
+                            SelectTarget::Stable { stable_id: sid }
+                        } else {
+                            SelectTarget::Name(v.get("target")?.as_str()?.to_string())
+                        };
+                        Some(ReplayIntent::Select { target })
+                    }
                     _ => None,
                 }
             }
@@ -123,8 +131,16 @@ pub fn action_to_replay_intent(entry: &TimedAction) -> Option<ReplayIntent> {
     }
     if let Some(rest) = a.strip_prefix("select:name=") {
         return Some(ReplayIntent::Select {
-            target: rest.to_string(),
+            target: SelectTarget::Name(rest.to_string()),
         });
+    }
+    if let Some(rest) = a.strip_prefix("select:stable=") {
+        return rest
+            .parse::<u64>()
+            .ok()
+            .map(|stable_id| ReplayIntent::Select {
+                target: SelectTarget::Stable { stable_id },
+            });
     }
     if a == "wait" {
         return Some(ReplayIntent::Wait);
