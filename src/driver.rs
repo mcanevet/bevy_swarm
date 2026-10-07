@@ -123,6 +123,31 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 .chain()
                 .in_set(PlaytestSet::Tick),
         );
+        app.init_resource::<crate::raw_input::RawActionQueue>();
+        app.init_resource::<crate::raw_input::ActiveKeyHolds>();
+        app.init_resource::<crate::raw_input::ActiveMouseHolds>();
+        app.init_resource::<crate::raw_input::VirtualGamepad>();
+        // Raw input actuator writes these messages directly; without
+        // winit nothing else registers them in a headless app.
+        app.add_message::<bevy::input::keyboard::KeyboardInput>();
+        app.add_message::<bevy::input::mouse::MouseButtonInput>();
+        app.add_message::<bevy::input::mouse::MouseMotion>();
+        app.add_message::<bevy::input::mouse::MouseWheel>();
+        app.add_message::<bevy::window::WindowEvent>();
+        #[cfg(feature = "gamepad")]
+        {
+            app.add_message::<bevy::input::gamepad::GamepadConnectionEvent>();
+            app.add_message::<bevy::input::gamepad::RawGamepadButtonChangedEvent>();
+            app.add_message::<bevy::input::gamepad::RawGamepadAxisChangedEvent>();
+        }
+
+        // Raw input actuator (Z3): keyboard/gamepad injection in PreUpdate,
+        // before Bevy's InputSystems so ButtonInput reflects them same-frame.
+        app.add_systems(
+            bevy::app::PreUpdate,
+            crate::raw_input::raw_input_preupdate_system.after(PlaytestSet::Bots),
+        );
+
         app.add_systems(
             bevy::app::PreUpdate,
             (
@@ -140,6 +165,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 synthetic_pointer_bot_system,
                 synthetic_pointer_actionability_check_system,
                 synthetic_keyboard_bot_system,
+                crate::raw_input::raw_input_update_system,
             )
                 .chain()
                 .in_set(PlaytestSet::RawInput),
