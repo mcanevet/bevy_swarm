@@ -152,6 +152,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 check_bounds_gameplay_system,
                 check_custom_system,
                 intent_audit_log_system,
+                crate::determinism::record_state_digest_system,
             )
                 .chain()
                 .in_set(PlaytestSet::Oracles),
@@ -196,6 +197,10 @@ pub struct PlaytestReport {
     /// during the run, vs every registered system. Unexecuted systems
     /// are coverage gaps to target with new scenarios.
     pub system_coverage: SystemCoverage,
+    /// Per-frame state digests (A4), present only when a StateTrace
+    /// resource was inserted by the caller (normal runs skip it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_trace: Option<Vec<crate::determinism::FrameDigest>>,
 }
 
 impl PlaytestReport {
@@ -218,6 +223,7 @@ impl PlaytestReport {
             unreplayable_actions: 0,
             warnings: vec![],
             system_coverage: Default::default(),
+            state_trace: None,
         }
     }
 }
@@ -646,6 +652,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         unreplayable_actions,
         warnings,
         system_coverage: system_coverage(&systems_before, app.world_mut()),
+        state_trace: app
+            .world_mut()
+            .remove_resource::<crate::determinism::StateTrace>()
+            .map(|t| t.digests),
     })
 }
 

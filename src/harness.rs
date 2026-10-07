@@ -29,3 +29,4 @@ pub use crate::state::*;
 
 // Re-export for consumers that only depend on the harness module.
 pub use crate::contract::Gameplay;
+pub use crate::determinism::*;

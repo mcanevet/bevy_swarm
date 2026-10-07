@@ -110,3 +110,22 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 Requires Bevy 0.20 with the `debug` feature for real system names.
+
+## Determinism
+
+Replay, minimization, and seed sweeps are only trustworthy if a scenario is
+deterministic. `check_determinism` verifies it (ggrs-SyncTest style): the
+scenario runs multiple times on fresh `App`s and per-frame canonical state
+digests are compared. On divergence you get the first divergent frame and
+the differing fields (e.g. `Gameplay[Ball].translation.x`):
+
+```rust
+let report = bevy_swarm::determinism::check_determinism(build_app, &scenario, 2)?;
+if !report.is_deterministic() {
+    println!("{:?}", report.first_divergence);
+}
+```
+
+Games contribute custom digest parts (RNG state, AI blackboards) via the
+`DigestHooks` resource. Normal runs pay nothing — digests are only recorded
+when a `StateTrace` resource is present.
