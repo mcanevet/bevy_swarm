@@ -329,19 +329,10 @@ pub(crate) fn synthetic_pointer_bot_system(
         if click.frame != state.frame {
             continue;
         }
-        let button = match click.button.as_str() {
-            "primary" => PointerButton::Primary,
-            "secondary" => PointerButton::Secondary,
-            "middle" => PointerButton::Middle,
-            other => {
-                violations.report(
-                    "synthetic_pointer_config",
-                    &click.target,
-                    format!("unknown pointer button '{}'", other),
-                    state.frame,
-                );
-                continue;
-            }
+        let button = match click.button {
+            crate::enums::PointerButton::Primary => PointerButton::Primary,
+            crate::enums::PointerButton::Secondary => PointerButton::Secondary,
+            crate::enums::PointerButton::Middle => PointerButton::Middle,
         };
         let Some((_, transform)) = q_named.iter().find(|(n, _)| n.as_str() == click.target) else {
             violations.report(

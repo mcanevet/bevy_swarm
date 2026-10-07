@@ -215,8 +215,8 @@ pub struct PointerClickInput {
     /// Entity Name to click (resolved against Gameplay entities).
     pub target: String,
     /// Primary button by default; "secondary"/"middle" supported.
-    #[serde(default = "default_pointer_button")]
-    pub button: String,
+    #[serde(default)]
+    pub button: crate::enums::PointerButton,
     /// ACTIONABILITY GATE (Playwright-style, opt-in): after the click
     /// gesture completes, verify the picking backend's hover map shows
     /// the pointer over SOME entity — i.e. the click was receivable by
@@ -229,10 +229,6 @@ pub struct PointerClickInput {
     /// Long-press interactions, drag-to-hold menus.
     #[serde(default = "default_hold_frames")]
     pub hold_frames: u64,
-}
-
-fn default_pointer_button() -> String {
-    "primary".to_string()
 }
 
 pub fn action_log_to_timed_actions(log: &[crate::contract::ActionEntry]) -> Vec<TimedAction> {
@@ -419,15 +415,6 @@ impl std::fmt::Display for ScenarioError {
 
 impl std::error::Error for ScenarioError {}
 
-const KNOWN_BOT_TYPES: [crate::enums::BotType; 6] = [
-    crate::enums::BotType::Chaos,
-    crate::enums::BotType::Pursuit,
-    crate::enums::BotType::Replay,
-    crate::enums::BotType::SyntheticPointer,
-    crate::enums::BotType::SyntheticKeyboard,
-    crate::enums::BotType::Planner,
-];
-
 pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
     // Validate tps and duration_s
     if scenario.tps < 1 {
@@ -438,14 +425,48 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             "duration_s must be finite and > 0".into(),
         ));
     }
-    // Bot type validity is enforced by the BotType enum deserialization
-    // itself — unknown strings fail at parse time.
-    if !KNOWN_BOT_TYPES.contains(&scenario.bot.bot_type) {
-        return Err(ScenarioError::Rejected(format!(
-            "unknown bot type '{}' (expected one of: {})",
-            scenario.bot.bot_type, scenario.bot.bot_type
-        )));
+    // Bot-specific requirements (C6).
+    use crate::enums::BotType;
+    match scenario.bot.bot_type {
+        BotType::Planner => {
+            if scenario.bot.goals.is_none() {
+                return Err(ScenarioError::Rejected(
+                    "planner bot requires a non-empty goals tree".into(),
+                ));
+            }
+        }
+        BotType::Pursuit => {
+            if scenario.bot.agent_target.is_none() && scenario.bot.target.is_none() {
+                return Err(ScenarioError::Rejected(
+                    "pursuit bot requires agent_target or target".into(),
+                ));
+            }
+        }
+        BotType::SyntheticPointer => {
+            if scenario.bot.pointer_clicks.is_empty() {
+                return Err(ScenarioError::Rejected(
+                    "synthetic_pointer bot requires a non-empty pointer_clicks list".into(),
+                ));
+            }
+        }
+        BotType::SyntheticKeyboard => {
+            if scenario.bot.key_presses.is_empty() {
+                return Err(ScenarioError::Rejected(
+                    "synthetic_keyboard bot requires a non-empty key_presses list".into(),
+                ));
+            }
+            for kp in &scenario.bot.key_presses {
+                if parse_key_code(&kp.key).is_none() {
+                    return Err(ScenarioError::Rejected(format!(
+                        "key_presses: unknown key name '{}' at frame {}",
+                        kp.key, kp.frame
+                    )));
+                }
+            }
+        }
+        _ => {}
     }
+
     // Invariant names key the eventual-state and dedup tables —
     // duplicates would silently shadow each other.
     let mut seen = HashSet::new();
@@ -483,6 +504,39 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
                 "invariant '{}' uses differential without a TestApi path",
                 rule.name
             )));
+        }
+        // Time-window sanity (C6).
+        if let Some(ev) = rule.eventually_s {
+            if ev <= 0.0 {
+                return Err(ScenarioError::Rejected(format!(
+                    "invariant '{}' has eventually_s <= 0",
+                    rule.name
+                )));
+            }
+        }
+        if let (Some(after), Some(before)) = (rule.after_s, rule.before_s) {
+            if after >= before {
+                return Err(ScenarioError::Rejected(format!(
+                    "invariant '{}' has after_s ({}) >= before_s ({})",
+                    rule.name, after, before
+                )));
+            }
+        }
+        // Bounds sanity (C6).
+        let bound_pairs = [
+            (rule.min_x, rule.max_x, "x"),
+            (rule.min_y, rule.max_y, "y"),
+            (rule.min_z, rule.max_z, "z"),
+        ];
+        for (min, max, axis) in bound_pairs {
+            if let (Some(lo), Some(hi)) = (min, max) {
+                if lo > hi {
+                    return Err(ScenarioError::Rejected(format!(
+                        "invariant '{}' has min_{} ({}) > max_{} ({})",
+                        rule.name, axis, lo, axis, hi
+                    )));
+                }
+            }
         }
         // Expert-rule validation: requires_* only valid when WHEN clause exists
         if (rule.requires_path.is_some() || rule.requires_check.is_some()) && rule.path.is_none() {

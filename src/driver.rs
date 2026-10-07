@@ -620,6 +620,12 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .filter(|ta| crate::minimize::action_to_replay_intent(ta).is_none())
         .count();
     let mut warnings = Vec::new();
+    if scenario.bot.bot_type == crate::enums::BotType::Replay && scenario.bot.inputs.is_empty() {
+        warnings.push(
+            "replay bot has an empty inputs list — the run does nothing;              record intents first (audit-log -> replay, B1)"
+                .to_string(),
+        );
+    }
     if unreplayable_actions > 0 {
         warnings.push(format!(
             "{} audit-log intents cannot be converted to replay intents (Select on unnamed entity?) — name your Gameplay entities for full replayability",
