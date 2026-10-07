@@ -339,6 +339,49 @@ pub(crate) fn finish_plugins(app: &mut App) {
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 
+    // Z7: route Bevy errors/logs/panics from this run into a private sink
+    // keyed by thread-local RunId, drained into Violations below. Install
+    // the panic hook once per process (chains to previous).
+    static mut PANIC_HOOK_INSTALLED: bool = false;
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    {
+        let _guard = LOCK.lock().unwrap();
+        if !unsafe { PANIC_HOOK_INSTALLED } {
+            unsafe { PANIC_HOOK_INSTALLED = true };
+            let prev = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                crate::sinks::swarm_panic_hook_inner(info, &prev);
+            }));
+        }
+    }
+    let run_id = crate::sinks::RunId::new();
+    crate::sinks::set_current_run(run_id);
+    // Install the swarm error handler once per App (App::set_error_handler
+    // panics on a second call). A marker resource tracks ownership; the
+    // handler reads the thread-local CURRENT_RUN so parallel runs stay
+    // separated. For Error-severity BevyErrors, chain to Bevy's panic
+    // handler so panics propagate as crashes.
+    #[derive(bevy::ecs::resource::Resource)]
+    struct SwarmErrorHandlerInstalled;
+    if app
+        .world()
+        .get_resource::<SwarmErrorHandlerInstalled>()
+        .is_none()
+    {
+        app.set_error_handler(|mut err, ctx| {
+            let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
+            // Capture first (severity/context/message), then resume
+            // unwinding so panic-severity errors crash the run as before.
+            crate::sinks::capture_bevy_error(&err, &ctx);
+            if is_panic {
+                if let Some(payload) = err.take_payload() {
+                    std::panic::resume_unwind(payload);
+                }
+            }
+        });
+        app.insert_resource(SwarmErrorHandlerInstalled);
+    }
+
     // Finish plugin building exactly like App::run (Plugin::finish
     // hooks: render app links, late registrations).
     finish_plugins(app);
@@ -608,6 +651,88 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // unfinished primitive never achieved its condition — a goal that
     // was pursued but not reached (progress-stall bug signature).
     let mut snap = violations.snapshot();
+
+    // Z7: drain the error/log/panic sink into the snapshot as
+    // bevy_error / log_error / panic violations. Dedupe by
+    // (rule, context) via Violations semantics.
+    crate::sinks::clear_current_run();
+    for captured in crate::sinks::drain_run(run_id) {
+        match captured {
+            crate::sinks::Captured::BevyError {
+                severity,
+                context,
+                message,
+                frame,
+            } => {
+                let rule = if severity >= crate::sinks::Severity::Error {
+                    "bevy_error"
+                } else {
+                    "bevy_warning"
+                };
+                // Only surface Warning-severity and above.
+                if severity >= crate::sinks::Severity::Warning {
+                    let entry = crate::state::ViolationEntry {
+                        rule: rule.to_string(),
+                        target: context.clone(),
+                        first_frame: frame,
+                        last_frame: frame,
+                        count: 1,
+                        detail: message.clone(),
+                        last_detail: message.clone(),
+                        fingerprint: None,
+                        fingerprint_scheme: 1,
+                    };
+                    snap.push(entry);
+                }
+            }
+            crate::sinks::Captured::Log {
+                level,
+                target,
+                message,
+                frame,
+            } => {
+                if level == bevy::log::Level::ERROR {
+                    // Allow-list: the second-App LogPlugin message is expected
+                    // in multi-App processes and not a game defect.
+                    if !message.contains("Could not set global logger")
+                        && !message.contains("already set")
+                    {
+                        let entry = crate::state::ViolationEntry {
+                            rule: "log_error".to_string(),
+                            target: target.clone(),
+                            first_frame: frame,
+                            last_frame: frame,
+                            count: 1,
+                            detail: message.clone(),
+                            last_detail: message.clone(),
+                            fingerprint: None,
+                            fingerprint_scheme: 1,
+                        };
+                        snap.push(entry);
+                    }
+                }
+            }
+            crate::sinks::Captured::Panic {
+                message, location, ..
+            } => {
+                let entry = crate::state::ViolationEntry {
+                    rule: "panic".to_string(),
+                    target: "world".to_string(),
+                    first_frame: 0,
+                    last_frame: 0,
+                    count: 1,
+                    detail: match location {
+                        Some(loc) => format!("{message} at {loc}"),
+                        None => message.clone(),
+                    },
+                    last_detail: message.clone(),
+                    fingerprint: None,
+                    fingerprint_scheme: 1,
+                };
+                snap.push(entry);
+            }
+        }
+    }
     if let Some(v) = crate::planner::planner_unfinished_check(&state.planner, &state) {
         snap.push(v);
     }
@@ -677,7 +802,13 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         coverage: state.coverage,
         frame_count: state.frame,
         pre_ready_frames: state.pre_ready_frames,
-        error: result.err().map(|e| format!("{:?}", e)),
+        error: result.err().map(|payload| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| format!("{:?}", payload))
+        }),
         action_log,
         game_version,
         cheat_count,
