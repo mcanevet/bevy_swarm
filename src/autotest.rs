@@ -173,7 +173,10 @@ impl AutotestReport {
             self.failures.iter().map(|f| f.occurrences).sum::<u64>(),
             self.failures.len(),
             self.timing.elapsed_ms / 1000,
-            (100.0 * (self.scope.seeds_run as f32 - self.failures.iter().map(|f| f.occurrences).sum::<u64>() as f32) / self.scope.seeds_run as f32) as u32
+            (100.0
+                * (self.scope.seeds_run as f32
+                    - self.failures.iter().map(|f| f.occurrences).sum::<u64>() as f32)
+                / self.scope.seeds_run as f32) as u32
         )
     }
 }
@@ -215,7 +218,12 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     // Aggregate results from BranchMatrixReport.
     let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
     for outcome in matrix_results?.outcomes {
-        let seed: u64 = outcome.variant_name.strip_prefix("seed-").unwrap_or("0").parse().unwrap_or(0);
+        let seed: u64 = outcome
+            .variant_name
+            .strip_prefix("seed-")
+            .unwrap_or("0")
+            .parse()
+            .unwrap_or(0);
         let rep = outcome.report;
         let elapsed_ms = outcome.ticks_run; // Approximate timing from ticks
 
@@ -237,12 +245,15 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         for v in &rep.violations {
             all_violations.push((seed, v.clone()));
             if let Some(fp) = &v.fingerprint {
-                let entry = failures_by_fp.entry(fp.clone()).or_insert_with(|| FingerprintSummary {
-                    fingerprint: fp.clone(),
-                    rule: v.rule.clone(),
-                    first_seen_seed: seed,
-                    occurrences: 0,
-                });
+                let entry =
+                    failures_by_fp
+                        .entry(fp.clone())
+                        .or_insert_with(|| FingerprintSummary {
+                            fingerprint: fp.clone(),
+                            rule: v.rule.clone(),
+                            first_seen_seed: seed,
+                            occurrences: 0,
+                        });
                 entry.occurrences += 1;
             }
         }
@@ -277,7 +288,10 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     Ok(report)
 }
 
-fn write_report(report: &AutotestReport, output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn write_report(
+    report: &AutotestReport,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let target_dir = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
@@ -327,14 +341,12 @@ mod tests {
                 parallelism: 4,
             },
             runs: vec![],
-            failures: vec![
-                FingerprintSummary {
-                    fingerprint: Fingerprint("test-fp".to_string()),
-                    rule: "panic".to_string(),
-                    first_seen_seed: 1,
-                    occurrences: 3,
-                },
-            ],
+            failures: vec![FingerprintSummary {
+                fingerprint: Fingerprint("test-fp".to_string()),
+                rule: "panic".to_string(),
+                first_seen_seed: 1,
+                occurrences: 3,
+            }],
             coverage: Some(Coverage::default()),
             timing: TimingSummary {
                 start: "".to_string(),

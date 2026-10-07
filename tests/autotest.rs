@@ -36,7 +36,9 @@ fn autotest_runs_and_writes_report() {
     let runs_dir = std::path::Path::new(&target).join("bevy_swarm/runs");
     assert!(
         std::fs::read_dir(&runs_dir)
-            .map(|entries| entries.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().starts_with("autotest-")))
+            .map(|entries| entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().starts_with("autotest-")))
             .unwrap_or(false),
         "expected an autotest-* run dir under {}",
         runs_dir.display()
