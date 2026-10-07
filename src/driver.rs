@@ -171,6 +171,15 @@ pub struct PlaytestReport {
     /// AUDIT: cheats detected in this run (subset of action_log, both
     /// counted and listed so reports can flag cheated runs cheaply).
     pub cheat_count: usize,
+    /// Intent-audit entries that cannot be converted back into
+    /// ReplayIntents (e.g. Select on an unnamed entity). Non-zero means
+    /// the run is NOT fully minimizable/replayable; name your Gameplay
+    /// entities.
+    pub unreplayable_actions: usize,
+    /// Report-level warnings (non-fatal issues worth surfacing:
+    /// unnamed Select targets, harness deprecations, ...). Reused by
+    /// later beads (C2/C3).
+    pub warnings: Vec<String>,
     /// If the run CRASHED and minimization was requested via
     /// [`MinimizeOnCrash`], the ddmin-minimal reproducing action
     /// subsequence — a permanent regression scenario's raw material.
@@ -500,6 +509,19 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .iter()
         .filter(|e| e.action.starts_with("cheat:"))
         .count();
+    // Intent-audit entries that cannot round-trip to a ReplayIntent:
+    // non-zero means the run is not fully minimizable/replayable.
+    let unreplayable_actions = crate::scenario::action_log_to_timed_actions(&action_log)
+        .iter()
+        .filter(|ta| crate::minimize::action_to_replay_intent(ta).is_none())
+        .count();
+    let mut warnings = Vec::new();
+    if unreplayable_actions > 0 {
+        warnings.push(format!(
+            "{} audit-log intents cannot be converted to replay intents (Select on unnamed entity?) — name your Gameplay entities for full replayability",
+            unreplayable_actions
+        ));
+    }
     let game_version = app
         .world()
         .get_resource::<crate::contract::GameVersion>()
@@ -522,6 +544,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         action_log,
         game_version,
         cheat_count,
+        unreplayable_actions,
+        warnings,
         minimized_actions: Vec::new(),
         system_coverage: system_coverage(&systems_before, app.world_mut()),
     })

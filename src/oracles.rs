@@ -693,8 +693,9 @@ pub(crate) fn check_custom_system(world: &mut World) {
 /// variant names), but the audit trail — what makes crashes found by ANY
 /// writer minimizable via ddmin — lives here and nowhere else.
 pub(crate) fn intent_audit_log_system(
-    state: ResMut<PlaytestState>,
+    state: Res<PlaytestState>,
     mut reader: bevy::ecs::message::MessageReader<UserIntent>,
+    names: Query<&Name>,
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
 ) {
     for intent in reader.read() {
@@ -705,13 +706,27 @@ pub(crate) fn intent_audit_log_system(
             UserIntent::Select { .. } => "select",
             UserIntent::Wait => "wait",
         };
+        // Structured JSON via serde_json: no escaping bugs, lossless
+        // float encoding (f32 -> f64 -> shortest repr round-trips
+        // exactly, unlike the old {:.4} truncation).
         let details = match &intent {
-            UserIntent::Move { dir } => Some(format!(r#"{{"dir":[{:.4},{:.4}]}}"#, dir.x, dir.y)),
-            UserIntent::Choice { index } => Some(format!(r#"{{"index":{}}}"#, index)),
-            UserIntent::Axis { name, value } => {
-                Some(format!(r#"{{"name":"{}","value":{:.4}}}"#, name, value))
+            UserIntent::Move { dir } => {
+                Some(serde_json::json!({"dir": [dir.x, dir.y]}).to_string())
             }
-            UserIntent::Select { target } => Some(format!(r#"{{"target":"{}"}}"#, target.index())),
+            UserIntent::Choice { index } => Some(serde_json::json!({"index": index}).to_string()),
+            UserIntent::Axis { name, value } => {
+                Some(serde_json::json!({"name": name, "value": value}).to_string())
+            }
+            UserIntent::Select { target } => Some(
+                match names.get(*target) {
+                    Ok(n) => serde_json::json!({"target": n.as_str(), "entity": target.to_bits()}),
+                    // No Name: keep the bits for diagnostics; the replay
+                    // decoder treats a missing "target" as unreplayable
+                    // (counted via unreplayable_actions).
+                    Err(_) => serde_json::json!({"entity": target.to_bits()}),
+                }
+                .to_string(),
+            ),
             UserIntent::Wait => None,
         };
         if let Some(log) = action_log.as_mut() {

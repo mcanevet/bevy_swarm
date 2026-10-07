@@ -8,8 +8,7 @@
 
 use crate::contract::{TestApi, TestApiResolve, TestFieldValue, UserIntent};
 use crate::harness::{PlaytestState, ReplayIntent, ScenarioResource, Violations};
-use bevy::ecs::message::MessageWriter;
-use bevy::ecs::system::{Res, ResMut};
+use bevy::ecs::world::World;
 use serde::{Deserialize, Serialize};
 
 fn default_any_max_s() -> f32 {
@@ -68,6 +67,7 @@ pub enum GoalNode {
 }
 
 /// One runtime frame on the planner goal stack.
+#[derive(Clone)]
 struct PlannerEntry {
     goal: GoalNode,
     /// Combinators: index of the NEXT child to activate (pre-incremented
@@ -86,7 +86,7 @@ struct PlannerEntry {
 /// Persistent planner state stored in PlaytestState across ticks. Keeping
 /// the pursuit stack in state means: (a) progress survives ticks, (b) every
 /// violation report can carry the full goal path (`seq[0]/prim(...)`).
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PlannerStack(Vec<PlannerEntry>);
 
 impl PlannerStack {
@@ -272,37 +272,41 @@ fn primitive_achieved(api: &TestApi, path: &str, check: &str, value: &serde_json
 /// Stack-machine evaluation with persistent state across ticks, goal-path
 /// traces in violation reports, deadline-bounded Any alternatives /
 /// Repeat attempts, and differential post-conditions on primitives.
-pub fn planner_bot_system(
-    mut state: ResMut<PlaytestState>,
-    mut intents: MessageWriter<UserIntent>,
-    mut violations: ResMut<Violations>,
-    api: Res<TestApi>,
-    scenario: Res<ScenarioResource>,
-) {
-    if scenario.0.bot.bot_type != crate::enums::BotType::Planner {
+/// Exclusive system: needs `&mut World` to resolve Select intents by
+/// Name against live Gameplay entities (entity-id-free, reset-stable).
+pub fn planner_bot_system(world: &mut World) {
+    // Use scoped borrows so each section ends its mutable world borrow.
+    let is_planner =
+        world.resource::<ScenarioResource>().0.bot.bot_type == crate::enums::BotType::Planner;
+    if !is_planner {
         return;
     }
-    let Some(goal_root) = &scenario.0.bot.goals else {
-        violations.report(
+    let (planner_stack, frame, tps) = {
+        let state = world.resource::<PlaytestState>();
+        (state.planner.clone(), state.frame, state.tps)
+    };
+    let Some(goal_root) = world.resource::<ScenarioResource>().0.bot.goals.clone() else {
+        world.resource_mut::<Violations>().report(
             "planner_bot_config",
             "",
             "planner bot requires `goals` (goal structure)".to_string(),
-            state.frame,
+            frame,
         );
         return;
     };
-    let frame = state.frame;
-    let tps = state.tps;
 
-    // Take the stack out of state to avoid double mutable borrows; it is
-    // written back before returning. First tick initializes with the root.
-    let mut planner = std::mem::take(&mut state.planner);
+    // planner_stack copied out; written back before returning. First
+    // tick initializes with the root.
+    let mut planner = planner_stack;
     if planner.is_empty() {
-        planner.push(goal_root, &api, frame, None);
+        let api = world.resource::<TestApi>().clone();
+        planner.push(&goal_root, &api, frame, None);
     }
 
     // Intent to emit this tick (at most one): (intent, variant ctx, trace).
     let mut emitted: Option<(UserIntent, String, String)> = None;
+    let api = world.resource::<TestApi>().clone();
+    let mut violations = world.resource_mut::<Violations>();
     let mut goals_done: u64 = 0;
 
     loop {
@@ -357,7 +361,7 @@ pub fn planner_bot_system(
                     break;
                 }
                 let child = children[entry.child].clone();
-                let dl = frame + (*max_s * tps as f32) as u64;
+                let dl = frame + (max_s * tps as f32) as u64;
                 planner.0.last_mut().unwrap().child += 1;
                 planner.push(&child, &api, frame, Some(dl));
             }
@@ -366,8 +370,8 @@ pub fn planner_bot_system(
                 // sits under the active child until it completes or the
                 // deadline sweep abandons it.
                 if entry.child == 0 {
-                    let c = (**child).clone();
-                    let dl = frame + (*max_s * tps as f32) as u64;
+                    let c = child.as_ref().clone();
+                    let dl = frame + (max_s * tps as f32) as u64;
                     planner.0.last_mut().unwrap().child = 1;
                     planner.push(&c, &api, frame, Some(dl));
                 } else {
@@ -404,25 +408,33 @@ pub fn planner_bot_system(
     }
 
     // Write results back into state (single mutable borrow region).
-    if goals_done > 0 {
-        state
-            .coverage
-            .intents_emitted
-            .entry("goal_primitive_done".into())
-            .and_modify(|c| *c += goals_done)
-            .or_insert(goals_done);
+    // Write results back into state (single mutable borrow region).
+    {
+        let state = &mut world.resource_mut::<PlaytestState>();
+        if goals_done > 0 {
+            state
+                .coverage
+                .intents_emitted
+                .entry("goal_primitive_done".into())
+                .and_modify(|c| *c += goals_done)
+                .or_insert(goals_done);
+        }
+        if let Some((intent, ctx, trace)) = &emitted {
+            state
+                .coverage
+                .intents_emitted
+                .entry(ctx.clone())
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+            state.planner = planner;
+            world
+                .resource_mut::<Violations>()
+                .set_context(format!("planner:{} [goal {}]", ctx, trace));
+            world.write_message(intent.clone());
+        } else {
+            state.planner = planner;
+        }
     }
-    if let Some((intent, ctx, trace)) = emitted {
-        state
-            .coverage
-            .intents_emitted
-            .entry(ctx.clone())
-            .and_modify(|c| *c += 1)
-            .or_insert(1);
-        violations.set_context(format!("planner:{} [goal {}]", ctx, trace));
-        intents.write(intent);
-    }
-    state.planner = planner;
 }
 
 /// Planner end-of-run check: if the goal stack is not EMPTY, the top

@@ -4,109 +4,272 @@
   "title": "bevy_swarm PlaytestReport",
   "description": "Public JSON contract for bevy_swarm playtest reports. Breaking changes require a schema_version bump and CHANGELOG entry.",
   "type": "object",
-  "required": ["schema_version", "status", "violations", "metrics", "coverage", "frame_count"],
+  "required": [
+    "schema_version",
+    "status",
+    "violations",
+    "metrics",
+    "coverage",
+    "frame_count"
+  ],
   "properties": {
     "schema_version": {
       "const": 1,
       "description": "Report format version. Stays 1 until the v0.2 release freezes it."
     },
     "status": {
-      "enum": ["pass", "fail", "crash"],
+      "enum": [
+        "pass",
+        "fail",
+        "crash"
+      ],
       "description": "Run outcome. crash is ungated by the known-issues system (T13)."
     },
     "violations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/violation" }
+      "items": {
+        "$ref": "#/$defs/violation"
+      }
     },
-    "metrics": { "$ref": "#/$defs/metrics" },
-    "coverage": { "$ref": "#/$defs/coverage" },
-    "frame_count": { "type": "integer", "minimum": 0 },
-    "error": { "type": ["string", "null"] },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "frame_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "action_log": {
       "type": "array",
-      "items": { "$ref": "#/$defs/action_entry" }
+      "items": {
+        "$ref": "#/$defs/action_entry"
+      }
     },
-    "game_version": { "type": ["string", "null"] },
-    "cheat_count": { "type": "integer", "minimum": 0 },
+    "game_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cheat_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "minimized_actions": {
       "type": "array",
-      "items": { "$ref": "#/$defs/timed_action" }
+      "items": {
+        "$ref": "#/$defs/timed_action"
+      }
     },
-    "system_coverage": { "$ref": "#/$defs/system_coverage" }
+    "system_coverage": {
+      "$ref": "#/$defs/system_coverage"
+    },
+    "unreplayable_actions": {
+      "type": "integer",
+      "description": "Intent-audit entries that cannot be converted to replay intents"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Non-fatal warnings"
+    }
   },
   "additionalProperties": false,
   "$defs": {
     "violation": {
       "type": "object",
-      "required": ["rule", "target", "first_frame", "last_frame", "count", "detail"],
+      "required": [
+        "rule",
+        "target",
+        "first_frame",
+        "last_frame",
+        "count",
+        "detail"
+      ],
       "properties": {
         "rule": {
           "type": "string",
           "description": "Must be a name from the rule registry (docs/rules.md)."
         },
-        "target": { "type": "string" },
-        "first_frame": { "type": "integer", "minimum": 0 },
-        "last_frame": { "type": "integer", "minimum": 0 },
-        "count": { "type": "integer", "minimum": 0 },
-        "detail": { "type": "string" }
+        "target": {
+          "type": "string"
+        },
+        "first_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detail": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "metrics": {
       "type": "object",
-      "required": ["input_count", "frame_count", "frame_ms_p99", "worst_frame_ms", "crash_detected"],
+      "required": [
+        "input_count",
+        "frame_count",
+        "frame_ms_p99",
+        "worst_frame_ms",
+        "crash_detected"
+      ],
       "properties": {
-        "input_count": { "type": "integer", "minimum": 0 },
-        "frame_count": { "type": "integer", "minimum": 0 },
-        "frame_ms_p99": { "type": "number" },
-        "worst_frame_ms": { "type": "number" },
-        "crash_detected": { "type": "boolean" }
+        "input_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frame_ms_p99": {
+          "type": "number"
+        },
+        "worst_frame_ms": {
+          "type": "number"
+        },
+        "crash_detected": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "coverage": {
       "type": "object",
-      "required": ["intents_emitted", "test_api_paths_read", "resets_invoked", "chaos_surface_indices"],
+      "required": [
+        "intents_emitted",
+        "test_api_paths_read",
+        "resets_invoked",
+        "chaos_surface_indices"
+      ],
       "properties": {
         "intents_emitted": {
           "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 0 }
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
-        "test_api_paths_read": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "resets_invoked": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "chaos_surface_indices": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true }
+        "test_api_paths_read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "resets_invoked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "chaos_surface_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        }
       },
       "additionalProperties": false
     },
     "system_coverage": {
       "type": "object",
-      "required": ["executed", "registered"],
+      "required": [
+        "executed",
+        "registered"
+      ],
       "properties": {
-        "executed": { "type": "array", "items": { "type": "string" } },
-        "registered": { "type": "array", "items": { "type": "string" } }
+        "executed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "registered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
     "action_entry": {
       "type": "object",
-      "required": ["frame", "elapsed_ms", "source", "action"],
+      "required": [
+        "frame",
+        "elapsed_ms",
+        "source",
+        "action"
+      ],
       "properties": {
-        "frame": { "type": "integer", "minimum": 0 },
-        "elapsed_ms": { "type": "number" },
-        "source": { "type": "string" },
-        "action": { "type": "string" },
-        "details": { "type": ["string", "null"] }
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsed_ms": {
+          "type": "number"
+        },
+        "source": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "timed_action": {
       "type": "object",
-      "required": ["frame", "source", "action"],
+      "required": [
+        "frame",
+        "source",
+        "action"
+      ],
       "properties": {
-        "frame": { "type": "integer", "minimum": 0 },
-        "source": { "type": "string" },
-        "action": { "type": "string" },
-        "details": { "type": ["string", "null"] }
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     }
