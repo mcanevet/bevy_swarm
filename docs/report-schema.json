@@ -63,12 +63,6 @@
       "type": "integer",
       "minimum": 0
     },
-    "minimized_actions": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/timed_action"
-      }
-    },
     "system_coverage": {
       "$ref": "#/$defs/system_coverage"
     },
