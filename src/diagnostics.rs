@@ -279,18 +279,81 @@ pub struct CalibrationSnapshot {
 /// USAGE: Call this once per game binary, save the snapshot, then
 /// programmatically generate invariants (e.g., "archetype X never drops
 /// below N"). Zero game-code changes required.
+/// Options for calibration runs.
+#[derive(Debug, Clone)]
+pub struct CalibrationOptions {
+    pub duration_s: f32,
+    pub tps: u32,
+    pub seed: u64,
+    /// Apply A1 deterministic simulated time (recommended: makes the
+    /// envelope independent of host speed).
+    pub simulated_time: bool,
+}
+
+impl Default for CalibrationOptions {
+    fn default() -> Self {
+        Self {
+            duration_s: 2.0,
+            tps: 60,
+            seed: 42,
+            simulated_time: true,
+        }
+    }
+}
+
 pub fn calibrate_world(
     app: &mut App,
     duration_s: f32,
 ) -> Result<CalibrationSnapshot, ScenarioError> {
+    calibrate_world_opts(
+        app,
+        &CalibrationOptions {
+            duration_s,
+            ..Default::default()
+        },
+    )
+}
+
+pub fn calibrate_world_opts(
+    app: &mut App,
+    opts: &CalibrationOptions,
+) -> Result<CalibrationSnapshot, ScenarioError> {
+    // Contract check: PlaytestPlugin must be added (its systems make
+    // ScenarioResource observable by bots). A missing TestApi is NOT a
+    // rejection — numeric percepts fall back to archetype envelopes only.
+    if app
+        .world()
+        .get_resource::<crate::state::PlaytestState>()
+        .is_none()
+        && !app.is_plugin_added::<crate::harness::PlaytestPlugin>()
+    {
+        return Err(ScenarioError::ContractMissing(
+            "PlaytestPlugin not added — calibrate_world needs the harness plugin".into(),
+        ));
+    }
+
     // Inject a minimal chaos scenario so harness systems can run.
-    let scenario = serde_json::from_str::<Scenario>(r#"{"bot":{"type":"chaos","seed":42}}"#)
-        .map_err(|e| ScenarioError::Rejected(format!("internal: bad calibration scenario: {e}")))?;
+    let scenario = serde_json::from_str::<Scenario>(&format!(
+        r#"{{"bot":{{"type":"chaos","seed":{}}},"tps":{},"simulated_time":{}}}"#,
+        opts.seed, opts.tps, opts.simulated_time
+    ))
+    .map_err(|e| ScenarioError::Rejected(format!("internal: bad calibration scenario: {e}")))?;
     app.insert_resource(ScenarioResource(scenario));
     app.insert_resource(Violations::default());
 
+    // Robustness: insert PlaytestState if missing (the App may have been
+    // constructed bare for calibration only).
+    if app.world().get_resource::<PlaytestState>().is_none() {
+        app.insert_resource(PlaytestState::new(opts.tps as u64, opts.seed));
+    }
+    if opts.simulated_time {
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(1.0 / opts.tps as f64),
+        ));
+    }
+
     let tps = app.world().resource::<PlaytestState>().tps;
-    let total_ticks = (duration_s * tps as f32) as u64;
+    let total_ticks = (opts.duration_s * tps as f32) as u64;
 
     // Track per-signature count extremes across MANY samples — a
     // two-point (start/end) estimate misses spawn/despawn transients
@@ -303,49 +366,61 @@ pub fn calibrate_world(
 
     let sample_every = (tps / 10).max(1); // ~10 samples/sec
 
-    // Run calibration, sampling archetype counts periodically.
-    for tick in 0..total_ticks {
-        app.update();
+    // Run calibration, sampling archetype counts periodically. Panics
+    // in game systems are captured: the snapshot gathered so far is
+    // still returned (a crash mid-calibration usually still tells us
+    // the archetype envelope).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for tick in 0..total_ticks {
+            app.update();
 
-        if tick % sample_every == 0 || tick == total_ticks - 1 {
-            for archetype in app.world().archetypes().iter() {
-                let mut sig_parts: Vec<String> = archetype
-                    .components()
-                    .iter()
-                    .filter_map(|id| {
-                        app.world()
-                            .components()
-                            .get_info(*id)
-                            .map(|info| info.name().to_string())
-                    })
-                    .collect();
-                sig_parts.sort();
-                let sig = sig_parts.join("|");
-                let len = archetype.entities().len();
-                if len == 0 {
-                    continue;
-                }
-                let cur_min = archetype_min.entry(sig.clone()).or_insert(len);
-                if len < *cur_min {
-                    *cur_min = len;
-                }
-                let cur_max = archetype_max.entry(sig).or_insert(len);
-                if len > *cur_max {
-                    *cur_max = len;
+            if tick % sample_every == 0 || tick == total_ticks - 1 {
+                for archetype in app.world().archetypes().iter() {
+                    let mut sig_parts: Vec<String> = archetype
+                        .components()
+                        .iter()
+                        .filter_map(|id| {
+                            app.world()
+                                .components()
+                                .get_info(*id)
+                                .map(|info| info.name().to_string())
+                        })
+                        .collect();
+                    sig_parts.sort();
+                    let sig = sig_parts.join("|");
+                    let len = archetype.entities().len();
+                    if len == 0 {
+                        continue;
+                    }
+                    let cur_min = archetype_min.entry(sig.clone()).or_insert(len);
+                    if len < *cur_min {
+                        *cur_min = len;
+                    }
+                    let cur_max = archetype_max.entry(sig).or_insert(len);
+                    if len > *cur_max {
+                        *cur_max = len;
+                    }
                 }
             }
-        }
 
-        // Sample resource baselines
-        if let Some(api) = app.world().get_resource::<TestApi>() {
-            if api.score != 0 {
+            // Sample the numeric percepts of game-owned resources
+            // (score/active_players plus game-defined custom_numeric fields)
+            // instead of only the hard-coded TestApi.score.
+            if let Some(api) = app.world().get_resource::<TestApi>() {
                 resource_values
-                    .entry("TestApi".into())
+                    .entry("TestApi.score".into())
                     .or_default()
                     .push(api.score as f64);
+                for (name, val) in &api.custom_numeric {
+                    resource_values
+                        .entry(format!("TestApi.{}", name))
+                        .or_default()
+                        .push(*val);
+                }
             }
         }
-    }
+    })); // end catch_unwind
+    let _ = result;
 
     // Compute envelopes
     let mut archetype_envelopes = Vec::new();

@@ -96,16 +96,26 @@ impl bevy::app::Plugin for PlaytestPlugin {
             world.get_resource::<ScenarioResource>().is_some()
                 && world.get_resource::<PlaytestState>().is_some()
         };
+        // Bots and oracles must not run before readiness (a game may
+        // spend frames loading assets); only tick/crash capture runs
+        // pre-ready. Games that never insert GameReady are instantly
+        // ready (frame-0 behavior preserved).
+        let game_ready = |world: &World| {
+            world
+                .get_resource::<crate::oracles::GameReady>()
+                .is_none_or(|r| r.0)
+        };
+        let live_and_ready = move |world: &World| scenario_live(world) && game_ready(world);
         app.configure_sets(bevy::app::First, PlaytestSet::Tick.run_if(scenario_live));
         app.configure_sets(
             bevy::app::PreUpdate,
-            PlaytestSet::Bots.run_if(scenario_live),
+            PlaytestSet::Bots.run_if(live_and_ready),
         );
         app.configure_sets(
             bevy::app::Update,
-            PlaytestSet::RawInput.run_if(scenario_live),
+            PlaytestSet::RawInput.run_if(live_and_ready),
         );
-        app.configure_sets(bevy::app::Last, PlaytestSet::Oracles.run_if(scenario_live));
+        app.configure_sets(bevy::app::Last, PlaytestSet::Oracles.run_if(live_and_ready));
 
         app.add_systems(
             bevy::app::First,
@@ -116,10 +126,10 @@ impl bevy::app::Plugin for PlaytestPlugin {
         app.add_systems(
             bevy::app::PreUpdate,
             (
-                chaos_bot_system,
-                replay_bot_system,
-                pursuit_bot_system,
-                crate::planner::planner_bot_system,
+                chaos_bot_system.run_if(bot_is(crate::enums::BotType::Chaos)),
+                replay_bot_system.run_if(bot_is(crate::enums::BotType::Replay)),
+                pursuit_bot_system.run_if(bot_is(crate::enums::BotType::Pursuit)),
+                crate::planner::planner_bot_system.run_if(bot_is(crate::enums::BotType::Planner)),
             )
                 .chain()
                 .in_set(PlaytestSet::Bots),
@@ -162,6 +172,8 @@ pub struct PlaytestReport {
     pub metrics: Metrics,
     pub coverage: Coverage,
     pub frame_count: u64,
+    /// Frames spent waiting for GameReady before the scenario began.
+    pub pre_ready_frames: u64,
     pub error: Option<String>,
     /// AUDIT (phase 3): every injected input and cheat invocation,
     /// labeled by source. Full replay material for the run.
@@ -235,6 +247,24 @@ fn filter_world_only_conflicts(rendered: &str) -> String {
     }
     kept.join("\n")
 }
+
+/// Run condition: the live scenario uses this bot type.
+fn bot_is(want: crate::enums::BotType) -> impl Fn(Option<Res<ScenarioResource>>) -> bool + Clone {
+    move |scenario: Option<Res<ScenarioResource>>| {
+        scenario.is_some_and(|s| s.0.bot.bot_type == want)
+    }
+}
+
+/// Run condition: the live scenario arms this invariant rule.
+#[allow(dead_code)]
+fn has_rule(
+    want: crate::enums::InvariantRule,
+) -> impl Fn(Option<Res<ScenarioResource>>) -> bool + Clone {
+    move |scenario: Option<Res<ScenarioResource>>| {
+        scenario.is_some_and(|s| s.0.invariants.iter().any(|i| i.rule == want))
+    }
+}
+
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 
@@ -335,6 +365,13 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // their generators, making chaos runs reproducible.
     app.insert_resource(crate::contract::ScenarioSeed(scenario.bot.seed));
 
+    // Re-run support: fresh Violations and ActionLog for each call to
+    // run_scenario on the same App (so repeated runs don't accumulate
+    // stale violations/logs). The ActionLog may be game-owned; we slice
+    // it later to include only entries since the start index.
+    app.insert_resource(crate::state::Violations::default());
+    app.insert_resource(crate::contract::ActionLog::default());
+
     // NOTE: no add_systems here anymore. All harness systems (bots,
     // oracles, cheat scheduler) are registered once by PlaytestPlugin in
     // explicit PlaytestSet phases; each bot's system early-returns when
@@ -376,32 +413,6 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // are initialized and enumerable.
     let systems_before = snapshot_systems(app.world_mut());
 
-    // Readiness gate (UE IsReady analog): wait for GameReady=true before
-    // counting scenario duration. Games that never insert GameReady get
-    // immediate readiness (frame-0 behavior preserved).
-    let mut pre_ready_frames = 0u64;
-    while app
-        .world_mut()
-        .get_resource::<GameReady>()
-        .is_some_and(|r| !r.0)
-    {
-        app.update();
-        pre_ready_frames += 1;
-        if pre_ready_frames > tps * 30 {
-            let mut violations = app
-                .world_mut()
-                .get_resource_mut::<Violations>()
-                .expect("Violations initialized by plugin");
-            violations.report(
-                "readiness_timeout",
-                "world",
-                "game did not become ready within 30s (GameReady never set true)".into(),
-                0,
-            );
-            break;
-        }
-    }
-
     // Names of FrameTimeAnomaly invariants armed by this scenario; the
     // wall-clock oracle only records/reports when at least one is armed.
     let scenario_frame_rules: Vec<String> = scenario
@@ -411,7 +422,45 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .map(|inv| inv.name.clone())
         .collect();
 
+    let pre_ready_frames = std::cell::Cell::new(0u64);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Readiness gate (UE IsReady analog), INSIDE the panic boundary:
+        // a panic while loading must yield status crash. Games that never
+        // insert GameReady get immediate readiness. When the gate opens,
+        // frame counters are RESET so after_s, replay frames and
+        // duration_s count from readiness.
+        while app
+            .world_mut()
+            .get_resource::<GameReady>()
+            .is_some_and(|r| !r.0)
+        {
+            app.update();
+            pre_ready_frames.set(pre_ready_frames.get() + 1);
+            if pre_ready_frames.get() > tps * 30 {
+                let mut violations = app
+                    .world_mut()
+                    .get_resource_mut::<Violations>()
+                    .expect("Violations initialized by plugin");
+                violations.report(
+                    "readiness_timeout",
+                    "world",
+                    "game did not become ready within 30s (GameReady never set true)".into(),
+                    0,
+                );
+                break;
+            }
+        }
+        // Gate opened: reset per-scenario counters so the scenario's
+        // frame numbering starts at readiness.
+        if pre_ready_frames.get() > 0 {
+            let mut state = app
+                .world_mut()
+                .get_resource_mut::<PlaytestState>()
+                .expect("PlaytestState inserted above");
+            state.frame = 0;
+            state.frozen_frames = 0;
+            state.eventually_state.clear();
+        }
         for frame_idx in 0..total_ticks {
             let t0 = std::time::Instant::now();
             app.update();
@@ -460,7 +509,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // Stamp the readiness-gate delay into the state for the report.
     let state = {
         let mut s = state;
-        s.pre_ready_frames = pre_ready_frames;
+        s.pre_ready_frames = pre_ready_frames.get();
         s
     };
 
@@ -530,6 +579,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         metrics: final_metrics,
         coverage: state.coverage,
         frame_count: state.frame,
+        pre_ready_frames: state.pre_ready_frames,
         error: result.err().map(|e| format!("{:?}", e)),
         action_log,
         game_version,
