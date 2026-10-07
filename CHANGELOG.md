@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- Agent BRP endpoint security (R2): `AgentConfig` (loopback default,
+  port 15702, token from config or `BEVY_SWARM_AGENT_TOKEN` env,
+  `allow_remote`, `deny_in_release`), `AgentPlugin::new/bind`;
+  every `playtest/*` method enforces `params.token` (auth before any
+  param parsing), non-loopback binds refused without opt-in, release
+  builds warn (or panic with `deny_in_release`)
 - CI `features` job printing `cargo tree -e features -i bevy` (feature
   regressions visible)
 
@@ -127,3 +133,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `v0.20.0-rc.2` on crates.io; when 0.20.0 final releases, switch to `bevy = "0.20"`
   it becomes `bevy = "0.20"`. Policy: each bevy_swarm release supports
   exactly one Bevy minor version.
+
+### Security
+- The agent BRP endpoint binds to loopback by default and refuses
+  non-loopback addresses without `allow_remote: true`. Set a token
+  (config or `BEVY_SWARM_AGENT_TOKEN`) to require `params.token` on
+  every `playtest/*` method. Never ship release builds with the agent
+  feature enabled — BRP exposes arbitrary world reads and mutation.

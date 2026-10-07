@@ -40,6 +40,10 @@ pub enum AgentRequest {
     Cheat(String),
 }
 
+/// Shared-secret token for playtest/* methods (R2). `None` = no auth.
+#[derive(Resource, Default)]
+pub struct AgentAuthToken(pub Option<String>);
+
 #[derive(Resource)]
 pub struct AgentRequestQueue(pub std::sync::Mutex<Receiver<AgentRequest>>);
 
@@ -70,11 +74,92 @@ struct PendingPointerGesture {
 // Plugin
 // ---------------------------------------------------------------------------
 
+/// Configuration for the agent BRP endpoint (R2).
+#[derive(Clone, Debug)]
+pub struct AgentConfig {
+    /// Bind address. Defaults to loopback (127.0.0.1). Non-loopback
+    /// addresses require `allow_remote: true`.
+    pub addr: std::net::IpAddr,
+    /// Bind port (BRP default 15702).
+    pub port: u16,
+    /// Shared-secret token. When set (config or
+    /// `BEVY_SWARM_AGENT_TOKEN` env), every `playtest/*` method
+    /// requires `params.token` to match; mismatches return
+    /// INVALID_REQUEST. Built-in `world.*` BRP methods are NOT covered
+    /// by this (RemoteHttpPlugin has no request middleware) — keep the
+    /// endpoint on loopback.
+    pub token: Option<String>,
+    /// Explicitly allow binding a non-loopback address.
+    pub allow_remote: bool,
+    /// Panic at startup if the feature is active in a release build.
+    pub deny_in_release: bool,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port: 15702,
+            token: std::env::var("BEVY_SWARM_AGENT_TOKEN").ok(),
+            allow_remote: false,
+            deny_in_release: false,
+        }
+    }
+}
+
+impl AgentConfig {
+    /// Validate the config: refuse non-loopback binds without explicit
+    /// opt-in; warn (or panic, per `deny_in_release`) on release builds.
+    /// Exposed for unit testing the decision logic without a network.
+    pub fn validate(&self) -> Result<(), String> {
+        let is_release = cfg!(not(debug_assertions));
+        if is_release {
+            let msg = "bevy_swarm agent feature is active in a RELEASE build —                        BRP exposes arbitrary world reads and mutation.                        Never ship builds with the agent enabled.";
+            if self.deny_in_release {
+                return Err(msg.to_string());
+            }
+            bevy::log::warn!("{msg}");
+        }
+        if !self.addr.is_loopback() && !self.allow_remote {
+            return Err(format!(
+                "refusing to bind agent BRP endpoint to non-loopback {}                  without allow_remote: true",
+                self.addr
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Adds the BRP transport with custom `playtest/*` methods.
-pub struct AgentPlugin;
+/// Uses [`AgentConfig::default`] (loopback, token from env).
+#[derive(Default)]
+pub struct AgentPlugin {
+    pub config: AgentConfig,
+}
+
+impl AgentPlugin {
+    pub fn new(config: AgentConfig) -> Self {
+        Self { config }
+    }
+
+    /// Convenience builder: bind the given address/port.
+    pub fn bind(addr: std::net::IpAddr, port: u16) -> Self {
+        Self::new(AgentConfig {
+            addr,
+            port,
+            ..AgentConfig::default()
+        })
+    }
+}
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
+        if let Err(msg) = self.config.validate() {
+            panic!("AgentPlugin: {}", msg);
+        }
+        let token = self.config.token.clone();
+        app.insert_resource(AgentAuthToken(token));
+
         let (tx, rx) = std::sync::mpsc::channel::<AgentRequest>();
 
         app.insert_resource(AgentRequestSender(tx))
@@ -97,7 +182,11 @@ impl Plugin for AgentPlugin {
                     .with_method_main("playtest/screenshot", playtest_screenshot)
                     .with_method_main("playtest/diagnostics", playtest_diagnostics),
             )
-            .add_plugins(RemoteHttpPlugin::default());
+            .add_plugins(
+                RemoteHttpPlugin::default()
+                    .with_address(self.config.addr)
+                    .with_port(self.config.port),
+            );
     }
 }
 
@@ -121,7 +210,28 @@ fn internal_error(msg: impl Into<String>) -> BrpError {
     }
 }
 
-fn brp_params(params: Option<Value>) -> BrpResult<Value> {
+/// Parse params AND enforce the R2 token: when an AgentAuthToken is
+/// configured, `params.token` must match. Applied to every playtest/*
+/// method (read ones included — a leaked endpoint is a leaked game).
+fn brp_params(world: &World, params: Option<Value>) -> BrpResult<Value> {
+    // Auth FIRST: a caller without the token learns nothing about the
+    // shape of the params (not even that params are required).
+    if let Some(expected) = world
+        .get_resource::<AgentAuthToken>()
+        .and_then(|t| t.0.clone())
+    {
+        let provided = params
+            .as_ref()
+            .and_then(|p| p.get("token"))
+            .and_then(Value::as_str);
+        if provided != Some(expected.as_str()) {
+            return Err(BrpError {
+                code: error_codes::INVALID_REQUEST,
+                message: "invalid or missing token".to_string(),
+                data: None,
+            });
+        }
+    }
     params.ok_or_else(|| invalid_params("missing params"))
 }
 
@@ -134,7 +244,7 @@ fn send_request(world: &World, req: AgentRequest) -> BrpResult {
 
 /// Catalog: what CAN be driven on this game.
 fn playtest_schema(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let _ = params;
+    brp_params(world, params)?;
     let surface = world.resource::<IntentSurface>();
     let variants: Vec<String> = surface.0.iter().map(variant_label).collect();
     let resets: Vec<String> = world.resource::<ResetHooks>().0.keys().cloned().collect();
@@ -164,7 +274,7 @@ fn variant_label(v: &SurfaceVariant) -> String {
 
 /// Percept snapshot: {"path": "Resource:GameState.current_turn"}
 fn playtest_observe(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let path = params
         .get("path")
         .and_then(Value::as_str)
@@ -182,7 +292,7 @@ fn playtest_observe(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Semantic action tier: {"intent": "Choice", "index": 1}
 fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let kind = params
         .get("intent")
         .and_then(Value::as_str)
@@ -213,7 +323,7 @@ fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
             });
         }
         // Queue for dispatch in agent_flush_system (which owns &mut World).
-        send_request(world, AgentRequest::NamedIntent(name));
+        send_request(world, AgentRequest::NamedIntent(name))?;
         return Ok(json!({"result": "queued"}));
     }
     let intent = decode_intent(&params)?;
@@ -222,7 +332,7 @@ fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Raw input tier: {"key": "space"} (chain-complete keyboard).
 fn playtest_key(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let key = params
         .get("key")
         .and_then(Value::as_str)
@@ -233,7 +343,7 @@ fn playtest_key(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Raw input tier: {"x": 400.0, "y": 300.0} (viewport coordinates).
 fn playtest_pointer(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let x = params.get("x").and_then(Value::as_f64);
     let y = params.get("y").and_then(Value::as_f64);
     let (Some(x), Some(y)) = (x, y) else {
@@ -250,7 +360,7 @@ fn playtest_pointer(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Reset via the game's ResetHooks: {"kind": "reset_game"} (optional).
 fn playtest_reset(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let kind = params
         .get("kind")
         .and_then(Value::as_str)
@@ -279,7 +389,7 @@ fn playtest_reset(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Invoke a registered cheat (AUDITED): {"kind": "god_mode"}.
 fn playtest_cheat(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    let params = brp_params(params)?;
+    let params = brp_params(world, params)?;
     let kind = params
         .get("kind")
         .and_then(Value::as_str)
@@ -384,7 +494,7 @@ fn decode_intent(params: &Value) -> Result<UserIntent, BrpError> {
             Ok(UserIntent::Axis { name, value })
         }
         "NamedMove" => {
-            let name = params
+            let _name = params
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| invalid_params("NamedMove requires name"))?
@@ -396,7 +506,7 @@ fn decode_intent(params: &Value) -> Result<UserIntent, BrpError> {
             })
         }
         "NamedSelect" => {
-            let name = params
+            let _name = params
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| invalid_params("NamedSelect requires name"))?
@@ -650,7 +760,7 @@ fn primary_window_entity(world: &mut World) -> Option<Entity> {
 }
 
 fn viewport_location(
-    world: &World,
+    _world: &World,
     window: Entity,
     x: f32,
     y: f32,
@@ -669,8 +779,8 @@ fn viewport_location(
 /// harness mode it returns window geometry only.
 fn playtest_screenshot(_params: In<Option<Value>>, world: &World) -> BrpResult {
     let frame = world.resource::<AgentFrameCounter>().0;
-    let mut w = 0u32;
-    let mut h = 0u32;
+    let w = 0u32;
+    let h = 0u32;
     // Headless harness: no windows. Windowed mode would use
     // native screenshot's native screenshot mechanism.
     // For now just report "no window" in headless mode.
@@ -694,4 +804,10 @@ fn playtest_diagnostics(_params: In<Option<Value>>, world: &World) -> BrpResult 
         );
     }
     Ok(v)
+}
+
+/// Direct handler access for integration tests (no network needed).
+#[doc(hidden)]
+pub fn __test_observe(world: &World, params: Option<Value>) -> Result<Value, BrpError> {
+    playtest_observe(In(params), world)
 }

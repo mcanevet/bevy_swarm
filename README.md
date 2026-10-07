@@ -129,3 +129,18 @@ if !report.is_deterministic() {
 Games contribute custom digest parts (RNG state, AI blackboards) via the
 `DigestHooks` resource. Normal runs pay nothing — digests are only recorded
 when a `StateTrace` resource is present.
+
+## Security (agent feature)
+
+The `agent` feature exposes BRP (arbitrary world reads and **mutation**) over
+HTTP. Treat it like an open debugger:
+
+- Binds to `127.0.0.1:15702` by default; non-loopback addresses are refused
+  unless `AgentConfig { allow_remote: true, .. }` is set explicitly.
+- Set a token via `AgentConfig::token` or the `BEVY_SWARM_AGENT_TOKEN` env
+  var: every `playtest/*` method then requires `params.token` to match
+  (`INVALID_REQUEST` otherwise, before any param parsing). Built-in
+  `world.*` BRP methods are not covered (no request middleware in
+  `RemoteHttpPlugin` 0.20) — keep the endpoint on loopback.
+- Release builds with the agent active log a loud warning; set
+  `deny_in_release: true` to panic instead. Never ship agent-enabled builds.
