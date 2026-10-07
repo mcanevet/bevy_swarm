@@ -36,9 +36,6 @@ pub(crate) fn chaos_bot_system(
     q_named: Query<(Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != crate::enums::BotType::Chaos {
-        return;
-    }
     // Persona bias (): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.
@@ -178,9 +175,6 @@ pub(crate) fn replay_bot_system(
     q_named: Query<(bevy::ecs::entity::Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != crate::enums::BotType::Replay {
-        return;
-    }
     for entry in &scenario.0.bot.inputs {
         if entry.frame == state.frame {
             let variant_name: String;
@@ -273,9 +267,6 @@ pub(crate) fn synthetic_pointer_bot_system(
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != crate::enums::BotType::SyntheticPointer {
-        return;
-    }
     // Deliver pending gesture halves scheduled for this frame.
     let frame = state.frame;
     let mut still_pending = std::collections::VecDeque::new();
@@ -426,9 +417,6 @@ pub(crate) fn pursuit_bot_system(
     q: Query<(&Name, &Transform), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
-    if scenario.0.bot.bot_type != crate::enums::BotType::Pursuit {
-        return;
-    }
     let bot = &scenario.0.bot;
     let (Some(agent_name), Some(target_name)) = (&bot.agent_target, &bot.target) else {
         violations.report(

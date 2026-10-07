@@ -76,6 +76,11 @@
         "type": "string"
       },
       "description": "Non-fatal warnings"
+    },
+    "pre_ready_frames": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Frames spent waiting for GameReady before the scenario began"
     }
   },
   "additionalProperties": false,

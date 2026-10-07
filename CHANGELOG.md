@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot rebuild the App — use `minimize_failure` with an app builder)
 
 ### Fixed
+- Readiness gate now runs INSIDE the panic boundary: a game that panics
+  while loading yields status crash (previously could hang or pass).
+  Bots and oracles no longer run before `GameReady(true)`; when the gate
+  opens, frame counters reset so `after_s`, replay frames and `duration_s`
+  count from readiness. New `PlaytestReport.pre_ready_frames`
+- `run_scenario` on the same App twice no longer leaks violations/action
+  log across runs (fresh Violations/ActionLog per run)
+- Bot dispatch via run conditions instead of per-system early returns
+- `calibrate_world_opts` with `CalibrationOptions {duration_s, tps, seed,
+  simulated_time}`: inserts PlaytestState if missing, applies simulated
+  time, captures panics, samples generic numeric percepts (not just
+  TestApi.score), errors clearly without PlaytestPlugin
 - Calibration off-by-one: archetype minimum invariants are now tight
   (`ge min` instead of `above min-1`)
 
