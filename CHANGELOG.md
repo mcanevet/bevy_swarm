@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- One comparison semantics everywhere: `CheckOp` is now `{lt, le, gt, ge, equals, ne}`
+  (legacy wire spellings `below`/`above`/`eq` still parse as `le`/`ge`/`equals`).
+  **below/above are inclusive at the boundary** everywhere, including the planner
+  and expert-rule WHEN guards (previously strict there — use `lt`/`gt` for strict
+  comparisons). `equals` now uses a relative tolerance instead of `f64::EPSILON`,
+  so large integer counters compare correctly. The planner's goal `check` is a
+  typed enum: typos fail at scenario parse time instead of silently making
+  goals unreachable
 - Declared MSRV 1.97 (Bevy 0.20.0-rc.2 dependency tree requirement), enforced in CI
 - `minimize_crash` replaced by `minimize_failure`: shrinks any failure
   signature (crash OR invariant violation, matched by rule/target to
@@ -17,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed dead `MinimizeOnCrash` resource and
   `PlaytestReport.minimized_actions` (never populated; `run_scenario`
   cannot rebuild the App — use `minimize_failure` with an app builder)
+
+### Fixed
+- Calibration off-by-one: archetype minimum invariants are now tight
+  (`ge min` instead of `above min-1`)
 
 ### Added
 - Initial (unreleased) version. Contract-first architecture: games
