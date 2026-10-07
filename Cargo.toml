@@ -50,7 +50,7 @@ serde_json = { workspace = true }
 
 [features]
 default = []
-agent = ["bevy/bevy_remote"]
+agent = ["bevy/bevy_remote", "bevy/bevy_render"]
 
 [badges]
 maintenance = { status = "actively-developed" }

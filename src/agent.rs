@@ -36,6 +36,10 @@ pub enum AgentRequest {
         x: f32,
         y: f32,
     },
+    /// Queue a screenshot (async write, audited).
+    Screenshot {
+        path: std::path::PathBuf,
+    },
     Reset(String),
     Cheat(String),
 }
@@ -45,7 +49,7 @@ pub enum AgentRequest {
 pub struct AgentAuthToken(pub Option<String>);
 
 #[derive(Resource)]
-pub struct AgentRequestQueue(pub std::sync::Mutex<Receiver<AgentRequest>>);
+pub(crate) struct AgentRequestQueue(pub std::sync::Mutex<Receiver<AgentRequest>>);
 
 #[derive(Resource)]
 struct AgentRequestSender(std::sync::mpsc::Sender<AgentRequest>);
@@ -129,6 +133,22 @@ impl AgentConfig {
         Ok(())
     }
 }
+
+/// The single source of truth for playtest/* method NAMES (used for
+/// registration and for playtest/schema output so they can't drift).
+pub const PLAYTEST_METHODS: &[&str] = &[
+    "playtest/schema",
+    "playtest/observe",
+    "playtest/intent",
+    "playtest/key",
+    "playtest/pointer",
+    "playtest/reset",
+    "playtest/cheat",
+    "playtest/actions",
+    "playtest/state",
+    "playtest/screenshot",
+    "playtest/diagnostics",
+];
 
 /// Adds the BRP transport with custom `playtest/*` methods.
 /// Uses [`AgentConfig::default`] (loopback, token from env).
@@ -245,20 +265,26 @@ fn send_request(world: &World, req: AgentRequest) -> BrpResult {
 /// Catalog: what CAN be driven on this game.
 fn playtest_schema(In(params): In<Option<Value>>, world: &World) -> BrpResult {
     brp_params(world, params)?;
-    let surface = world.resource::<IntentSurface>();
-    let variants: Vec<String> = surface.0.iter().map(variant_label).collect();
-    let resets: Vec<String> = world.resource::<ResetHooks>().0.keys().cloned().collect();
-    let cheats: Vec<String> = world.resource::<CheatHooks>().0.keys().cloned().collect();
+    // get_resource everywhere: an unregistered contract must not panic
+    // the BRP worker — return empty lists instead (loud, but alive).
+    let variants: Vec<String> = world
+        .get_resource::<IntentSurface>()
+        .map(|s| s.0.iter().map(variant_label).collect())
+        .unwrap_or_default();
+    let resets: Vec<String> = world
+        .get_resource::<ResetHooks>()
+        .map(|h| h.0.keys().cloned().collect())
+        .unwrap_or_default();
+    let cheats: Vec<String> = world
+        .get_resource::<CheatHooks>()
+        .map(|h| h.0.keys().cloned().collect())
+        .unwrap_or_default();
     Ok(json!({
         "intent_surface": variants,
         "reset_kinds": resets,
         "cheat_kinds": cheats,
         "intent_kinds": ["Move", "Select", "Choice", "Axis", "Wait"],
-        "methods": [
-            "playtest/schema", "playtest/observe", "playtest/intent", "playtest/screenshot", "playtest/diagnostics",
-            "playtest/key", "playtest/pointer", "playtest/reset",
-            "playtest/cheat", "playtest/state",
-        ],
+        "methods": PLAYTEST_METHODS,
     }))
 }
 
@@ -304,7 +330,10 @@ fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
             .and_then(Value::as_str)
             .ok_or_else(|| invalid_params(format!("{} requires name", kind)))?
             .to_string();
-        let registered = world.resource::<NamedIntents>().0.contains_key(&name);
+        let registered = world
+            .get_resource::<NamedIntents>()
+            .map(|n| n.0.contains_key(&name))
+            .unwrap_or(false);
         if !registered {
             return Err(BrpError {
                 code: error_codes::INVALID_PARAMS,
@@ -338,6 +367,9 @@ fn playtest_key(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_params("params.key required"))?
         .to_string();
+    if crate::harness::parse_key_code(&key).is_none() {
+        return Err(invalid_params(format!("unknown key name `{}`", key)));
+    }
     send_request(world, AgentRequest::KeyPress { key })
 }
 
@@ -367,7 +399,10 @@ fn playtest_reset(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         .unwrap_or("reset_game")
         .to_string();
     // Validate synchronously before queuing.
-    let known = world.resource::<ResetHooks>().0.contains_key(&kind);
+    let known = world
+        .get_resource::<ResetHooks>()
+        .map(|h| h.0.contains_key(&kind))
+        .unwrap_or(false);
     if !known {
         return Err(BrpError {
             code: error_codes::INVALID_PARAMS,
@@ -395,7 +430,10 @@ fn playtest_cheat(In(params): In<Option<Value>>, world: &World) -> BrpResult {
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_params("params.kind required"))?
         .to_string();
-    let known = world.resource::<CheatHooks>().0.contains_key(&kind);
+    let known = world
+        .get_resource::<CheatHooks>()
+        .map(|h| h.0.contains_key(&kind))
+        .unwrap_or(false);
     if !known {
         return Err(BrpError {
             code: error_codes::INVALID_PARAMS,
@@ -493,39 +531,8 @@ fn decode_intent(params: &Value) -> Result<UserIntent, BrpError> {
             let value = params.get("value").and_then(Value::as_f64).unwrap_or(0.0) as f32;
             Ok(UserIntent::Axis { name, value })
         }
-        "NamedMove" => {
-            let _name = params
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid_params("NamedMove requires name"))?
-                .to_string();
-            // Named intents are dispatched later via NamedIntents resource.
-            // Return a placeholder Move with the name encoded in the dir.
-            Ok(UserIntent::Move {
-                dir: Vec2::new(0.0, 0.0),
-            })
-        }
-        "NamedSelect" => {
-            let _name = params
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid_params("NamedSelect requires name"))?
-                .to_string();
-            Ok(UserIntent::Select {
-                target: bevy::ecs::entity::Entity::PLACEHOLDER,
-            })
-        }
-        "NamedAxis" => {
-            let name = params
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid_params("NamedAxis requires name"))?
-                .to_string();
-            let value = params.get("value").and_then(Value::as_f64).unwrap_or(0.0) as f32;
-            Ok(UserIntent::Axis { name, value })
-        }
         other => Err(invalid_params(format!(
-            "unknown intent kind `{other}` (expected Move/Select/Choice/Axis/Wait/NamedMove/NamedSelect/NamedAxis)"
+            "unknown intent kind `{other}` (expected Move/Select/Choice/Axis/Wait, or Named* with `name`)"
         ))),
     }
 }
@@ -542,6 +549,7 @@ struct AgentFrameCounter(u64);
 fn agent_flush_system(world: &mut World) {
     world.resource_mut::<AgentFrameCounter>().0 += 1;
     let frame = world.resource::<AgentFrameCounter>().0;
+    let elapsed_ms = agent_elapsed_ms(world);
 
     // Take all pending requests without holding the lock across world access.
     let requests: Vec<AgentRequest> = {
@@ -570,7 +578,7 @@ fn agent_flush_system(world: &mut World) {
                 };
                 world.resource_mut::<ActionLog>().record(
                     frame,
-                    0.0,
+                    elapsed_ms,
                     ActionSource::Agent,
                     format!("agent-intent:{}", name),
                     None,
@@ -587,7 +595,7 @@ fn agent_flush_system(world: &mut World) {
                 world.resource_mut::<PendingAgentInput>().keys.push(code);
                 world.resource_mut::<ActionLog>().record(
                     frame,
-                    0.0,
+                    elapsed_ms,
                     ActionSource::Agent,
                     format!("key:{}", key),
                     None,
@@ -636,7 +644,7 @@ fn agent_flush_system(world: &mut World) {
                 // Cheats are ALWAYS audited, then executed.
                 world.resource_mut::<ActionLog>().record(
                     frame,
-                    0.0,
+                    elapsed_ms,
                     ActionSource::Agent,
                     format!("cheat:{}", kind),
                     None,
@@ -660,36 +668,26 @@ fn agent_flush_system(world: &mut World) {
                 }
                 world.insert_resource(hooks);
             }
+            AgentRequest::Screenshot { path } => {
+                // Spawn a Screenshot (async write via observer).
+                world
+                    .spawn(bevy::render::view::window::screenshot::Screenshot::primary_window())
+                    .observe(bevy::render::view::window::screenshot::save_to_disk(
+                        path.clone(),
+                    ));
+                world.resource_mut::<ActionLog>().record(
+                    frame,
+                    elapsed_ms,
+                    ActionSource::Agent,
+                    format!("screenshot:{}", path.display()),
+                    None,
+                );
+            }
         }
     }
 
-    // Deliver gesture halves due this frame (presses scheduled earlier).
-    let pending = world
-        .resource::<PendingAgentInput>()
-        .gestures
-        .iter()
-        .filter(|g| g.press_at == frame || g.release_at == frame)
-        .count();
-    if pending > 0 {
-        let due: Vec<PendingPointerGesture> =
-            std::mem::take(&mut world.resource_mut::<PendingAgentInput>().gestures)
-                .into_iter()
-                .filter(|g| {
-                    if g.press_at == frame {
-                        let w = primary_window_entity(world).unwrap_or(Entity::PLACEHOLDER);
-                        let _ = w;
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .collect();
-        // Re-add gestures not yet complete.
-        let _ = due;
-        let _ = world;
-    }
-    // NOTE: press/release delivery continues in agent_input_system
-    // (separate system below) — flush only enqueues.
+    // Gesture press/release halves are delivered by agent_input_system
+    // below; flush only enqueues.
 }
 
 /// Deliver pending key releases and pointer press/release halves due
@@ -727,9 +725,6 @@ fn agent_input_system(world: &mut World) {
             ));
             continue; // gesture complete
         }
-        if g.press_at < frame && g.release_at > frame {
-            // pressed previously; nothing due now, keep waiting
-        }
         still.push_back(g);
     }
     world.resource_mut::<PendingAgentInput>().gestures = still;
@@ -752,11 +747,28 @@ fn key_input(
     }
 }
 
+/// Real elapsed time for audit-log entries (was hardcoded 0.0).
+/// Falls back to 0 when no Time resource exists (bare test worlds).
+fn agent_elapsed_ms(world: &World) -> f64 {
+    world
+        .get_resource::<bevy::time::Time>()
+        .map(|t| t.elapsed_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
 fn primary_window_entity(world: &mut World) -> Option<Entity> {
     world
         .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>()
         .single(world)
         .ok()
+}
+
+/// Read-only variant for BRP handlers (&World).
+fn primary_window_read(world: &World) -> Option<Entity> {
+    world
+        .iter_entities()
+        .find(|e| e.contains::<bevy::window::PrimaryWindow>())
+        .map(|e| e.id())
 }
 
 fn viewport_location(
@@ -777,19 +789,23 @@ fn viewport_location(
 /// In windowed mode this captures the real rendered frame (via the
 // native screenshot's native screenshot mechanism); in headless
 /// harness mode it returns window geometry only.
-fn playtest_screenshot(_params: In<Option<Value>>, world: &World) -> BrpResult {
+fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResult {
+    // Require a primary window; fail loudly if headless.
+    let Some(window) = primary_window_read(world) else {
+        return Err(invalid_params(
+            "no primary window — screenshots need a rendering app",
+        ));
+    };
+    let _ = window; // validated above; spawn will use it.
     let frame = world.resource::<AgentFrameCounter>().0;
-    let w = 0u32;
-    let h = 0u32;
-    // Headless harness: no windows. Windowed mode would use
-    // native screenshot's native screenshot mechanism.
-    // For now just report "no window" in headless mode.
-    Ok(json!({
-        "frame": frame,
-        "width": w,
-        "height": h,
-        "note": "visual capture delegated to native screenshot; this endpoint reports geometry"
-    }))
+    let path = params
+        .as_ref()
+        .and_then(|p| p.get("path"))
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| format!("screenshot-{}.png", frame).into());
+    send_request(world, AgentRequest::Screenshot { path: path.clone() })?;
+    Ok(json!({ "queued": true, "path": path }))
 }
 
 /// Contract diagnostics over BRP: detect contract pieces, report gaps.
