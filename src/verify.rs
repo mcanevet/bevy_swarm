@@ -2283,3 +2283,81 @@ fn percept_name_addressing_survives_despawns() {
         "{{Name}} addressing lost the survivor"
     );
 }
+
+// ---------------------------------------------------------------------------
+// E1: ScenarioRunner abstraction + parallel runner
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parallel_matches_sequential() {
+    let variants: Vec<(String, Scenario)> = (1..=6)
+        .map(|i| {
+            (
+                format!("seed-{i}"),
+                serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"chaos","seed":{i}}},"duration_s":0.2,"invariants":[]}}"#
+                ))
+                .unwrap(),
+            )
+        })
+        .collect();
+    let seq = run_branch_matrix(build_app, variants.clone()).unwrap();
+    let par = crate::branch::run_matrix(
+        &crate::branch::InProcess { factory: build_app },
+        variants,
+        3,
+    )
+    .unwrap();
+    assert_eq!(seq.outcomes.len(), par.outcomes.len());
+    for (s, p) in seq.outcomes.iter().zip(par.outcomes.iter()) {
+        assert_eq!(s.variant_name, p.variant_name);
+        assert_eq!(s.report.status, p.report.status);
+        assert_eq!(s.report.violations, p.report.violations);
+        assert_eq!(s.report.frame_count, p.report.frame_count);
+    }
+}
+
+#[test]
+fn fresh_thread_per_scenario() {
+    // Each scenario runs on its own freshly-spawned thread (thread ids
+    // differ across runs; captured via a runner that records them).
+    use std::sync::Mutex;
+    let seen = Mutex::new(Vec::<std::thread::ThreadId>::new());
+    struct ThreadRecording<F> {
+        factory: F,
+        seen: std::sync::Arc<Mutex<Vec<std::thread::ThreadId>>>,
+    }
+    impl<F: Fn() -> App + Sync> crate::branch::ScenarioRunner for ThreadRecording<F> {
+        fn run(
+            &self,
+            scenario: &Scenario,
+        ) -> Result<crate::harness::PlaytestReport, crate::harness::ScenarioError> {
+            self.seen.lock().unwrap().push(std::thread::current().id());
+            let runner = crate::branch::InProcess {
+                factory: &self.factory,
+            };
+            crate::branch::ScenarioRunner::run(&runner, scenario)
+        }
+    }
+    let seen = std::sync::Arc::new(seen);
+    let runner = ThreadRecording {
+        factory: build_app,
+        seen: std::sync::Arc::clone(&seen),
+    };
+    let variants: Vec<(String, Scenario)> = (1..=4)
+        .map(|i| {
+            (
+                format!("s{i}"),
+                serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"chaos","seed":{i}}},"duration_s":0.1,"invariants":[]}}"#
+                ))
+                .unwrap(),
+            )
+        })
+        .collect();
+    crate::branch::run_matrix(&runner, variants, 2).unwrap();
+    let ids = seen.lock().unwrap().clone();
+    assert_eq!(ids.len(), 4, "one run per scenario");
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(unique.len(), 4, "each scenario on its own fresh thread");
+}

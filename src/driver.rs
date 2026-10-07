@@ -198,6 +198,30 @@ pub struct PlaytestReport {
     pub system_coverage: SystemCoverage,
 }
 
+impl PlaytestReport {
+    /// An empty Crash-status report — used when a runner-level
+    /// structured error (scenario rejection) must not tear down a
+    /// whole matrix run.
+    pub fn crashed_empty() -> Self {
+        Self {
+            schema_version: 1,
+            status: crate::enums::PlaytestStatus::Crash,
+            violations: vec![],
+            metrics: Default::default(),
+            coverage: Default::default(),
+            frame_count: 0,
+            pre_ready_frames: 0,
+            error: None,
+            action_log: vec![],
+            game_version: None,
+            cheat_count: 0,
+            unreplayable_actions: 0,
+            warnings: vec![],
+            system_coverage: Default::default(),
+        }
+    }
+}
+
 /// Run a validated scenario against an already-built headless App.
 ///
 /// Contract requirements, enforced loudly (a missing contract piece is a

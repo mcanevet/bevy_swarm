@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 // Violations — dedup by (rule, target), ordered by first_frame
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, PartialEq)]
 pub struct ViolationEntry {
     pub rule: String,
     pub target: String,

@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ge min` instead of `above min-1`)
 
 ### Added
+- `ScenarioRunner` trait + `InProcess` runner + `run_matrix` (parallel:
+  one fresh scoped thread per scenario, max_parallel cap, input-order
+  output); `run_branch_matrix` is now `run_matrix(.., 1)` semantics
 - `Component:<Type>{<Name>}.<field>` percept addressing — stable across
   despawns; `[N]` indices now sort candidates by Entity (documented as
   unstable; prefer {Name}); stable-id addressing reserved for I1
