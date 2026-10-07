@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Systems `raw_input_preupdate_system` (keyboard/gamepad in PreUpdate) and `raw_input_update_system` (mouse/cursor/wheel in Update), wired into `PlaytestPlugin`
 - Optional `gamepad` crate feature (`bevy/gamepad`): lazily spawned virtual gamepad emitting `GamepadConnectionEvent`, `RawGamepadButtonChangedEvent`, `RawGamepadAxisChangedEvent`
 - Integration tests in `tests/raw_input.rs`
-- Z7 generic error oracles: new `sinks` module capturing Bevy errors (severity/context/message), panics (message/location/backtrace) and routing them per-run via thread-local RunId; `run_scenario` installs the swarm error handler once per App, resumes unwinding for Panic-severity errors (status Crash preserved) and drains captures into violations (`bevy_error`/`bevy_warning` rules); panic payloads in `PlaytestReport.error` now downcast to readable strings instead of `Any { .. }`. Integration tests in `tests/error_oracles.rs`
+- Z18 autotest() integration: AutotestConfig (16 seeds × 20s chaos defaults, BEVY_SWARM_SEEDS/DURATION/THREADS env overrides), autotest(game_plugin, config) building on headless_app + run_matrix (parallel, fresh App per seed), AutotestReport {schema_version, contract_tier, harness_mode, scope, runs, failures, coverage, summary()} persisted to target/bevy_swarm/runs/autotest-<elapsed>/report.json. Integration tests in tests/autotest.rs
 - Z2 headless App builder: `headless_platform()` (DefaultPlugins configured with invisible window, DontExit) and `headless_app::<P>(game)` returning a fresh-App-per-call closure; bundled-DefaultPlugins conflicts surface actionable guidance instead of an opaque panic. Integration tests in `tests/headless.rs`
 
 ### Changed

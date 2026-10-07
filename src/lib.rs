@@ -27,6 +27,7 @@
 //!
 #[cfg(feature = "agent")]
 pub mod agent;
+pub mod autotest;
 pub mod bots;
 pub mod branch;
 pub mod contract;
