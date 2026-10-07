@@ -40,6 +40,7 @@ pub mod harness;
 pub mod minimize;
 pub mod oracles;
 pub mod planner;
+pub mod raw_input;
 pub mod rules;
 pub mod scenario;
 pub mod state;

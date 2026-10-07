@@ -242,6 +242,7 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
             inputs,
             pointer_clicks: vec![],
             key_presses: vec![],
+            raw_surface: None,
             persona: None,
         },
         invariants: scenario.invariants.clone(),

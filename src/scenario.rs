@@ -158,6 +158,10 @@ pub struct BotConfig {
     pub persona: Option<crate::enums::Persona>,
     #[serde(default)]
     pub key_presses: Vec<KeyPressInput>,
+    /// Raw input surface for chaos/curious bots (Z3). When present,
+    /// chaos bot emits RawActions instead of UserIntents.
+    #[serde(default)]
+    pub raw_surface: Option<RawSurface>,
     /// planner: declarative goal tree (aplib-inspired). The scenario
     /// author writes WHAT to achieve (TestApi predicates), not WHEN
     /// to press.
@@ -175,6 +179,24 @@ fn default_deadzone() -> f32 {
     10.0
 }
 
+/// Raw input surface declaration (Z3). Defines what raw inputs are available
+/// for chaos/curious bots to sample from.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
+pub struct RawSurface {
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub mouse_buttons: bool,
+    #[serde(default)]
+    pub mouse_motion: bool,
+    #[serde(default)]
+    pub wheel: bool,
+    #[serde(default)]
+    pub gamepad: bool,
+    #[serde(default)]
+    pub clickables: bool, // ClickEntity targets discovered by Z6/Z5
+}
+
 /// A typed replay intent. Whatever intent sequence a scenario author
 /// (or a recorded human play session translated through the adapter)
 /// provides is replayed verbatim.
@@ -183,6 +205,58 @@ fn default_deadzone() -> f32 {
 pub struct ReplayInput {
     pub frame: u64,
     pub intent: ReplayIntent,
+}
+
+/// A raw input action for the tier-0 actuator (Z3). Peer of ReplayIntent:
+/// keys, mouse, cursor, gamepad, wheel, and ClickEntity gestures.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(tag = "raw", rename_all = "snake_case")]
+pub enum RawAction {
+    /// Key press (reuse parse_key_code for validation).
+    Key { key: String, hold_frames: u32 },
+    /// Mouse button press.
+    MouseButton { button: MouseBtn, hold_frames: u32 },
+    /// Mouse motion (delta in logical pixels).
+    MouseMove { delta: (f32, f32) },
+    /// Absolute cursor position (logical pixels, viewport coordinates).
+    Cursor { pos: (f32, f32) },
+    /// Click gesture: move to pos, press, hold, release.
+    Click {
+        pos: (f32, f32),
+        button: MouseBtn,
+        hold_frames: u32,
+    },
+    /// Click an entity by Name or StableId (resolved each frame).
+    ClickEntity { target: EntityRef },
+    /// Mouse wheel scroll.
+    Wheel { dy: f32 },
+    /// Gamepad button.
+    GamepadButton { button: String, hold_frames: u32 },
+    /// Gamepad axis.
+    GamepadAxis {
+        axis: String,
+        value: f32,
+        hold_frames: u32,
+    },
+    /// Wait N frames (no-op, for pacing).
+    Wait { frames: u32 },
+}
+
+/// Reference to a gameplay entity (by Name or StableId). Used by ClickEntity.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum EntityRef {
+    ByName(String),
+    ByStableId(u64),
+}
+
+/// Mouse button for raw input (wire-compatible with PointerButton).
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseBtn {
+    Left,
+    Right,
+    Middle,
 }
 
 /// synthetic_pointer: click a named entity at a given frame. The
