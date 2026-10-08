@@ -25,8 +25,9 @@ pub struct StableId(pub u64);
 #[derive(Resource, Default)]
 pub struct IdentityIndex {
     pub(crate) next_stable: u64,
-    /// Map from StableId to Entity.
-    by_stable: HashMap<StableId, Entity>,
+    /// Map from StableId to Entity (BTreeMap: stable_ids() iteration
+    /// is in StableId order, deterministic — HashMap was random order).
+    by_stable: std::collections::BTreeMap<StableId, Entity>,
     /// Multiple entities may share a Name; kept in insertion (StableId)
     /// order so "first match" is deterministic.
     by_name: HashMap<String, Vec<(StableId, Entity)>>,
@@ -74,6 +75,12 @@ impl IdentityIndex {
         self.next_stable = 0;
         self.by_stable.clear();
         self.by_name.clear();
+    }
+
+    /// FX6 I1: re-insert an existing (StableId, Entity) pair after a
+    /// reset (entities that survived from App build / previous run).
+    pub fn reinsert(&mut self, id: StableId, entity: Entity) {
+        self.by_stable.insert(id, entity);
     }
 
     /// Index an entity under a name (observer helper).
@@ -139,7 +146,6 @@ pub(crate) fn on_replace_name(
 ) {
     let e = event.entity;
     if let (Ok(&id), Ok(old)) = (ids.get(e), names.get(e)) {
-        eprintln!("DISCARD observer: entity={:?} name={}", e, old);
         // Remove the old name entry.
         if let Some(vec) = idx.by_name_name_mut(old.as_ref()) {
             vec.retain(|(sid, ent)| *sid != id || *ent != e);
@@ -163,7 +169,6 @@ pub(crate) fn on_insert_name(
 ) {
     let e = event.entity;
     if let (Ok(&id), Ok(n)) = (ids.get(e), names.get(e)) {
-        eprintln!("INSERT observer: entity={:?} name={}", e, n);
         // Deduplicate (Insert also fires for fresh Adds).
         if let Some(vec) = idx.by_name_name_mut(n.as_ref()) {
             if vec.iter().any(|(sid, ent)| *sid == id && *ent == e) {

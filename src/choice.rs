@@ -100,6 +100,10 @@ impl ChoiceStream {
     /// stay valid). Lemire multiply-shift kills modulo bias.
     pub fn below(&mut self, frame: u64, bound: u64) -> u64 {
         if bound <= 1 {
+            // FX6 J0: record AND consume symmetrically. Skipping the
+            // replay pop here desynced every later draw in a replay
+            // stream (1-element surfaces, Choice(0)).
+            self.replay.pop_front();
             self.recorded.push(Choice {
                 frame,
                 value: 0,
@@ -148,6 +152,39 @@ impl ChoiceStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fx6_j0_replay_bound_1_consumes() {
+        // FX6 J0 RED: below(_, n<=1) must pop the replay queue.
+        // A 1-element surface recording Choice(0) but NOT popping
+        // desyncs every later draw.
+        let mut cs = ChoiceStream::from_seed(42).with_replay(
+            vec![
+                Choice {
+                    frame: 1,
+                    value: 0,
+                    bound: 1,
+                },
+                Choice {
+                    frame: 2,
+                    value: 5,
+                    bound: 10,
+                },
+                Choice {
+                    frame: 3,
+                    value: 3,
+                    bound: 4,
+                },
+            ],
+            Continuation::Prng,
+        );
+        let a = cs.below(1, 1); // consumes replay[0]
+        let b = cs.below(2, 10); // should consume replay[1] -> 5
+        let c = cs.below(3, 4); // should consume replay[2] -> 3
+        assert_eq!(a, 0);
+        assert_eq!(b, 5, "desync: replay[1] was not consumed");
+        assert_eq!(c, 3, "desync: replay[2] was not consumed");
+    }
 
     #[test]
     fn zero_choices_are_simplest() {
