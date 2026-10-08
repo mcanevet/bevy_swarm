@@ -81,6 +81,9 @@
       "type": "integer",
       "minimum": 0,
       "description": "Frames spent waiting for GameReady before the scenario began"
+    },
+    "action_effect_rate": {
+      "$ref": "#/$defs/action_effect_rate"
     }
   },
   "additionalProperties": false,
@@ -297,6 +300,28 @@
         }
       },
       "additionalProperties": false
+    },
+    "action_effect_rate": {
+      "type": "object",
+      "description": "I5: per-action effect rates (key -> {effective, total})",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "effective",
+          "total"
+        ],
+        "properties": {
+          "effective": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
     }
   }
 }
