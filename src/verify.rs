@@ -1781,7 +1781,7 @@ fn check_op_boundary_inclusive_in_scenario() {
     // Score == 2 with invariant score below 2 must PASS (inclusive le).
     // Above-at-equality for expert WHEN fires.
     let scen: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[{"name":"cap","rule":"custom","path":"TestApi.score","check":"below","value":0.5}]}"#,
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[{"name":"cap","rule":"custom","path":"TestApi.score","check":"below","value":0.5}]}"#,
     )
     .unwrap();
     // Use the standard scoring game: awards on Choice{0}... score stays 0.

@@ -27,8 +27,10 @@ use crate::state::*;
 /// `Gameplay` entities (a placeholder entity would be ignored-or-panic
 /// noise, not a test). `SurfaceVariant::Axis(name)` counts as variant
 /// `"axis:<name>"` for coverage tracking.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn chaos_bot_system(
     mut state: ResMut<PlaytestState>,
+    mut choices: ResMut<crate::choice::ChoiceStream>,
     mut intents: MessageWriter<UserIntent>,
     mut violations: ResMut<Violations>,
     surface: Option<Res<IntentSurface>>,
@@ -55,7 +57,7 @@ pub(crate) fn chaos_bot_system(
         return;
     }
     // Idle persona: skip 7 of 8 fire slots entirely (occasional jabs).
-    if persona == crate::enums::Persona::Idle && !state.next_rand().is_multiple_of(8) {
+    if persona == crate::enums::Persona::Idle && !choices.chance(state.frame, 1, 8) {
         return;
     }
     let Some(surface) = surface else {
@@ -78,7 +80,7 @@ pub(crate) fn chaos_bot_system(
         );
         return;
     }
-    let roll_uniform = (state.next_rand() % surface.0.len() as u64) as usize;
+    let roll_uniform = choices.below(state.frame, surface.0.len() as u64) as usize;
     // Aggressive persona: never Wait — draw from the FILTERED candidate
     // set (no reject loops anywhere; a Wait-only surface still yields
     // Wait rather than hanging).
@@ -93,7 +95,7 @@ pub(crate) fn chaos_bot_system(
         if candidates.is_empty() {
             roll_uniform
         } else {
-            candidates[(state.next_rand() % candidates.len() as u64) as usize]
+            candidates[choices.below(state.frame, candidates.len() as u64) as usize]
         }
     } else {
         roll_uniform
@@ -105,22 +107,22 @@ pub(crate) fn chaos_bot_system(
             variant_name = "move".into();
             UserIntent::Move {
                 dir: bevy::math::Vec2::new(
-                    (state.next_rand() % 100) as f32 / 50.0 - 1.0,
-                    (state.next_rand() % 100) as f32 / 50.0 - 1.0,
+                    choices.unit_f32(state.frame, -1.0, 1.0),
+                    choices.unit_f32(state.frame, -1.0, 1.0),
                 ),
             }
         }
         SurfaceVariant::Choice(max_index) => {
             variant_name = "choice".into();
             UserIntent::Choice {
-                index: (state.next_rand() % (*max_index as u64 + 1)) as usize,
+                index: choices.below(state.frame, *max_index as u64 + 1) as usize,
             }
         }
         SurfaceVariant::Axis(name) => {
             variant_name = "axis".into();
             UserIntent::Axis {
                 name: name.clone(),
-                value: (state.next_rand() % 100) as f32 / 50.0 - 1.0,
+                value: choices.unit_f32(state.frame, -1.0, 1.0),
             }
         }
         SurfaceVariant::Select => {
@@ -157,7 +159,7 @@ pub(crate) fn chaos_bot_system(
             } else {
                 &named
             };
-            let idx = (state.next_rand() % pool.len() as u64) as usize;
+            let idx = choices.below(state.frame, pool.len() as u64) as usize;
             UserIntent::Select { target: pool[idx] }
         }
         SurfaceVariant::Wait => {

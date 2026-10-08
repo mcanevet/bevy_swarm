@@ -261,6 +261,8 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
             raw_surface: None,
             persona: None,
             policy: None,
+            choices: None,
+            continuation: crate::choice::Continuation::default(),
         },
         invariants: scenario.invariants.clone(),
         oracles: scenario.oracles.clone(),

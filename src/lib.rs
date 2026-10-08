@@ -33,6 +33,7 @@ pub mod agent;
 pub mod autotest;
 pub mod bots;
 pub mod branch;
+pub mod choice;
 pub mod compiled;
 pub mod contract;
 pub mod conventions;
