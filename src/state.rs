@@ -149,6 +149,8 @@ pub struct PlaytestState {
     pub last_alive_frame: u64,
     /// Last frame where an intent/action was consumed (I4 turn-based mode).
     pub last_intent_frame: Option<u64>,
+    /// Z6: archetype count at the last gameplay-inference pass.
+    pub inference_last_archetype_len: usize,
     /// Readiness gate: frames spent waiting for `GameReady` before
     /// scenario duration began accruing (UE IsReady analog).
     pub pre_ready_frames: u64,
@@ -341,6 +343,7 @@ impl PlaytestState {
             frozen_frames: 0,
             last_alive_frame: 0,
             last_intent_frame: None,
+            inference_last_archetype_len: 0,
             pre_ready_frames: 0,
             planner: crate::planner::PlannerStack::default(),
             pending_gestures: std::collections::VecDeque::new(),

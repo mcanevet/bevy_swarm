@@ -122,7 +122,13 @@ impl bevy::app::Plugin for PlaytestPlugin {
 
         app.add_systems(
             bevy::app::First,
-            (tick_counter_system, cheat_scheduler_system)
+            (
+                tick_counter_system,
+                // Z6: incremental gameplay inference (no-op unless
+                // GameTypes present and no explicit Gameplay marker).
+                crate::game_types::apply_gameplay_inference,
+                cheat_scheduler_system,
+            )
                 .chain()
                 .in_set(PlaytestSet::Tick),
         );

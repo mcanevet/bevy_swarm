@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Z6: Gameplay inference from the game's crate path** — `src/game_types.rs`: `GameTypes` (crate-prefix classification, `from_plugin::<P>()`, `.with_crate(...)`), `infer_gameplay_archetypes`, and sticky tagging that inserts the real `Gameplay` + `InferredGameplay` markers on entities whose archetype has ≥1 game-owned component (cameras/lights/windows/UI/observers excluded). Explicit `Gameplay` markers disable inference. Wired via `headless_app` (GameTypes insert) and an incremental `First`-set system. Tests in `tests/game_inference.rs` + lib tests.
+
+### Added
 - **I3: Typed Rust API** — oracles, goal predicates and bot policies as plain Bevy systems: `PlaytestAppExt::{add_oracle, add_goal_predicate, add_bot_policy}` registering into a `TypedRegistry`; `run_typed_oracles` in `PlaytestSet::Oracles`; scenario `oracles` selection (None = all, unknown names reject at load); planner `{"kind":"predicate","name":...}` goals; `BotType::Custom` + `bot.policy`. Tests in `tests/typed.rs` incl. minimization of typed-oracle failures. JSON DSL unchanged.
 
 ### Added
