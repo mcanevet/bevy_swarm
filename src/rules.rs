@@ -40,6 +40,7 @@ pub enum Rule {
     RawClickEntityUnimplemented,
     PointerNotActionable,
     ChaosSelectUnnamed,
+    EntropyUnattributedDraws,
 }
 
 impl Rule {
@@ -79,6 +80,7 @@ impl Rule {
         Rule::RawClickEntityUnimplemented,
         Rule::PointerNotActionable,
         Rule::ChaosSelectUnnamed,
+        Rule::EntropyUnattributedDraws,
     ];
 
     /// The string name used in reports (snake_case).
@@ -118,6 +120,7 @@ impl Rule {
             Rule::RawClickEntityUnimplemented => "raw_click_entity_unimplemented",
             Rule::PointerNotActionable => "pointer_not_actionable",
             Rule::ChaosSelectUnnamed => "chaos_select_unnamed",
+            Rule::EntropyUnattributedDraws => "entropy_unattributed_draws",
         }
     }
 }
@@ -157,6 +160,7 @@ pub const RAW_GAMEPAD_DISABLED: &str = "raw_gamepad_disabled";
 pub const RAW_CLICK_ENTITY_UNIMPLEMENTED: &str = "raw_click_entity_unimplemented";
 pub const POINTER_NOT_ACTIONABLE: &str = "pointer_not_actionable";
 pub const CHAOS_SELECT_UNNAMED: &str = "chaos_select_unnamed";
+pub const ENTROPY_UNATTRIBUTED_DRAWS: &str = "entropy_unattributed_draws";
 
 /// All registered rule names (legacy alias).
 pub const ALL_RULES: &[&str] = &[

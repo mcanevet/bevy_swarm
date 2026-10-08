@@ -100,7 +100,11 @@ impl Violations {
     }
 
     /// Wall-clock/informational rules excluded from fingerprint gating.
-    pub const INFORMATIONAL_RULES: &[&str] = &["frame_time_p99", "frame_time_worst"];
+    pub const INFORMATIONAL_RULES: &[&str] = &[
+        "frame_time_p99",
+        "frame_time_worst",
+        "entropy_unattributed_draws",
+    ];
 }
 
 // ---------------------------------------------------------------------------

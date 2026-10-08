@@ -152,6 +152,34 @@ Games contribute custom digest parts (RNG state, AI blackboards) via the
 `DigestHooks` resource. Normal runs pay nothing — digests are only recorded
 when a `StateTrace` resource is present.
 
+### Z14: Deterministic Entropy Hook
+
+Enable the `deterministic-entropy` feature and set the `getrandom_backend` cfg:
+
+```bash
+RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_swarm/deterministic-entropy
+```
+
+Or use `cargo swarm run` which sets both automatically.
+
+The custom backend hook (`__getrandom_v03_custom`) intercepts all `getrandom`
+calls (including `rand::rng()`, `uuid::Uuid::new_v4`, `bevy_rand`) and draws
+from a deterministic stream seeded from the scenario seed. Calls outside
+`enter_run()` draw from a process-global fallback stream and increment the
+`entropy_unattributed_draws` informational rule counter.
+
+**Important**: The hook signature must match exactly:
+```rust
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom::Error>
+```
+
+Using `extern "C"` or returning `Result<(), ()>` is undefined behavior (UB)
+and will abort the process on panic.
+
 ## Robustness margins (J1)
 
 Every invariant carries a signed robustness ρ — the distance to violation,

@@ -92,6 +92,15 @@ impl Xoshiro256StarStar {
 /// Enter a deterministic entropy run with the given seed.
 /// Must be called before building the App or running scenarios.
 pub fn enter_run(seed: u64) {
+    // FX3: diagnostic when the feature is on but the build cfg is not —
+    // entropy interception silently no-ops in that misconfiguration.
+    #[cfg(all(feature = "deterministic-entropy", not(getrandom_backend = "custom")))]
+    eprintln!(
+        "bevy_swarm: deterministic-entropy feature is enabled but the getrandom \
+         custom-backend cfg is NOT set. Rebuild with RUSTFLAGS='--cfg getrandom_backend=\"custom\"' \
+         or `cargo swarm run`; entropy interception is inactive and runs are NOT \
+         deterministic."
+    );
     STREAM.with(|s| {
         *s.borrow_mut() = Some(Xoshiro256StarStar::seed(seed));
     });
@@ -124,9 +133,14 @@ pub fn reset_fallback_counter() {
 
 // The getrandom v0.4 custom backend hook (also works for v0.3 due to
 // identical symbol name and ABI). Defined only when the cfg is set.
+// FX3: Changed from extern "C" to extern "Rust" with proper Error return
+// (getrandom 0.3/0.4 declare this as extern "Rust" — using "C" was UB).
 #[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), ()> {
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom04::Error> {
     // Safety: caller guarantees dest points to len valid bytes.
     let buf = unsafe { std::slice::from_raw_parts_mut(dest, len) };
 
@@ -137,15 +151,26 @@ unsafe extern "C" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result
                 Ok(())
             }
             None => {
-                // Fallback: use OS randomness (unattributed).
+                // Fallback: process-global deterministic stream (seeded constant).
+                // No panics — we're in an FFI context.
                 FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // For now, just panic to make missing enter_run obvious in tests.
-                // In production, fall back to OS:
-                // getrandom::getrandom(buf).map_err(|_| ())
-                panic!("getrandom called outside deterministic run - missing enter_run()?");
+                let mut g = global_fallback().lock().unwrap_or_else(|e| e.into_inner());
+                g.fill_bytes(buf);
+                Ok(())
             }
         }
     })
+}
+
+/// Process-global fallback RNG for getrandom calls outside enter_run.
+/// Seeded with a constant to ensure reproducibility across runs.
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+static GLOBAL_FALLBACK: std::sync::OnceLock<std::sync::Mutex<Xoshiro256StarStar>> =
+    std::sync::OnceLock::new();
+
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+fn global_fallback() -> &'static std::sync::Mutex<Xoshiro256StarStar> {
+    GLOBAL_FALLBACK.get_or_init(|| std::sync::Mutex::new(Xoshiro256StarStar::seed(0xDEADBEEF)))
 }
 
 /// Layout assertions for getrandom Error types (v0.3 and v0.4).
