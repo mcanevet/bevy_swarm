@@ -80,3 +80,56 @@ fn release_guard_decision_function() {
     assert_eq!(cfg.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert_eq!(cfg.port, 15702);
 }
+
+// ---------------------------------------------------------------------------
+// FX10: world.* auth bypass, constant-time compare, release guard
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fx10_constant_time_compare() {
+    // The token comparison must be constant-time: equal-length but
+    // different content must be rejected without leaking which byte
+    // differed (behaviorally indistinguishable, but the helper is
+    // exposed for direct testing).
+    use bevy_swarm::agent::__test_token_eq;
+    assert!(__test_token_eq("sekrit", "sekrit"));
+    assert!(!__test_token_eq("sekrit", "sekrut"));
+    assert!(!__test_token_eq("sekrit", "sekritt"));
+    assert!(!__test_token_eq("", "x"));
+    assert!(__test_token_eq("", ""));
+}
+
+#[test]
+fn fx10_world_methods_require_token() {
+    // An unauthenticated world.get_components request must be rejected
+    // when a token is set: the built-in world.* methods registered by
+    // RemotePlugin::default() must be auth-guarded.
+    use bevy::remote::error_codes;
+    let world = world_with_token(Some("sekrit".into()));
+
+    // No token -> INVALID_REQUEST.
+    let err = bevy_swarm::agent::__test_world_get(&world, None).unwrap_err();
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
+
+    // Wrong token -> INVALID_REQUEST.
+    let params = serde_json::json!({"entity": 1, "components": [], "token": "wrong"});
+    let err = bevy_swarm::agent::__test_world_get(&world, Some(params)).unwrap_err();
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
+
+    // Right token -> passes auth.
+    let params = serde_json::json!({"entity": 1, "components": [], "token": "sekrit"});
+    let res = bevy_swarm::agent::__test_world_get(&world, Some(params));
+    assert!(res.is_ok() || res.unwrap_err().code != error_codes::INVALID_REQUEST);
+}
+
+#[test]
+fn fx10_deny_in_release_defaults_true_for_remote() {
+    // allow_remote: true + deny_in_release unset -> effective default is
+    // deny (remote exposure in release is the dangerous case).
+    let cfg = bevy_swarm::agent::AgentConfig {
+        allow_remote: true,
+        ..Default::default()
+    };
+    assert!(cfg.effective_deny_in_release());
+    assert!(!bevy_swarm::agent::AgentConfig::default().effective_deny_in_release());
+}

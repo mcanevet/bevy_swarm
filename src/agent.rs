@@ -15,7 +15,7 @@ use crate::contract::{
 use bevy::picking;
 use bevy::prelude::*;
 use bevy::remote::http::RemoteHttpPlugin;
-use bevy::remote::{error_codes, BrpError, BrpResult, RemotePlugin};
+use bevy::remote::{builtin_methods, error_codes, BrpError, BrpResult, RemotePlugin};
 use serde_json::{json, Value};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -115,6 +115,13 @@ impl AgentConfig {
     /// Validate the config: refuse non-loopback binds without explicit
     /// opt-in; warn (or panic, per `deny_in_release`) on release builds.
     /// Exposed for unit testing the decision logic without a network.
+    /// FX10: effective deny_in_release — defaults to TRUE when
+    /// allow_remote is set (remote exposure in a release build is the
+    /// dangerous case).
+    pub fn effective_deny_in_release(&self) -> bool {
+        self.deny_in_release || self.allow_remote
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         let is_release = cfg!(not(debug_assertions));
         if is_release {
@@ -149,6 +156,160 @@ pub const PLAYTEST_METHODS: &[&str] = &[
     "playtest/screenshot",
     "playtest/diagnostics",
 ];
+
+/// FX10: constant-time token comparison. Lengths are compared
+/// without early exit on content; content is XOR-accumulated so a
+/// mismatch does not reveal which byte differed.
+pub(crate) fn token_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// FX10: token-guarded wrapper around a built-in world.* handler.
+/// Auth FIRST — a caller without the token learns nothing about the
+/// shape of the params.
+fn with_token_guard(
+    handler: fn(In<Option<Value>>, &World) -> BrpResult,
+) -> impl Fn(In<Option<Value>>, &World) -> BrpResult {
+    move |In(params): In<Option<Value>>, world: &World| {
+        if !world_token_ok(world, params.as_ref()) {
+            return Err(auth_error());
+        }
+        handler(In(params), world)
+    }
+}
+
+/// FX10: same guard for handlers needing `&mut World`.
+fn with_token_guard_mut(
+    handler: fn(In<Option<Value>>, &mut World) -> BrpResult,
+) -> impl Fn(In<Option<Value>>, &mut World) -> BrpResult {
+    move |In(params): In<Option<Value>>, world: &mut World| {
+        if !world_token_ok(world, params.as_ref()) {
+            return Err(auth_error());
+        }
+        handler(In(params), world)
+    }
+}
+
+fn auth_error() -> BrpError {
+    BrpError {
+        code: error_codes::INVALID_REQUEST,
+        message: "invalid or missing token".to_string(),
+        data: None,
+    }
+}
+
+fn world_token_ok(world: &World, params: Option<&Value>) -> bool {
+    let Some(expected) = world
+        .get_resource::<AgentAuthToken>()
+        .and_then(|t| t.0.clone())
+    else {
+        return true;
+    };
+    let provided = params.and_then(|p| p.get("token")).and_then(Value::as_str);
+    provided.is_some_and(|p| token_eq(p, &expected))
+}
+
+/// FX10: rejecting stub for mutating built-in world.* methods.
+/// Overriding a builtin name replaces its handler (RemotePlugin::build
+/// drains in order and RemoteMethods::insert replaces same-named
+/// entries — later wins).
+fn world_method_disabled(In(_params): In<Option<Value>>) -> BrpResult {
+    Err(BrpError {
+        code: error_codes::METHOD_NOT_FOUND,
+        message: "world mutation methods are disabled; use playtest/* methods".to_string(),
+        data: None,
+    })
+}
+
+/// FX10: RemotePlugin with auth-guarded read-only world methods and
+/// ALL mutating builtins overridden to reject. Drive mutations
+/// through playtest/* instead (token-guarded via brp_params).
+fn guarded_remote_plugin() -> RemotePlugin {
+    RemotePlugin::default()
+        // Read-only getters: token-guarded versions override builtins.
+        .with_method_main(
+            builtin_methods::BRP_GET_COMPONENTS_METHOD,
+            with_token_guard(builtin_methods::process_remote_get_components_request),
+        )
+        .with_method_main(
+            builtin_methods::BRP_QUERY_METHOD,
+            with_token_guard_mut(builtin_methods::process_remote_query_request),
+        )
+        .with_method_main(
+            builtin_methods::BRP_LIST_COMPONENTS_METHOD,
+            with_token_guard(builtin_methods::process_remote_list_components_request),
+        )
+        .with_method_main(
+            builtin_methods::BRP_GET_RESOURCE_METHOD,
+            with_token_guard(builtin_methods::process_remote_get_resources_request),
+        )
+        // Mutating / streaming builtins: replaced with rejections.
+        .with_method_main(
+            builtin_methods::BRP_SPAWN_ENTITY_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_INSERT_COMPONENTS_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_REMOVE_COMPONENTS_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_DESPAWN_COMPONENTS_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_REPARENT_ENTITIES_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_MUTATE_COMPONENTS_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_MUTATE_RESOURCE_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_INSERT_RESOURCE_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_REMOVE_RESOURCE_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_TRIGGER_EVENT_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_WRITE_MESSAGE_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(builtin_methods::BRP_OBSERVE_METHOD, world_method_disabled)
+        .with_method_main(
+            builtin_methods::BRP_GET_COMPONENTS_AND_WATCH_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_LIST_COMPONENTS_AND_WATCH_METHOD,
+            world_method_disabled,
+        )
+        .with_method_main(
+            builtin_methods::BRP_LIST_RESOURCES_METHOD,
+            world_method_disabled,
+        )
+}
 
 /// Adds the BRP transport with custom `playtest/*` methods.
 /// Uses [`AgentConfig::default`] (loopback, token from env).
@@ -189,7 +350,7 @@ impl Plugin for AgentPlugin {
             // Gestures pending for THIS frame (releases, presses).
             .add_systems(PreUpdate, (agent_flush_system, agent_input_system).chain())
             .add_plugins(
-                RemotePlugin::default()
+                guarded_remote_plugin()
                     .with_method_main("playtest/schema", playtest_schema)
                     .with_method_main("playtest/observe", playtest_observe)
                     .with_method_main("playtest/intent", playtest_intent)
@@ -244,7 +405,7 @@ fn brp_params(world: &World, params: Option<Value>) -> BrpResult<Value> {
             .as_ref()
             .and_then(|p| p.get("token"))
             .and_then(Value::as_str);
-        if provided != Some(expected.as_str()) {
+        if !provided.is_some_and(|p| token_eq(p, &expected)) {
             return Err(BrpError {
                 code: error_codes::INVALID_REQUEST,
                 message: "invalid or missing token".to_string(),
@@ -826,4 +987,15 @@ fn playtest_diagnostics(_params: In<Option<Value>>, world: &World) -> BrpResult 
 #[doc(hidden)]
 pub fn __test_observe(world: &World, params: Option<Value>) -> Result<Value, BrpError> {
     playtest_observe(In(params), world)
+}
+
+/// FX10 test hooks (no network needed).
+#[doc(hidden)]
+pub fn __test_token_eq(a: &str, b: &str) -> bool {
+    token_eq(a, b)
+}
+
+#[doc(hidden)]
+pub fn __test_world_get(world: &World, params: Option<Value>) -> Result<Value, BrpError> {
+    with_token_guard(builtin_methods::process_remote_get_components_request)(In(params), world)
 }
