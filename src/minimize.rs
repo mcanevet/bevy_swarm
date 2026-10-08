@@ -264,6 +264,7 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
         },
         invariants: scenario.invariants.clone(),
         oracles: scenario.oracles.clone(),
+        liveness: scenario.liveness.clone(),
     }
 }
 
