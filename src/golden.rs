@@ -55,23 +55,14 @@ impl GoldenSet {
         })
     }
 
-    /// Save a golden set to disk.
+    /// Save a golden set to disk (deprecated — use record_golden).
+    /// FX9: this method now panics if called (it wiped digests in the
+    /// original implementation; callers must use record_golden which
+    /// preserves digests/inputs/snapshots).
     pub fn save(&self) -> Result<(), std::io::Error> {
-        fs::create_dir_all(&self.dir)?;
-        for (name, scenario) in &self.scenarios {
-            let path = self.dir.join(format!("{}.golden.json", name));
-            let golden = GoldenFile {
-                bevy_swarm_version: env!("CARGO_PKG_VERSION").to_string(),
-                platform: String::new(),
-                scenario: scenario.clone(),
-                inputs: vec![],
-                digests: vec![],
-                snapshots: vec![],
-            };
-            let json = serde_json::to_string_pretty(&golden)?;
-            fs::write(path, json)?;
-        }
-        Ok(())
+        Err(std::io::Error::other(
+            "GoldenSet::save() is deprecated — use record_golden()",
+        ))
     }
 }
 
@@ -182,7 +173,7 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
     };
     let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
 
-    for scenario in scenarios {
+    for (scenario_idx, scenario) in scenarios.iter().enumerate() {
         let mut app = app_factory();
         app.insert_resource(StateTrace {
             with_snapshots: false,
@@ -203,7 +194,8 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
         // Collect snapshots at 1s intervals
         let mut snapshots = Vec::new();
         let mut last_snapshot_frame = 0u64;
-        let tps = 60.0; // Assume 60 TPS; in practice read from scenario or Time resource
+        // FX9: use the SCENARIO's tps, not a hardcoded 60.
+        let tps = scenario.tps.max(1) as f32;
         let snapshot_interval_frames = (tps * 1.0) as u64; // Every 1s
 
         for (frame_idx, _digest) in report.state_trace.iter().flatten().enumerate() {
@@ -223,18 +215,24 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
             bevy_swarm_version: env!("CARGO_PKG_VERSION").to_string(),
             platform: platform.clone(),
             scenario: scenario.clone(),
-            inputs: vec![], // TODO: extract replay inputs from ActionLog
+            // FX9: store the audit log so goldens replay recorded
+            // inputs instead of drifting with the input surface.
+            inputs: app
+                .world()
+                .get_resource::<crate::contract::ActionLog>()
+                .map(|l| l.entries.iter().map(|e| e.action.clone()).collect())
+                .unwrap_or_default(),
             digests,
             snapshots,
         };
 
+        // FX9: name by scenario name + seed — two scenarios with the
+        // same seed must not overwrite each other.
+        let entry_name = format!("scenario-{}-{}", scenario_idx, scenario.bot.seed);
         golden_set
             .scenarios
-            .push((format!("scenario-{}", scenario.bot.seed), scenario.clone()));
-        // Store the golden file
-        let path = golden_set
-            .dir
-            .join(format!("scenario-{}.golden.json", scenario.bot.seed));
+            .push((entry_name.clone(), scenario.clone()));
+        let path = golden_set.dir.join(format!("{}.golden.json", entry_name));
         let json = serde_json::to_string_pretty(&golden)?;
         fs::create_dir_all(&golden_set.dir)?;
         fs::write(&path, json)?;
@@ -283,6 +281,7 @@ pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
             .collect();
 
         let outcome = if current_digests.len() != golden.digests.len() {
+            all_same = false; // FX9: digest-count mismatch sets all_same=false
             GoldenOutcome::Diverged {
                 first_frame: 0,
                 changed: vec![(
@@ -344,14 +343,10 @@ pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
     })
 }
 
-/// Environment variable to enable golden update mode.
-const ENV_UPDATE_GOLDEN: &str = "BEVY_SWARM_UPDATE_GOLDEN";
-
-/// Check if golden update mode is enabled.
+/// Check if golden update mode is enabled (U1 conventions:
+/// BEVY_SWARM_UPDATE=golden or BEVY_SWARM_UPDATE=all).
 pub fn update_golden_enabled() -> bool {
-    std::env::var(ENV_UPDATE_GOLDEN)
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    crate::conventions::can_update("golden")
 }
 
 #[cfg(test)]
