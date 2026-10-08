@@ -18,6 +18,8 @@ pub enum BotType {
     SyntheticPointer,
     SyntheticKeyboard,
     Planner,
+    /// I3: user-registered typed bot policy (BotConfig.policy names it).
+    Custom,
 }
 
 impl std::fmt::Display for BotType {
@@ -29,6 +31,7 @@ impl std::fmt::Display for BotType {
             BotType::SyntheticPointer => write!(f, "synthetic_pointer"),
             BotType::SyntheticKeyboard => write!(f, "synthetic_keyboard"),
             BotType::Planner => write!(f, "planner"),
+            BotType::Custom => write!(f, "custom"),
         }
     }
 }

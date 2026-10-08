@@ -87,6 +87,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
         app.init_resource::<Violations>();
         // I1: identity index + observers (idempotent).
         crate::identity::install_identity(app);
+        // I3: typed oracle/predicate/policy registry.
+        app.init_resource::<crate::typed::TypedRegistry>();
 
         // Every harness system is gated on a live scenario so the plugin
         // is safe to leave in a production App (or an App never driven
@@ -157,6 +159,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 replay_bot_system.run_if(bot_is(crate::enums::BotType::Replay)),
                 pursuit_bot_system.run_if(bot_is(crate::enums::BotType::Pursuit)),
                 crate::planner::planner_bot_system.run_if(bot_is(crate::enums::BotType::Planner)),
+                crate::typed::custom_policy_bot_system
+                    .run_if(bot_is(crate::enums::BotType::Custom)),
             )
                 .chain()
                 .in_set(PlaytestSet::Bots),
@@ -179,6 +183,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 check_finite_transforms_system,
                 check_bounds_gameplay_system,
                 check_custom_system,
+                // I3: typed oracles after the JSON-DSL checker.
+                crate::typed::run_typed_oracles,
                 intent_audit_log_system,
                 crate::determinism::record_state_digest_system,
             )
@@ -493,6 +499,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             });
         }
     }
+
+    // I3: typed-oracle name validation (unknown names reject at load).
+    crate::typed::validate_oracle_names(app.world(), scenario)?;
+    // I3: custom bot-policy name validation.
+    crate::typed::validate_policy_name(app.world(), scenario)?;
 
     // I2: compile invariants once — unknown component/query types
     // reject at LOAD time, before any frame runs.

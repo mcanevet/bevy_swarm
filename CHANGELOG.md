@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **I3: Typed Rust API** — oracles, goal predicates and bot policies as plain Bevy systems: `PlaytestAppExt::{add_oracle, add_goal_predicate, add_bot_policy}` registering into a `TypedRegistry`; `run_typed_oracles` in `PlaytestSet::Oracles`; scenario `oracles` selection (None = all, unknown names reject at load); planner `{"kind":"predicate","name":...}` goals; `BotType::Custom` + `bot.policy`. Tests in `tests/typed.rs` incl. minimization of typed-oracle failures. JSON DSL unchanged.
+
+### Added
 - **I2: Compiled invariants** — load-time component resolution (typos reject before any frame runs), archetype-level query counts via QueryBuilder + matched_archetypes (O(archetypes) vs O(entities)), pre-parsed ParsedPath for reflect fields, lazy component-id resolution for Startup-spawned components. New `src/compiled.rs` with `CompiledScenario` resource, `Accessor::Count` fast path, and `CompiledKind::QueryCount`. Tests: `unknown_component_rejected_at_load`, `count_is_archetype_level`, `lazy_registered_component_count_works`. Delta windows converted to VecDeque (eliminating O(n) remove(0)).
 
 ### Added

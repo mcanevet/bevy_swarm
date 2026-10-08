@@ -40,6 +40,11 @@ pub struct Scenario {
     pub invariants: Vec<Invariant>,
     #[serde(default)]
     pub setup: Setup,
+    /// I3: typed-oracle selection. None = run ALL registered typed
+    /// oracles; Some(names) restricts to the listed ones. Unknown names
+    /// reject at load time (ScenarioError::Rejected).
+    #[serde(default)]
+    pub oracles: Option<Vec<String>>,
 }
 /// Key name → KeyCode (common subset; extend as games need).
 pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {
@@ -167,6 +172,10 @@ pub struct BotConfig {
     /// to press.
     #[serde(default)]
     pub goals: Option<crate::planner::GoalNode>,
+    /// custom: name of a registered typed bot policy
+    /// (PlaytestAppExt::add_bot_policy). Unknown names reject at load.
+    #[serde(default)]
+    pub policy: Option<String>,
 }
 
 fn default_seed() -> u64 {

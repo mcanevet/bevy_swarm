@@ -260,8 +260,10 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
             key_presses: vec![],
             raw_surface: None,
             persona: None,
+            policy: None,
         },
         invariants: scenario.invariants.clone(),
+        oracles: scenario.oracles.clone(),
     }
 }
 

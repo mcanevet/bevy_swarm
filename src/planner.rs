@@ -47,6 +47,14 @@ pub enum GoalNode {
         #[serde(default = "default_repeat_max_s")]
         max_s: f32,
     },
+    /// Leaf (I3): a registered typed goal predicate, evaluated as a
+    /// Bevy system. Achieved when the predicate returns true.
+    /// {"kind":"predicate","name":"door_open","emit":[...]}
+    Predicate {
+        name: String,
+        #[serde(default)]
+        emit: Vec<ReplayIntent>,
+    },
     /// Leaf: a TestApi predicate plus intents to emit while pursuing it.
     /// Achieved when `path` satisfies `check` vs `value`.
     Primitive {
@@ -140,6 +148,7 @@ impl PlannerStack {
                 GoalNode::Any { .. } => format!("any[{}]", e.child),
                 GoalNode::Repeat { .. } => "repeat".into(),
                 GoalNode::Primitive { path, .. } => format!("prim({})", path),
+                GoalNode::Predicate { name, .. } => format!("pred({})", name),
             })
             .collect::<Vec<_>>()
             .join("/")
@@ -346,11 +355,43 @@ pub fn planner_bot_system(world: &mut World) {
     // Take Violations out of the world so the resolve closure can hold
     // an immutable world borrow for the whole loop; re-inserted below.
     let mut violations = world.remove_resource::<Violations>().unwrap_or_default();
-    // D1: resolution goes through resolve_path (registered resolver
-    // first, then world percepts) — a custom TestApi type works without
-    // the crate's TestApi resource.
-    let resolve = |path: &str| crate::contract::resolve_path(world, path);
     let mut planner = planner_stack;
+    let resolve = |path: &str| crate::contract::resolve_path(world, path);
+    if planner.is_empty() {
+        planner.push(&goal_root, &resolve, frame, None);
+    }
+    // I3: pre-evaluate typed goal predicates on the current stack
+    // (run_system needs &mut World; the resolve closure below holds an
+    // immutable borrow for the whole loop). Runs AFTER the root push so
+    // a freshly-(re)pushed Predicate goal is evaluated this frame.
+    let mut achieved_predicates: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    if planner
+        .0
+        .iter()
+        .any(|e| matches!(e.goal, GoalNode::Predicate { .. }))
+    {
+        let registry = world
+            .remove_resource::<crate::typed::TypedRegistry>()
+            .unwrap_or_default();
+        let wanted: Vec<String> = planner
+            .0
+            .iter()
+            .filter_map(|e| match &e.goal {
+                GoalNode::Predicate { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        for name in wanted {
+            if let Some(id) = registry.predicates.get(&name).copied() {
+                if world.run_system(id).unwrap_or(false) {
+                    achieved_predicates.insert(name);
+                }
+            }
+        }
+        world.insert_resource(registry);
+    }
+    let resolve = |path: &str| crate::contract::resolve_path(world, path);
     if planner.is_empty() {
         planner.push(&goal_root, &resolve, frame, None);
     }
@@ -432,6 +473,30 @@ pub fn planner_bot_system(world: &mut World) {
                     planner.push(&c, &resolve, frame, Some(dl));
                 } else {
                     break; // child is in flight on the stack above us
+                }
+            }
+            GoalNode::Predicate { name, emit } => {
+                // I3: typed predicate — pre-evaluated before the
+                // immutable world borrow (see achieved_predicates).
+                let achieved = achieved_predicates.contains(name.as_str());
+                if achieved {
+                    pop_success(&mut planner, &resolve, &mut violations, frame);
+                    goals_done += 1;
+                } else {
+                    // Unachieved: emit pursuit intents, PACED by
+                    // bot.input_rate_hz (same as primitives).
+                    let due = frame.is_multiple_of(fire_every);
+                    let cursor = planner.0.last().unwrap().emit_cursor;
+                    if due && !emit.is_empty() && cursor < emit.len() {
+                        let idx = cursor;
+                        planner.0.last_mut().unwrap().emit_cursor += 1;
+                        let ri = &emit[idx];
+                        if let Some(intent) = replay_intent_to_user(ri) {
+                            let ctx = replay_variant(ri).to_string();
+                            emitted = Some((intent, ctx, planner.trace()));
+                        }
+                    }
+                    break;
                 }
             }
             GoalNode::Primitive {
