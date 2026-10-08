@@ -67,6 +67,17 @@ pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {
         "ctrl" => ControlLeft,
         "alt" => AltLeft,
         s => {
+            // Accept "KeyA"-style names (debug/serde form) as well as
+            // bare letters ("a") and digits ("1").
+            if let Some(rest) = lower.strip_prefix("key") {
+                if rest.len() == 1 {
+                    if let Some(c) = rest.chars().next() {
+                        if c.is_ascii_lowercase() {
+                            return KEY_LETTERS.get(c as usize - 'a' as usize).copied();
+                        }
+                    }
+                }
+            }
             let mut chars = s.chars();
             let c = chars.next()?;
             if chars.next().is_some() {
