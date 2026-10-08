@@ -21,20 +21,20 @@ struct CaseOutcome {
 #[derive(Debug, PartialEq)]
 enum Outcome {
     Passed,
-    Failed,
+    Failed(Vec<String>),
     Pending(String),
     UnexpectedPass(String),
 }
 
-fn golden_dir(fixture: &str) -> PathBuf {
+fn golden_dir(fixture: impl AsRef<str>) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/swarm/golden")
-        .join(fixture)
+        .join("tests/swarm/expectations")
+        .join(fixture.as_ref())
 }
 
 fn discover_cases() -> Vec<(String, String)> {
     let mut cases = Vec::new();
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/swarm/golden");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/swarm/expectations");
     let mut fixtures: Vec<_> = std::fs::read_dir(&root)
         .expect("golden dir exists")
         .filter_map(|e| e.ok())
@@ -133,6 +133,12 @@ fn build_scenario(expectation: &serde_json::Value) -> String {
             scenario["bot"]["seed"] = serde_json::json!(first);
         }
     }
+    if let Some(liveness) = expectation.get("liveness") {
+        scenario["liveness"] = liveness.clone();
+    }
+    if let Some(rate) = expectation.get("input_rate_hz").and_then(|r| r.as_u64()) {
+        scenario["bot"]["input_rate_hz"] = serde_json::json!(rate);
+    }
     scenario.to_string()
 }
 
@@ -175,14 +181,65 @@ fn check_case(report: &serde_json::Value, expectation: &serde_json::Value) -> Ve
         })
         .unwrap_or_default();
 
+    // FX2: expectations pin the ACTUAL bug, not just a rule name —
+    // optional detail_contains / target / min_count narrow the match.
+    let violation_objects: Vec<&serde_json::Value> = report
+        .get("violations")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().collect())
+        .unwrap_or_default();
+
     if let Some(must) = expectation.get("must_report").and_then(|m| m.as_array()) {
         for entry in must {
             let rule = entry
                 .get("rule")
                 .and_then(|r| r.as_str())
                 .expect("rule name");
-            if !violation_rules.contains(&rule) {
+            let matching: Vec<&&serde_json::Value> = violation_objects
+                .iter()
+                .filter(|v| v.get("rule").and_then(|r| r.as_str()) == Some(rule))
+                .collect();
+            if matching.is_empty() {
                 errors.push(format!("must_report: '{}' not reported", rule));
+                continue;
+            }
+            if let Some(want) = entry.get("detail_contains").and_then(|d| d.as_str()) {
+                if !matching.iter().any(|v| {
+                    v.get("detail")
+                        .and_then(|d| d.as_str())
+                        .is_some_and(|d| d.contains(want))
+                }) {
+                    errors.push(format!(
+                        "must_report: '{}' reported but no detail contains {:?}",
+                        rule, want
+                    ));
+                }
+            }
+            if let Some(target) = entry.get("target").and_then(|d| d.as_str()) {
+                if !matching
+                    .iter()
+                    .any(|v| v.get("target").and_then(|d| d.as_str()) == Some(target))
+                {
+                    errors.push(format!(
+                        "must_report: '{}' reported but not on target {:?}",
+                        rule, target
+                    ));
+                }
+            }
+            if let Some(min_count) = entry.get("min_count").and_then(|d| d.as_u64()) {
+                // Aggregated reports collapse repeats into count — use
+                // that when present, else the array length.
+                let n = matching
+                    .iter()
+                    .filter_map(|v| v.get("count").and_then(|c| c.as_u64()))
+                    .max()
+                    .unwrap_or(matching.len() as u64);
+                if n < min_count {
+                    errors.push(format!(
+                        "must_report: '{}' reported {} times, want >= {}",
+                        rule, n, min_count
+                    ));
+                }
             }
         }
     }
@@ -209,7 +266,7 @@ fn acceptance_suite() {
     let cases = discover_cases();
     assert!(
         !cases.is_empty(),
-        "no golden cases found — tests/swarm/golden/ is empty?"
+        "no expectation cases found — tests/swarm/expectations/ is empty?"
     );
 
     let mut outcomes = Vec::new();
@@ -230,7 +287,7 @@ fn acceptance_suite() {
             (false, Some(bead)) => {
                 Outcome::Pending(format!("{} ({}): {:?}", bead, variant, errors))
             }
-            (false, None) => Outcome::Failed,
+            (false, None) => Outcome::Failed(errors),
         };
         outcomes.push(CaseOutcome {
             fixture: fixture.clone(),
@@ -245,7 +302,7 @@ fn acceptance_suite() {
         .count();
     let failed = outcomes
         .iter()
-        .filter(|c| matches!(c.outcome, Outcome::Failed))
+        .filter(|c| matches!(c.outcome, Outcome::Failed(_)))
         .count();
     let unexpected: Vec<&CaseOutcome> = outcomes
         .iter()
@@ -273,13 +330,14 @@ fn acceptance_suite() {
     }
 
     for c in &outcomes {
-        if let Outcome::Failed = c.outcome {
+        if let Outcome::Failed(errors) = &c.outcome {
             let expect_path = golden_dir(&c.fixture).join(format!("{}.json", c.variant));
             eprintln!(
-                "FAILED: {}/{} ({})",
+                "FAILED: {}/{} ({}) — {:#?}",
                 c.fixture,
                 c.variant,
-                expect_path.display()
+                expect_path.display(),
+                errors
             );
         }
     }
@@ -306,6 +364,16 @@ fn fixtures_have_no_harness_plumbing() {
         "UserIntent",
         "IntentSurface",
         "PlaytestPlugin",
+        // FX2: the harness-side markers are also plumbing — fixtures
+        // must not import/derive their identity from them.
+        "RealTime",
+        "PlaytestSet",
+        "Gameplay,",
+        "Gameplay;",
+        "Gameplay>",
+        "(Gameplay",
+        "Gameplay)",
+        ": Gameplay",
     ];
     // "Gameplay" the MARKER: the word Gameplay alone may appear in prose;
     // the marker type is `Gameplay` in struct position — approximate by
@@ -340,21 +408,14 @@ fn fixtures_have_no_harness_plumbing() {
 }
 
 /// Reports from real runs validate against docs/report-schema.json
-/// (hand-rolled validator for the subset this suite uses: required fields,
-/// types, enum values, and no unknown top-level keys).
+/// (FX2: FULL draft-2020-12 validation via the jsonschema crate — the
+/// hand-rolled top-level-key subset missed nested shape errors).
 #[test]
 fn report_matches_schema() {
     let cases = discover_cases();
     let schema: serde_json::Value =
         serde_json::from_str(include_str!("../docs/report-schema.json")).expect("schema parses");
-
-    let allowed_top: Vec<&str> = schema["properties"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(|k| k.as_str())
-        .collect();
-    let statuses = ["pass", "fail", "crash"];
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles");
 
     for (fixture, variant) in &cases {
         let expectation = serde_json::from_str::<serde_json::Value>(
@@ -364,32 +425,110 @@ fn report_matches_schema() {
         .unwrap();
         let report = run_case(fixture, variant, &expectation);
 
-        for key in report.as_object().unwrap().keys() {
-            assert!(
-                allowed_top.contains(&key.as_str()),
-                "{}/{}: unexpected report key '{}'",
-                fixture,
-                variant,
-                key
-            );
-        }
-        let status = report["status"].as_str().unwrap();
+        let errors: Vec<String> = validator
+            .iter_errors(&report)
+            .map(|e| format!("{} at {}", e, e.instance_path))
+            .collect();
         assert!(
-            statuses.contains(&status),
-            "{}/{}: bad status '{}'",
+            errors.is_empty(),
+            "{}/{}: report does not match docs/report-schema.json: {:#?}",
             fixture,
             variant,
-            status
+            errors
         );
+    }
+}
+
+/// FX2: unknown FIXTURE_BUG values must PANIC in the fixture, not
+/// silently run the clean game (a typo'd case would vacuously pass).
+/// RED PHASE: currently unknown bugs fall through to the clean system.
+#[test]
+fn unknown_fixture_bug_panics() {
+    for fixture in [
+        "walker",
+        "spinner",
+        "spawner",
+        "turn_based",
+        "regression_pair",
+    ] {
+        let out = Command::new("cargo")
+            .args(["run", "--quiet", "-p", "fixture-runner", "--", fixture])
+            .arg(
+                r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[],"setup":{}}"#,
+            )
+            .env("FIXTURE_BUG", "definitely_not_a_real_bug")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("run fixture-runner");
         assert!(
-            report["violations"].is_array()
-                && report["metrics"].is_object()
-                && report["coverage"].is_object()
-                && report["frame_count"].is_u64(),
-            "{}/{}: missing required fields",
-            fixture,
-            variant
+            !out.status.success(),
+            "{fixture}: unknown FIXTURE_BUG must panic, not silently run clean"
         );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("unknown FIXTURE_BUG"),
+            "{fixture}: panic must name the problem, stderr: {stderr}"
+        );
+    }
+}
+
+/// FX2: reports must be read from a per-case unique path (--out), not
+/// the shared runs/last copy that parallel tests race on.
+#[test]
+fn fixture_runner_supports_out_flag() {
+    let out_dir = std::env::temp_dir().join(format!("fx2-out-test-{}", std::process::id()));
+    let out_path = out_dir.join("report.json");
+    let out = Command::new("cargo")
+        .args(["run", "--quiet", "-p", "fixture-runner", "--", "walker"])
+        .arg(r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[],"setup":{}}"#)
+        .arg("--out")
+        .arg(&out_path)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run fixture-runner");
+    assert!(
+        out.status.success(),
+        "fixture-runner --out must work: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let content = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("--out report must exist at {}: {}", out_path.display(), e));
+    assert!(
+        content.contains("\"schema_version\""),
+        "--out report must be the report JSON"
+    );
+    let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+/// FX2: every "pending" expectation must reference an OPEN bead, per
+/// tests/swarm/pending.json (kept in sync manually; bd isn't callable
+/// from CI). A pending case referencing a CLOSED bead is dead weight
+/// that hides a real failure.
+#[test]
+fn pending_expectations_reference_open_beads() {
+    let pending_registry: serde_json::Value =
+        serde_json::from_str(include_str!("swarm/pending.json"))
+            .expect("tests/swarm/pending.json parses");
+    let closed: Vec<&str> = pending_registry["closed"]
+        .as_array()
+        .expect("closed: array of CLOSED bead ids")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+
+    for (fixture, variant) in discover_cases() {
+        let expect_path = golden_dir(&fixture).join(format!("{}.json", variant));
+        let raw = std::fs::read_to_string(&expect_path).unwrap();
+        let expectation: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        if let Some(bead) = expectation.get("pending").and_then(|p| p.as_str()) {
+            assert!(
+                !closed.contains(&bead),
+                "{}/{} is pending on '{}' but that bead is CLOSED in pending.json —                  investigate (it may now pass, or the case needs fixing)",
+                fixture,
+                variant,
+                bead
+            );
+        }
     }
 }
 

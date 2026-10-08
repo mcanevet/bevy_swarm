@@ -35,11 +35,9 @@ pub struct SpinnerGamePlugin;
 
 impl Plugin for SpinnerGamePlugin {
     fn build(&self, app: &mut App) {
-        let buggy = std::env::var("FIXTURE_BUG")
-            .ok()
-            .map(|s| s.to_lowercase())
-            .as_deref()
-            == Some("frozen");
+        let bug = std::env::var("FIXTURE_BUG").ok().map(|s| s.to_lowercase());
+        known_bug(&bug, &["frozen"]);
+        let buggy = bug.as_deref() == Some("frozen");
 
         app.add_systems(Startup, |mut commands: Commands| {
             commands.spawn((Spinner, Transform::default()));
@@ -49,6 +47,16 @@ impl Plugin for SpinnerGamePlugin {
             app.add_systems(Update, spin_system_buggy);
         } else {
             app.add_systems(Update, spin_system);
+        }
+    }
+}
+
+/// FX2: an unknown FIXTURE_BUG is a typo'd test case — panic loudly
+/// instead of silently running the clean game (vacuous pass).
+fn known_bug(bug: &Option<String>, known: &[&str]) {
+    if let Some(b) = bug.as_deref() {
+        if !known.contains(&b) {
+            panic!("unknown FIXTURE_BUG '{}'. Known: {:?}", b, known);
         }
     }
 }

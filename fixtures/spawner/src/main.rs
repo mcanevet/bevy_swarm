@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+
 use fixture_spawner::SpawnerGamePlugin;
 
 fn main() {

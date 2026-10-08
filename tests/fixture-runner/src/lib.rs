@@ -18,7 +18,7 @@ use std::fs;
 /// headless_platform). MinimalPlugins provides Time/task/chedule plumbing.
 pub fn headless_app() -> App {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
+    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin));
     app
 }
 
@@ -69,6 +69,16 @@ impl Plugin for WalkerAdapterPlugin {
         app.add_systems(
             Update,
             |mut commands: Commands, q: Query<Entity, Added<fixture_walker::Player>>| {
+                for e in &q {
+                    commands.entity(e).insert(Gameplay);
+                }
+            },
+        );
+        // FX2: child_out_of_bounds spawns a ChildSprite far outside the
+        // playable bounds — it is gameplay-relevant, so tag it too.
+        app.add_systems(
+            Update,
+            |mut commands: Commands, q: Query<Entity, Added<fixture_walker::ChildSprite>>| {
                 for e in &q {
                     commands.entity(e).insert(Gameplay);
                 }
@@ -135,6 +145,15 @@ impl Plugin for TurnBasedAdapterPlugin {
         app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
             fixture_turn_based::TurnBasedGamePlugin,
         >());
+        // FX2: expose Score as TestApi.score (the checkop_boundary
+        // expectation asserts on it).
+        app.add_systems(
+            bevy::app::Update,
+            |score: Res<fixture_turn_based::Score>,
+             mut api: ResMut<bevy_swarm::contract::TestApi>| {
+                api.score = score.0 as i64;
+            },
+        );
     }
 }
 

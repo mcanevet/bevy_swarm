@@ -11,10 +11,30 @@ use fixture_runner::{
 use std::env;
 
 fn main() {
-    let fixture = env::args()
-        .nth(1)
-        .expect("usage: fixture-runner <spinner|walker|spawner>");
-    let scenario_json = env::args().nth(2).unwrap_or_else(|| {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let fixture = args
+        .first()
+        .expect("usage: fixture-runner <fixture> [scenario] [--out <path>]")
+        .clone();
+    // FX2: optional --out <path> — unique per-case report destination,
+    // so parallel invocations never race on a shared path.
+    let mut out_path: Option<std::path::PathBuf> = None;
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--out" {
+            out_path = Some(
+                args.get(i + 1)
+                    .expect("--out requires a path argument")
+                    .into(),
+            );
+            i += 2;
+        } else {
+            positional.push(args[i].clone());
+            i += 1;
+        }
+    }
+    let scenario_json = positional.get(1).cloned().unwrap_or_else(|| {
         r#"{"bot":{"type":"chaos","seed":42},"duration_s":1.0,"invariants":[],"setup":{}}"#
             .to_string()
     });
@@ -73,6 +93,20 @@ fn main() {
         .unwrap_or(0);
     let run_id = conventions::run_id(scenario_hash, scenario.bot.seed);
     let path = write_report(&report, &run_id);
+    // FX2: --out overrides the report destination (unique per-case
+    // path for the acceptance harness). Errors are FATAL — a swallowed
+    // copy error meant stale-report reads downstream.
+    if let Some(out) = out_path {
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)
+                .unwrap_or_else(|e| panic!("create out dir {}: {}", parent.display(), e));
+        }
+        std::fs::write(
+            &out,
+            serde_json::to_string_pretty(&report).expect("serialize"),
+        )
+        .unwrap_or_else(|e| panic!("write {}: {}", out.display(), e));
+    }
     // runs/last convention: copy of the latest run dir (conventions §2)
     let last = bevy_swarm::conventions::runs_dir().join("last");
     let _ = std::fs::remove_dir_all(&last);

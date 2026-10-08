@@ -28,7 +28,7 @@ pub(crate) fn check_finite_transforms_system(
         let t = transform.translation;
         if !t.x.is_finite() || !t.y.is_finite() || !t.z.is_finite() {
             violations.report(
-                "nodes_finite",
+                crate::rules::FINITE_TRANSFORMS,
                 &format!("entity:{}", entity),
                 format!("non-finite translation ({}, {}, {})", t.x, t.y, t.z),
                 state.frame,
@@ -39,7 +39,7 @@ pub(crate) fn check_finite_transforms_system(
         // check missed.
         if !transform.rotation.is_finite() || !transform.scale.is_finite() {
             violations.report(
-                "nodes_finite",
+                crate::rules::FINITE_TRANSFORMS,
                 &format!("entity:{}", entity),
                 format!(
                     "non-finite rotation ({:?}) or scale ({:?})",

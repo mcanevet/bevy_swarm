@@ -1,0 +1,25 @@
+{
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_not_report": [],
+  "status": "fail",
+  "must_report": [
+    {
+      "rule": "b",
+      "detail_contains": "out of bounds"
+    }
+  ],
+  "invariants": [
+    {
+      "name": "b",
+      "rule": "nodes_in_bounds",
+      "min_x": -10,
+      "max_x": 10,
+      "min_y": -10,
+      "max_y": 10
+    }
+  ]
+}

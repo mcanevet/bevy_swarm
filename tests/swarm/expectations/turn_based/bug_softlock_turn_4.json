@@ -1,0 +1,19 @@
+{
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_not_report": [],
+  "status": "fail",
+  "must_report": [
+    {
+      "rule": "stuck_after_intent"
+    }
+  ],
+  "liveness": {
+    "mode": "after_intent",
+    "timeout_s": 0.5
+  },
+  "input_rate_hz": 1
+}

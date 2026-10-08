@@ -1,14 +1,15 @@
 {
-  "status": "fail",
   "scaffold": "adapter",
   "seeds": [
     42
   ],
   "duration_s": 6.0,
+  "must_not_report": [],
+  "status": "fail",
   "must_report": [
     {
-      "rule": "frozen_world"
+      "rule": "dangling_entity"
     }
   ],
-  "must_not_report": []
+  "pending": "swarm-716.24"
 }

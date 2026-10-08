@@ -90,6 +90,16 @@
     },
     "robustness": {
       "$ref": "#/$defs/robustness"
+    },
+    "state_trace": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "Per-frame state digests (opt-in, golden trajectory support).",
+      "items": {
+        "$ref": "#/$defs/frame_digest"
+      }
     }
   },
   "additionalProperties": false,
@@ -103,7 +113,6 @@
         "last_frame",
         "count",
         "detail",
-        "last_detail",
         "last_detail"
       ],
       "properties": {
@@ -258,7 +267,28 @@
           "type": "number"
         },
         "source": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "object",
+              "description": "BotScenario",
+              "required": [
+                "BotScenario"
+              ],
+              "properties": {
+                "BotScenario": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Agent",
+                "Manual"
+              ]
+            }
+          ]
         },
         "action": {
           "type": "string"
@@ -289,7 +319,28 @@
           "minimum": 0
         },
         "source": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "object",
+              "description": "BotScenario",
+              "required": [
+                "BotScenario"
+              ],
+              "properties": {
+                "BotScenario": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Agent",
+                "Manual"
+              ]
+            }
+          ]
         },
         "action": {
           "type": "string"
@@ -385,6 +436,28 @@
         "overall"
       ],
       "additionalProperties": false
+    },
+    "frame_digest": {
+      "type": "object",
+      "required": [
+        "frame",
+        "hash"
+      ],
+      "properties": {
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hash": {
+          "type": "integer"
+        },
+        "snapshot": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
     }
   }
 }

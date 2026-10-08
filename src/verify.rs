@@ -2276,7 +2276,7 @@ fn nan_rotation_is_detected() {
     assert!(
         rep2.violations
             .iter()
-            .any(|v| v.rule == "nodes_finite" && v.detail.contains("rotation")),
+            .any(|v| v.rule == "finite_transforms" && v.detail.contains("rotation")),
         "NaN rotation not detected: {:?}",
         rep2.violations
     );
@@ -2314,7 +2314,7 @@ fn unnormalized_rotation_is_separate_rule() {
     assert!(
         !rep.violations
             .iter()
-            .any(|v| v.rule == "nodes_finite" && v.detail.contains("rotation")),
+            .any(|v| v.rule == "finite_transforms" && v.detail.contains("rotation")),
         "denormalized rotation must not be a nodes_finite hit"
     );
 }
