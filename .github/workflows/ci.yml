@@ -19,9 +19,12 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
+      - name: Install Linux dependencies (bevy_render via agent feature)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97
-      - run: cargo build
+      - name: Check the whole workspace (FX11: was root-package build only)
+        run: cargo check --workspace --all-targets
 
   audit:
     runs-on: ubuntu-latest
@@ -34,10 +37,17 @@ jobs:
   features:
     runs-on: ubuntu-latest
     steps:
+      - name: Install Linux dependencies (bevy_render via agent feature)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Print enabled Bevy features (H2)
-        run: cargo tree -e features -i bevy
+      - name: Assert default features pull no render/winit/audio (H2)
+        run: |
+          cargo tree -e features -i bevy
+          if cargo tree -e features -i bevy | grep -qE 'bevy feature "(render|winit|audio)"'; then
+            echo "FAIL: default features enable render/winit/audio"
+            exit 1
+          fi
 
   agent:
     runs-on: ubuntu-latest
@@ -73,26 +83,31 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
+      - name: Install Linux dependencies (bevy_render via agent feature)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
+      
       - name: Cache
         uses: Swatinem/rust-cache@v2
       
-      - name: Build
-        run: cargo build --all-targets
+      - name: Build (FX11: whole workspace, all features)
+        run: cargo build --workspace --all-targets --all-features
+        env:
+          CARGO_INCREMENTAL: "0"
       
-      - name: Run unit tests
-        run: cargo test --lib
+      - name: Run all tests (FX11: workspace + all-features)
+        run: cargo test --workspace --all-features
+        env:
+          CARGO_INCREMENTAL: "0"
       
-      - name: Run benchmark tests (regression suite)
-        run: cargo test --tests
-      
-      - name: Run doc tests
-        run: cargo test --doc
-      
-      - name: Lint with Clippy (deny warnings)
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Lint with Clippy (deny warnings, FX11: workspace + all-features)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        env:
+          CARGO_INCREMENTAL: "0"
       
       - name: Build examples
-        run: cargo build --examples
+        run: cargo build --examples --all-features
+        env:
+          CARGO_INCREMENTAL: "0"
 
   docs:
     runs-on: ubuntu-latest

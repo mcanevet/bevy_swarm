@@ -15,6 +15,7 @@ allow = [
     "Unicode-3.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSD-4-Clause",
     "ISC",
     "MPL-2.0",
     "Zlib",
