@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **I5: Action-effect oracle (actuator-agnostic) + per-action effect rates** — `src/effects.rs`: every audited action (intents via the audit log, Z3 raw actions) records a `PendingEffect`; after `effect_window_frames` (default tps/2) an effect = any gameplay-state change since the action's tick (I4 `changed_since`). Report gains `action_effect_rate: {key: {effective, total}}`. Rule `dead_verb` (Major): an action key with 0% effect over ≥10 samples. `overall_effect_rate()` feeds the Z1 vacuity guard.
+
+### Added
 - **Z6: Gameplay inference from the game's crate path** — `src/game_types.rs`: `GameTypes` (crate-prefix classification, `from_plugin::<P>()`, `.with_crate(...)`), `infer_gameplay_archetypes`, and sticky tagging that inserts the real `Gameplay` + `InferredGameplay` markers on entities whose archetype has ≥1 game-owned component (cameras/lights/windows/UI/observers excluded). Explicit `Gameplay` markers disable inference. Wired via `headless_app` (GameTypes insert) and an incremental `First`-set system. Tests in `tests/game_inference.rs` + lib tests.
 
 ### Added

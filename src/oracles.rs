@@ -873,6 +873,7 @@ pub(crate) fn intent_audit_log_system(
     names: Query<&Name>,
     ids: Query<&crate::identity::StableId>,
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
+    mut action_effects: ResMut<crate::effects::ActionEffects>,
 ) {
     if !reader.is_empty() {
         // I4: remember the last frame an intent was consumed (for the
@@ -887,6 +888,8 @@ pub(crate) fn intent_audit_log_system(
             UserIntent::Select { .. } => "select",
             UserIntent::Wait => "wait",
         };
+        // I5: every audited action records a pending effect.
+        action_effects.record(&format!("intent:{}", variant), state.frame);
         // Structured JSON via serde_json: no escaping bugs, lossless
         // float encoding (f32 -> f64 -> shortest repr round-trips
         // exactly, unlike the old {:.4} truncation).

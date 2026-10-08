@@ -10,6 +10,5 @@
       "rule": "dead_verb"
     }
   ],
-  "must_not_report": [],
-  "pending": "swarm-cj8.5"
+  "must_not_report": []
 }

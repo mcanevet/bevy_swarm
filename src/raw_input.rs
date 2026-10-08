@@ -80,6 +80,7 @@ pub fn raw_input_preupdate_system(
     mut window_events: MessageWriter<WindowEvent>,
     mut violations: ResMut<Violations>,
     playtest_state: Option<ResMut<PlaytestState>>,
+    mut action_effects: ResMut<crate::effects::ActionEffects>,
     primary_window: bevy::ecs::system::Query<
         bevy::ecs::entity::Entity,
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
@@ -168,6 +169,7 @@ pub fn raw_input_preupdate_system(
                 key_holds
                     .0
                     .insert((frame, key_code), frame + hold_frames as u64);
+                action_effects.record(&format!("raw:key:{:?}", key_code), frame);
             }
             RawAction::MouseButton {
                 button,
@@ -178,6 +180,7 @@ pub fn raw_input_preupdate_system(
                 mouse_holds
                     .0
                     .insert((frame, btn), frame + hold_frames as u64);
+                action_effects.record(&format!("raw:mouse:{:?}", btn), frame);
             }
             RawAction::Click {
                 pos,
@@ -191,6 +194,7 @@ pub fn raw_input_preupdate_system(
                 mouse_holds
                     .0
                     .insert((frame, btn), frame + hold_frames as u64);
+                action_effects.record(&format!("raw:mouse:{:?}", btn), frame);
             }
             RawAction::GamepadButton {
                 button,
