@@ -26,10 +26,10 @@ enum Outcome {
     UnexpectedPass(String),
 }
 
-fn golden_dir(fixture: &str) -> PathBuf {
+fn golden_dir(fixture: impl AsRef<str>) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/swarm/expectations")
-        .join(fixture)
+        .join(fixture.as_ref())
 }
 
 fn discover_cases() -> Vec<(String, String)> {
@@ -271,7 +271,7 @@ fn acceptance_suite() {
 
     let mut outcomes = Vec::new();
     for (fixture, variant) in &cases {
-        let expect_path = golden_dir(&fixture).join(format!("{}.json", variant));
+        let expect_path = golden_dir(fixture).join(format!("{}.json", variant));
         let raw = std::fs::read_to_string(&expect_path)
             .unwrap_or_else(|e| panic!("read {}: {}", expect_path.display(), e));
         let expectation: serde_json::Value = serde_json::from_str(&raw)
