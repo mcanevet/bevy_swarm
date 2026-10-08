@@ -178,7 +178,19 @@ pub fn swarm_error_handler(err: BevyError, ctx: ErrorContext) {
 
 /// Capture a borrowed BevyError + context into the current run's sink.
 pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
-    let severity = Severity::from(&err.severity());
+    // FX5 Z7: map by severity. Ignore = NOT recorded (errors the game
+    // explicitly marked uninteresting must not fail the run as
+    // bevy_warning). Trace/Debug/Info map to Warning (recorded), Error
+    // and Panic map to Error.
+    let sev = err.severity();
+    let severity = match sev {
+        bevy::ecs::error::Severity::Ignore => return, // not recorded
+        bevy::ecs::error::Severity::Warning
+        | bevy::ecs::error::Severity::Trace
+        | bevy::ecs::error::Severity::Debug
+        | bevy::ecs::error::Severity::Info => Severity::Warning,
+        bevy::ecs::error::Severity::Error | bevy::ecs::error::Severity::Panic => Severity::Error,
+    };
     let context = ctx.name().to_string();
     let message = err.to_string();
     let frame = current_frame();
@@ -193,12 +205,18 @@ pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
     }
 }
 
-/// Get the current frame number (from PlaytestState if available).
+thread_local! {
+    static CURRENT_FRAME: Cell<u64> = const { Cell::new(0) };
+}
+
+/// FX5 Z7: set the current frame number (driver sets this each tick).
+pub fn set_current_frame(frame: u64) {
+    CURRENT_FRAME.with(|c| c.set(frame));
+}
+
+/// Get the current frame number (driver-set thread-local).
 fn current_frame() -> u64 {
-    // Try to read PlaytestState from the current world.
-    // Since we can't access the world here, we return 0 as a placeholder.
-    // In practice, the caller should set CURRENT_FRAME before calling this.
-    0
+    CURRENT_FRAME.with(Cell::get)
 }
 
 /// Set the current run id for the calling thread.

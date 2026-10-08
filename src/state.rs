@@ -68,7 +68,11 @@ impl Violations {
     /// oracle systems needing the normalizer.
     pub fn snapshot(&self) -> Vec<ViolationEntry> {
         let mut v: Vec<ViolationEntry> = self.entries.values().cloned().collect();
-        v.sort_by_key(|e| e.first_frame);
+        // FX5: total order (first_frame, rule, target) for deterministic
+        // fingerprinting across runs. HashMap tie-breaking was random.
+        v.sort_by(|a, b| {
+            (a.first_frame, &a.rule, &a.target).cmp(&(b.first_frame, &b.rule, &b.target))
+        });
         for e in &mut v {
             // Informational rules (wall-clock frame-time) are NOT
             // fingerprint-gated (U1 rule 9).
