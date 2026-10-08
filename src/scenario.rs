@@ -472,6 +472,9 @@ pub struct Invariant {
     pub requires_path: Option<String>,
     pub requires_check: Option<crate::enums::CheckOp>,
     pub requires_value: Option<serde_json::Value>,
+    /// J1: robustness normalization scale. Defaults to max(|threshold|,
+    /// 1.0) so large-unit invariants don't dominate the overall min.
+    pub scale: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]

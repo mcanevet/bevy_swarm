@@ -87,6 +87,9 @@
     },
     "choices": {
       "$ref": "#/$defs/choices"
+    },
+    "robustness": {
+      "$ref": "#/$defs/robustness"
     }
   },
   "additionalProperties": false,
@@ -352,6 +355,36 @@
         },
         "additionalProperties": false
       }
+    },
+    "robustness": {
+      "type": "object",
+      "description": "J1: STL-style signed robustness margins per invariant",
+      "properties": {
+        "per_invariant": {
+          "type": "object",
+          "description": "invariant name -> [min rho over run, frame of min, normalized min]",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "overall": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "min over invariants of normalized min; < 0 iff some invariant failed"
+        }
+      },
+      "required": [
+        "per_invariant",
+        "overall"
+      ],
+      "additionalProperties": false
     }
   }
 }

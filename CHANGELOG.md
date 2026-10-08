@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **J1: quantitative robustness semantics (STL-style signed margins)** — `src/robustness.rs`: every invariant computes a signed distance to violation ρ (positive = satisfied by that margin) in `report.robustness`: `per_invariant {name: [min ρ, frame of min, normalized min]}` + `overall` (min of normalized mins; < 0 iff the run failed an invariant). Threshold, query-count, differential, max_delta_per_sec, expert-implication and bounds invariants all feed it. Optional invariant `scale` field (default max(|threshold|, 1.0); bounds use the half-width) normalizes units so large-unit invariants don't dominate. Boolean verdict == sign of ρ (debug_assert-enforced). Basis for falsification (J2/J3) and LLM feedback (M2).
+
 ### Changed
 - **J0: RNG stream change** — bot randomness now flows through `ChoiceStream` (Lemire multiply-shift, unbiased on small bounds) instead of `next_rand()%n`. Seed N gives a different run than in 0.1; replaying `report.choices` reproduces runs exactly. `PlaytestState::rng`/`next_rand` removed.
 

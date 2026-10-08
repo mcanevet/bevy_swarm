@@ -62,6 +62,44 @@ pub(crate) fn check_finite_transforms_system(
 
 /// Shared bounds predicate: x/y always; z only when a z bound is declared
 /// (check z for 3D nodes — don't silently drop it).
+/// Scale for bounds robustness: the largest configured half-width
+/// (units cancel; default 1.0 for degenerate single-sided bounds).
+fn default_bounds_scale(inv: &Invariant) -> f64 {
+    [
+        (inv.min_x, inv.max_x),
+        (inv.min_y, inv.max_y),
+        (inv.min_z, inv.max_z),
+    ]
+    .iter()
+    .filter_map(|(lo, hi)| match (lo, hi) {
+        (Some(lo), Some(hi)) => Some(((hi - lo) / 2.0).abs().max(1.0) as f64),
+        _ => None,
+    })
+    .fold(1.0, f64::max)
+}
+
+/// J1: signed margin of a position against the invariant's bounds —
+/// min over checked axes of min(v - lo, hi - v). Positive = inside.
+pub(crate) fn bounds_margin(t: bevy::math::Vec3, inv: &Invariant) -> f64 {
+    let axes = [(t.x, inv.min_x, inv.max_x), (t.y, inv.min_y, inv.max_y)];
+    let mut m = f64::INFINITY;
+    for (v, lo, hi) in axes {
+        if let (Some(lo), Some(hi)) = (lo, hi) {
+            m = m.min((v - lo).min(hi - v) as f64);
+        } else if let Some(lo) = lo {
+            m = m.min((v - lo) as f64);
+        } else if let Some(hi) = hi {
+            m = m.min((hi - v) as f64);
+        }
+    }
+    if inv.min_z.is_some() || inv.max_z.is_some() {
+        let lo = inv.min_z.unwrap_or(f32::MIN);
+        let hi = inv.max_z.unwrap_or(f32::MAX);
+        m = m.min((t.z - lo).min(hi - t.z) as f64);
+    }
+    m
+}
+
 fn out_of_bounds(t: bevy::math::Vec3, inv: &Invariant) -> bool {
     let (min_x, max_x, min_y, max_y) = (
         inv.min_x.unwrap_or(-10000.0),
@@ -93,6 +131,7 @@ pub(crate) fn check_bounds_gameplay_system(
     mut violations: ResMut<Violations>,
     state: Res<PlaytestState>,
     scenario: Res<ScenarioResource>,
+    mut robustness: ResMut<crate::robustness::RobustnessTracker>,
 ) {
     for inv in &scenario.0.invariants {
         if inv.rule != crate::enums::InvariantRule::NodesInBounds {
@@ -113,6 +152,13 @@ pub(crate) fn check_bounds_gameplay_system(
             // are legitimately positioned and would flood reports.
             // Only re-check entities whose Transform changed this tick.
             for (name, transform) in q_changed.iter() {
+                let margin = bounds_margin(transform.translation(), inv);
+                robustness.observe(
+                    &format!("{}/{}", inv.name, name.as_ref()),
+                    state.frame,
+                    margin,
+                    inv.scale.unwrap_or_else(|| default_bounds_scale(inv)),
+                );
                 if out_of_bounds(transform.translation(), inv) {
                     violations.report(
                         &inv.name,
@@ -149,6 +195,13 @@ pub(crate) fn check_bounds_gameplay_system(
                     );
                 }
                 for (name, transform) in matched_changed {
+                    let margin = bounds_margin(transform.translation(), inv);
+                    robustness.observe(
+                        &format!("{}/{}", inv.name, name.as_ref()),
+                        state.frame,
+                        margin,
+                        inv.scale.unwrap_or_else(|| default_bounds_scale(inv)),
+                    );
                     if out_of_bounds(transform.translation(), inv) {
                         violations.report(
                             &inv.name,
@@ -469,6 +522,20 @@ pub(crate) fn check_custom_system(world: &mut World) {
     let elapsed_s = world.resource::<PlaytestState>().elapsed_s();
     let tps = world.resource::<PlaytestState>().tps;
 
+    // J1: record this frame's signed robustness margin for the
+    // invariant (threshold / query-count / differential / rate /
+    // implication). Boolean verdict == sign of ρ (debug-checked).
+    macro_rules! rho {
+        ($name:expr, $rho:expr, $scale:expr) => {
+            let __rho: f64 = $rho;
+            if let Some(sc) = $scale {
+                world
+                    .resource_mut::<crate::robustness::RobustnessTracker>()
+                    .observe($name, frame, __rho, sc);
+            }
+        };
+    }
+
     for inv in &scenario.invariants {
         if inv.rule != crate::enums::InvariantRule::Custom {
             continue;
@@ -543,6 +610,25 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 Some(thr) => check.holds(count as f64, thr),
                 None => false,
             };
+            if let Some(thr) = threshold {
+                let margin = crate::robustness::threshold_margin(check, count as f64, thr);
+                debug_assert_eq!(
+                    holds_now,
+                    !(margin < 0.0
+                        || (matches!(
+                            check,
+                            crate::enums::CheckOp::Lt
+                                | crate::enums::CheckOp::Gt
+                                | crate::enums::CheckOp::Ne
+                        ) && margin == 0.0)),
+                    "J1 drift: {check:?} count={count} thr={thr} rho={margin}"
+                );
+                rho!(
+                    &inv.name,
+                    margin,
+                    inv.scale.or(Some(crate::robustness::default_scale(thr)))
+                );
+            }
 
             match inv.eventually_s {
                 Some(deadline) => {
@@ -691,6 +777,26 @@ pub(crate) fn check_custom_system(world: &mut World) {
         if let Some(thr) = threshold {
             // Shared predicate evaluation for both modes.
             let holds_now = check.holds(current, thr);
+            // J1: per-frame margin (eventually-mode callers would track
+            // best-so-far; the tracker keeps min over run which the
+            // summary reports — the two views compose).
+            let margin = crate::robustness::threshold_margin(check, current, thr);
+            debug_assert_eq!(
+                holds_now,
+                !(margin < 0.0
+                    || (matches!(
+                        check,
+                        crate::enums::CheckOp::Lt
+                            | crate::enums::CheckOp::Gt
+                            | crate::enums::CheckOp::Ne
+                    ) && margin == 0.0)),
+                "J1 drift: {check:?} v={current} thr={thr} rho={margin}"
+            );
+            rho!(
+                &inv.name,
+                margin,
+                inv.scale.or(Some(crate::robustness::default_scale(thr)))
+            );
             match inv.eventually_s {
                 // Eventually-mode: satisfied on first hold; report only at
                 // deadline expiry if never held. Semantics mirror
@@ -749,6 +855,12 @@ pub(crate) fn check_custom_system(world: &mut World) {
             // shorter spans measure rates with warm-up skew.
             if dt_ticks >= window_ticks {
                 let rate = (current - oldest.1).abs() / (dt_ticks as f64 / tps as f64);
+                rho!(
+                    &inv.name,
+                    max_dps - rate,
+                    inv.scale
+                        .or(Some(crate::robustness::default_scale(max_dps)))
+                );
                 if rate > max_dps {
                     world.resource_mut::<Violations>().report(
                         &inv.name,
@@ -775,6 +887,19 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 } else {
                     current > prev_val // no_increase
                 };
+                // J1: signed margin of this step (positive = compliant).
+                let step_margin = if diff == &crate::enums::DifferentialOp::NoDecrease {
+                    current - prev_val
+                } else {
+                    prev_val - current
+                };
+                rho!(
+                    &inv.name,
+                    step_margin,
+                    inv.scale.or(Some(crate::robustness::default_scale(
+                        prev_val.abs().max(current)
+                    )))
+                );
                 if violated {
                     world.resource_mut::<Violations>().report(
                         &inv.name,
@@ -816,6 +941,23 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 // registered resolver first, then world percepts
                 // (previously skipped percepts entirely).
                 let (req_num, req_str) = resolve_field(world, req_path);
+                // J1: implication robustness ¬W ∨ R = max(-ρ_W, ρ_R).
+                // While WHEN holds (mask active), the reactive clause
+                // dominates: record ρ_R when both clauses are numeric.
+                // Anti-masking: WHEN false frames are NOT recorded
+                // here (the guard clause ρ_W > 0 dominates then and is
+                // tracked via the threshold branch above).
+                if let Some(r_thr) = req_value.as_f64() {
+                    if let Some(rc) = req_num {
+                        // ρ_R: the reactive clause margin while masked.
+                        let r_margin = crate::robustness::threshold_margin(*req_check, rc, r_thr);
+                        rho!(
+                            &inv.name,
+                            r_margin,
+                            inv.scale.or(Some(crate::robustness::default_scale(r_thr)))
+                        );
+                    }
+                }
                 world
                     .resource_mut::<PlaytestState>()
                     .coverage

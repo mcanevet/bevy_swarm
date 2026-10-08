@@ -251,6 +251,9 @@ pub struct PlaytestReport {
     /// bound). Replay via bot.choices. Populated for chaos/curious
     /// (and any bot drawing from the stream).
     pub choices: Vec<crate::choice::Choice>,
+    /// J1: signed robustness margins (STL-style) per invariant and
+    /// overall (normalized). Positive = satisfied by that margin.
+    pub robustness: crate::robustness::RobustnessSummary,
 }
 
 impl PlaytestReport {
@@ -276,6 +279,7 @@ impl PlaytestReport {
             state_trace: None,
             action_effect_rate: Default::default(),
             choices: vec![],
+            robustness: Default::default(),
         }
     }
 }
@@ -597,6 +601,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         scenario.bot.continuation,
     );
     app.insert_resource(choice_stream);
+    // J1: robustness accumulation (thresholds, bounds, differentials...).
+    app.init_resource::<crate::robustness::RobustnessTracker>();
 
     let total_ticks = (scenario.duration_s * tps as f32) as u64;
     // Pre-run snapshot for code-aware (system) coverage — see
@@ -885,6 +891,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .world_mut()
             .get_resource::<crate::choice::ChoiceStream>()
             .map(|c| c.recorded.clone())
+            .unwrap_or_default(),
+        robustness: app
+            .world_mut()
+            .get_resource::<crate::robustness::RobustnessTracker>()
+            .map(|t| t.summary())
             .unwrap_or_default(),
     })
 }
