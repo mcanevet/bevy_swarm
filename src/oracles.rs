@@ -736,9 +736,10 @@ pub(crate) fn check_custom_system(world: &mut World) {
             continue;
         }
 
-        // Equals on enum-ish (string) fields.
+        // FX5 C1: string comparison respects inv.check (Equals/Ne only).
         if let (Some(sv), Some(serde_json::Value::String(expect))) = (&string_val, &inv.value) {
-            let eq = sv == expect;
+            let check = inv.check.unwrap_or(crate::enums::CheckOp::Equals);
+            let holds = check.holds_text(sv, expect).unwrap_or(false);
             // Eventually-mode: pass as soon as satisfied; report only at
             // deadline expiry if never satisfied.
             if let Some(deadline) = inv.eventually_s {
@@ -747,24 +748,24 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     .eventually_state
                     .entry(inv.name.clone())
                     .or_insert((deadline, None));
-                if eq {
+                if holds {
                     entry.1 = Some(entry.1.unwrap_or(frame)); // first satisfaction
                 } else if elapsed_s >= deadline && entry.1.is_none() {
                     world.resource_mut::<Violations>().report(
                         &inv.name,
                         path,
                         format!(
-                            "{} never equaled {} within {:.1}s (eventually deadline expired)",
-                            path, expect, deadline
+                            "{} never {} {} within {:.1}s (eventually deadline expired)",
+                            path, check, expect, deadline
                         ),
                         frame,
                     );
                 }
-            } else if !eq {
+            } else if !holds {
                 world.resource_mut::<Violations>().report(
                     &inv.name,
                     path,
-                    format!("{} = {} (expected: {})", path, sv, expect),
+                    format!("{} = {} ({} {})", path, sv, check, expect),
                     frame,
                 );
             }
@@ -927,10 +928,13 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 if let (Some(cur), Some(thr)) = (numeric, when_val.as_f64()) {
                     check.holds(cur, thr)
                 } else {
-                    // Text WHEN: string equality against the field value.
+                    // FX5 C1: Text WHEN respects the check op
+                    // (Equals/Ne; other ops on strings are rejected at
+                    // load, unwrap_or(false) is a defensive default).
                     string_val
                         .as_deref()
-                        .and_then(|sv| when_val.as_str().map(|wv| sv == wv))
+                        .and_then(|sv| when_val.as_str().map(|wv| check.holds_text(sv, wv)))
+                        .flatten()
                         .unwrap_or(false)
                 }
             } else {

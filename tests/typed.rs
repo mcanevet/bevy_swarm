@@ -44,6 +44,42 @@ fn scenario(json: &str) -> Scenario {
 }
 
 #[test]
+fn fx5_text_ne_violation_proven() {
+    // FX5 C1 RED: invariant with check="ne" and string value should fire
+    // when field EQUALS the forbidden value. Currently the code at
+    // oracles.rs:741 does `let eq = sv == expect;` ignoring inv.check,
+    // so "ne" is treated as "equals" and the violation is NOT reported.
+    let mut app = build_game_app();
+    {
+        let mut api = app
+            .world_mut()
+            .resource_mut::<bevy_swarm::contract::TestApi>();
+        api.custom_text
+            .insert("status".to_string(), "active".to_string());
+    }
+    let sc: Scenario = serde_json::from_str(
+        r#"{
+            "bot":{"type":"chaos","seed":0,"input_rate_hz":10},
+            "duration_s":1.0,
+            "invariants":[{"name":"forbidden_active","rule":"custom","path":"TestApi.status","value":"inactive","check":"ne"}],
+            "setup":{}
+        }"#,
+    ).unwrap();
+    let rep = run_scenario(&mut app, &sc).unwrap();
+    // With check="ne", status="active" should PASS (not equal to "inactive").
+    // But the bug treats all strings as equals, so it reports a FALSE violation.
+    // After fix: no violation because "active" != "inactive" satisfies "ne".
+    let has_forbidden_active = rep.violations.iter().any(|v| v.rule == "forbidden_active");
+    println!("violations: {:?}", rep.violations);
+    // This assertion proves the bug: currently it FAILS because a false
+    // violation IS reported (the code ignores "ne" and checks equality).
+    assert!(
+        !has_forbidden_active,
+        "text ne bug: violation reported when it should pass"
+    );
+}
+
+#[test]
 fn typed_oracle_detects_violation() {
     // Oracle fires when Score exceeds 3 (points awarded bug: presses
     // past the cap). Here Choice{2} pressed twice → 4 > 3.
