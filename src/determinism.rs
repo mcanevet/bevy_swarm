@@ -233,13 +233,18 @@ pub fn check_determinism(
         match &first_run {
             None => first_run = Some(digests),
             Some(baseline) => {
-                if digests.len() != baseline.len() && mismatch_frame.is_none() {
-                    mismatch_frame = Some(digests.len().min(baseline.len()) as u64);
-                }
+                // FX6 A4: hash scan FIRST (zip covers the common prefix —
+                // the earliest divergence frame), length mismatch is only
+                // the fallback when all common frames agree (a crashed
+                // run previously reported len, hiding the earlier hash
+                // mismatch).
                 for (a, b) in digests.iter().zip(baseline.iter()) {
                     if a.hash != b.hash && mismatch_frame.is_none() {
                         mismatch_frame = Some(a.frame);
                     }
+                }
+                if digests.len() != baseline.len() && mismatch_frame.is_none() {
+                    mismatch_frame = Some(digests.len().min(baseline.len()) as u64);
                 }
             }
         }

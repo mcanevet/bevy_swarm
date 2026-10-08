@@ -646,12 +646,28 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     for k in &kinds {
         coverage.resets_invoked.insert(k.clone());
     }
-    // I1: reset identity index before resets (ids are relative to run start).
-    if let Some(mut idx) = app
-        .world_mut()
-        .get_resource_mut::<crate::identity::IdentityIndex>()
+    // I1: reset identity index then RE-INDEX existing Gameplay entities
+    // (otherwise entities from build/prev run vanish and next spawn
+    // duplicates StableId(0)). Sort by Entity bits for determinism.
+    if app
+        .world()
+        .contains_resource::<crate::identity::IdentityIndex>()
     {
-        idx.reset();
+        // resource_scope lets us borrow world immutably for the query
+        // and mutably for the index simultaneously.
+        app.world_mut().resource_scope(|world, mut idx: bevy::ecs::change_detection::Mut<crate::identity::IdentityIndex>| {
+            let entities: Vec<(bevy::ecs::entity::Entity, crate::identity::StableId)> = world
+                .query_filtered::<(bevy::ecs::entity::Entity, &crate::identity::StableId), With<crate::contract::Gameplay>>()
+                .iter(world)
+                .map(|(e, id)| (e, *id))
+                .collect();
+            let mut entities: Vec<_> = entities;
+            entities.sort_by_key(|(e, _)| *e);
+            idx.reset();
+            for (entity, id) in entities {
+                idx.reinsert(id, entity);
+            }
+        });
     }
     let hooks = app
         .world_mut()

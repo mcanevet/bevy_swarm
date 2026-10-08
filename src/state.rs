@@ -122,8 +122,6 @@ pub struct PlaytestState {
     pub metrics: Metrics,
     pub delta_windows: HashMap<String, std::collections::VecDeque<(u64, f64)>>, // rule -> samples
     pub(crate) warned_paths: HashSet<String>,
-    /// One-shot flag: chaos Select sampled unnamed entities (warn once).
-    pub(crate) warned_select_unnamed: bool,
     pub coverage: Coverage,
     /// Execution-time oracle state (Welford per-frame stats).
     pub frame_timing: FrameTimingStats,
@@ -345,7 +343,6 @@ impl PlaytestState {
             metrics: Metrics::default(),
             delta_windows: HashMap::default(),
             warned_paths: HashSet::default(),
-            warned_select_unnamed: false,
             coverage: Coverage::default(),
             frame_timing: FrameTimingStats::default(),
             api_history: HashMap::default(),

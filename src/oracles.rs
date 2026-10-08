@@ -375,9 +375,18 @@ pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue
                     }
                 }
             }
-            Selector::StableId(_sid) => {
-                // Stable-ID addressing deferred to I1 (requires stable ID
-                // infrastructure). For now, this selector form is a no-op.
+            Selector::StableId(sid) => {
+                // FX6 I2: resolve @id via the identity index (works for
+                // unnamed entities; stable across resets).
+                if let Some(idx) = world.get_resource::<crate::identity::IdentityIndex>() {
+                    if let Some(entity) = idx.by_stable(crate::identity::StableId(sid)) {
+                        if let Ok(entity_ref) = world.get_entity(entity) {
+                            let reflect = reflect_component.reflect(entity_ref)?;
+                            let val = reflect.reflect_path(field).ok()?;
+                            return Some(value_from_reflect(val));
+                        }
+                    }
+                }
             }
             Selector::Index(idx, _warn) => {
                 // Both [N] and the implicit first form use the sorted

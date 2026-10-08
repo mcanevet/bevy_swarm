@@ -215,25 +215,11 @@ pub(crate) fn chaos_bot_system(
                 );
                 return;
             }
-            // Prefer NAMED candidates: Select on an unnamed entity is
-            // recorded as entity bits only and is NOT replayable
-            // (counted via unreplayable_actions). Warn once per run.
+            // FX6 I1: chaos Select prefers NAMED candidates for
+            // readability, but falls back to ALL Gameplay entities —
+            // unnamed entities replay via their StableId now.
             let named: Vec<Entity> = q_named.iter().map(|(e, _)| e).collect();
-            let pool = if named.is_empty() {
-                if !state.warned_select_unnamed {
-                    state.warned_select_unnamed = true;
-                    violations.report(
-                        "chaos_select_unnamed",
-                        "",
-                        "Select targets have no Name — runs are not replayable; add Name to Gameplay entities"
-                            .to_string(),
-                        state.frame,
-                    );
-                }
-                &all
-            } else {
-                &named
-            };
+            let pool = if named.is_empty() { &all } else { &named };
             let idx = choices.below(state.frame, pool.len() as u64) as usize;
             UserIntent::Select { target: pool[idx] }
         }
@@ -262,7 +248,6 @@ pub(crate) fn replay_bot_system(
     mut state: ResMut<PlaytestState>,
     mut intents: MessageWriter<UserIntent>,
     mut violations: ResMut<Violations>,
-    q_named: Query<(bevy::ecs::entity::Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
     idx: Res<crate::identity::IdentityIndex>,
 ) {
@@ -296,13 +281,14 @@ pub(crate) fn replay_bot_system(
                     // Resolve against the identity index (I1): StableId
                     // first (unnamed entities), then Name. Stable across
                     // resets, unlike raw entity ids.
+                    // FX6 I1: resolve against identity index. StableId works
+                    // for unnamed entities; Name filter is optional (empty
+                    // list = no named entities, but StableId still resolves).
                     let resolved: Option<bevy::ecs::entity::Entity> = match &target {
-                        crate::scenario::SelectTarget::Stable { stable_id } => idx
-                            .by_stable(crate::identity::StableId(*stable_id))
-                            .filter(|e| q_named.get(*e).is_ok()),
-                        crate::scenario::SelectTarget::Name(name) => {
-                            idx.by_name(name).filter(|e| q_named.get(*e).is_ok())
+                        crate::scenario::SelectTarget::Stable { stable_id } => {
+                            idx.by_stable(crate::identity::StableId(*stable_id))
                         }
+                        crate::scenario::SelectTarget::Name(name) => idx.by_name(name),
                     };
                     match resolved {
                         Some(entity) => UserIntent::Select { target: entity },

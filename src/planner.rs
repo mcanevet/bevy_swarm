@@ -9,6 +9,13 @@
 use crate::contract::{TestFieldValue, UserIntent};
 use crate::harness::{PlaytestState, ReplayIntent, ScenarioResource, Violations};
 use crate::scenario::SelectTarget;
+
+thread_local! {
+    /// FX6 B1: last Select miss display (set inside replay_intent_to_user,
+    /// reported by planner_bot_system which owns the violations).
+    static PLANNER_SELECT_MISS: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
 use bevy::ecs::world::World;
 use serde::{Deserialize, Serialize};
 
@@ -246,7 +253,7 @@ fn check_postcondition(
 
 /// Convert a ReplayIntent to a UserIntent. Select intents resolve by
 /// Name against live Gameplay entities (stable across resets).
-fn replay_intent_to_user(ri: &ReplayIntent) -> Option<UserIntent> {
+fn replay_intent_to_user(ri: &ReplayIntent, world: &World) -> Option<UserIntent> {
     match ri {
         ReplayIntent::Move { dir } => Some(UserIntent::Move {
             dir: bevy::math::Vec2::new(dir.0, dir.1),
@@ -256,9 +263,33 @@ fn replay_intent_to_user(ri: &ReplayIntent) -> Option<UserIntent> {
             name: name.clone(),
             value: *value,
         }),
-        // Planner primitives name targets symbolically via TestApi
-        // predicates, not entity ids — Select is resolved at the game layer.
-        ReplayIntent::Select { .. } | ReplayIntent::Wait => Some(UserIntent::Wait),
+        // FX6 B1: Select resolves via the identity index (StableId first
+        // — works for unnamed entities — then Name). Emits Wait and a
+        // planner_select_target_missing violation when the target is
+        // absent (previously silently became Wait).
+        ReplayIntent::Wait => Some(UserIntent::Wait),
+        ReplayIntent::Select { target } => {
+            let idx = world.get_resource::<crate::identity::IdentityIndex>();
+            let resolved = match target {
+                SelectTarget::Stable { stable_id } => {
+                    idx.and_then(|i| i.by_stable(crate::identity::StableId(*stable_id)))
+                }
+                SelectTarget::Name(name) => idx.and_then(|i| i.by_name(name)),
+            };
+            // FX6 B1: loud miss — planner Select target absent. Misses
+            // are reported by the caller (has &mut world access);
+            // here we only signal via returning None after the miss.
+            if resolved.is_none() {
+                PLANNER_SELECT_MISS.with(|c| {
+                    let mut d = c.borrow_mut();
+                    *d = Some(match target {
+                        SelectTarget::Name(n) => n.clone(),
+                        SelectTarget::Stable { stable_id } => format!("#{stable_id}"),
+                    });
+                });
+            }
+            resolved.map(|entity| UserIntent::Select { target: entity })
+        }
     }
 }
 
@@ -491,7 +522,18 @@ pub fn planner_bot_system(world: &mut World) {
                         let idx = cursor;
                         planner.0.last_mut().unwrap().emit_cursor += 1;
                         let ri = &emit[idx];
-                        if let Some(intent) = replay_intent_to_user(ri) {
+                        let intent = replay_intent_to_user(ri, world);
+                        if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
+                            violations.report(
+                                "planner_select_target_missing",
+                                &miss,
+                                format!(
+                                    "planner Select target '{miss}' not found in identity index"
+                                ),
+                                frame,
+                            );
+                        }
+                        if let Some(intent) = intent {
                             let ctx = replay_variant(ri).to_string();
                             emitted = Some((intent, ctx, planner.trace()));
                         }
@@ -520,7 +562,18 @@ pub fn planner_bot_system(world: &mut World) {
                         let idx = cursor;
                         planner.0.last_mut().unwrap().emit_cursor += 1;
                         let ri = &emit[idx];
-                        if let Some(intent) = replay_intent_to_user(ri) {
+                        let intent = replay_intent_to_user(ri, world);
+                        if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
+                            violations.report(
+                                "planner_select_target_missing",
+                                &miss,
+                                format!(
+                                    "planner Select target '{miss}' not found in identity index"
+                                ),
+                                frame,
+                            );
+                        }
+                        if let Some(intent) = intent {
                             let ctx = replay_variant(ri).to_string();
                             emitted = Some((intent, ctx, planner.trace()));
                         }
