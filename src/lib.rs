@@ -39,6 +39,7 @@ pub mod conventions;
 pub mod determinism;
 pub mod diagnostics;
 pub mod driver;
+pub mod effects;
 pub mod entropy;
 pub mod enums;
 pub mod fingerprint;

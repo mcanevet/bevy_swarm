@@ -133,6 +133,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 .in_set(PlaytestSet::Tick),
         );
         app.init_resource::<crate::raw_input::RawActionQueue>();
+        app.init_resource::<crate::effects::ActionEffects>();
         app.init_resource::<crate::raw_input::ActiveKeyHolds>();
         app.init_resource::<crate::raw_input::ActiveMouseHolds>();
         app.init_resource::<crate::raw_input::VirtualGamepad>();
@@ -186,6 +187,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
             (
                 // I4: liveness oracle (replaces frozen_world_oracle_system).
                 crate::liveness::liveness_oracle_system,
+                // I5: action-effect oracle (per-action effect rates).
+                crate::effects::action_effect_oracle_system,
                 check_finite_transforms_system,
                 check_bounds_gameplay_system,
                 check_custom_system,
@@ -241,6 +244,9 @@ pub struct PlaytestReport {
     /// resource was inserted by the caller (normal runs skip it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state_trace: Option<Vec<crate::determinism::FrameDigest>>,
+    /// I5: per-action effect rates (key -> (effective, total)).
+    /// Feeds dead_verb and the Z1 vacuity guard.
+    pub action_effect_rate: std::collections::HashMap<String, crate::effects::EffectRate>,
 }
 
 impl PlaytestReport {
@@ -264,6 +270,7 @@ impl PlaytestReport {
             warnings: vec![],
             system_coverage: Default::default(),
             state_trace: None,
+            action_effect_rate: Default::default(),
         }
     }
 }
@@ -861,6 +868,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .world_mut()
             .remove_resource::<crate::determinism::StateTrace>()
             .map(|t| t.digests),
+        action_effect_rate: crate::effects::effect_rates(app.world()),
     })
 }
 
