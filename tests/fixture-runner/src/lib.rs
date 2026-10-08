@@ -30,10 +30,13 @@ pub struct SpinnerAdapterPlugin;
 
 impl Plugin for SpinnerAdapterPlugin {
     fn build(&self, app: &mut App) {
-        // RealTime marker: arms the frozen-world oracle (TurnBased exempts).
+        // FX1: tag via Added<> in Update — the game's Startup command
+        // buffers haven't applied when OUR Startup systems ran, so
+        // Startup-time queries missed every entity. Added<> catches
+        // entities the frame they appear, including mid-run spawns.
         app.add_systems(
-            Startup,
-            |mut commands: Commands, q: Query<Entity, With<fixture_spinner::Spinner>>| {
+            Update,
+            |mut commands: Commands, q: Query<Entity, Added<fixture_spinner::Spinner>>| {
                 for e in &q {
                     commands.entity(e).insert((Gameplay, RealTime));
                 }
@@ -64,8 +67,8 @@ impl Plugin for WalkerAdapterPlugin {
         app.add_message::<fixture_walker::MoveEvent>();
         app.add_systems(Update, walker_intent_bridge);
         app.add_systems(
-            Startup,
-            |mut commands: Commands, q: Query<Entity, With<fixture_walker::Player>>| {
+            Update,
+            |mut commands: Commands, q: Query<Entity, Added<fixture_walker::Player>>| {
                 for e in &q {
                     commands.entity(e).insert(Gameplay);
                 }
@@ -84,9 +87,12 @@ impl Plugin for SpawnerAdapterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            |mut commands: Commands, q: Query<Entity, With<fixture_spawner::LeakyEntity>>| {
+            |mut commands: Commands, q: Query<Entity, Added<fixture_spawner::LeakyEntity>>| {
                 for e in &q {
-                    commands.entity(e).insert(Gameplay);
+                    // TurnBased: the spawner is bursty by design (spawn
+                    // 10, then idle) — real-time liveness semantics
+                    // would flag its natural idle as a soft-lock.
+                    commands.entity(e).insert((Gameplay, TurnBased));
                 }
             },
         );
@@ -117,13 +123,18 @@ impl Plugin for TurnBasedAdapterPlugin {
         app.add_message::<fixture_turn_based::CardPlayed>();
         app.add_systems(Update, turn_based_intent_bridge);
         app.add_systems(
-            Startup,
-            |mut commands: Commands, q: Query<Entity, With<fixture_turn_based::PlayerCard>>| {
+            Update,
+            |mut commands: Commands, q: Query<Entity, Added<fixture_turn_based::PlayerCard>>| {
                 for e in &q {
-                    commands.entity(e).insert(Gameplay);
+                    commands.entity(e).insert((Gameplay, TurnBased));
                 }
             },
         );
+        // FX1: game-owned resources (Score) must count as liveness —
+        // the fixture keeps ALL state in resources.
+        app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
+            fixture_turn_based::TurnBasedGamePlugin,
+        >());
     }
 }
 
@@ -140,6 +151,10 @@ impl Plugin for RegressionPairAdapterPlugin {
         app.add_systems(Startup, |mut commands: Commands| {
             commands.spawn((Gameplay, Transform::default()));
         });
+        // FX1: game-owned resources (Damage) count as liveness.
+        app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
+            fixture_regression_pair::RegressionPairGamePlugin,
+        >());
     }
 }
 

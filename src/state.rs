@@ -145,6 +145,14 @@ pub struct PlaytestState {
     pub last_intent_frame: Option<u64>,
     /// Z6: archetype count at the last gameplay-inference pass.
     pub inference_last_archetype_len: usize,
+    /// FX1: change tick snapshotted at each frame START (tick_counter,
+    /// before any schedule runs). Liveness windows compare against the
+    /// tick recorded N FRAMES ago — the raw tick counter advances per
+    /// system run, not per frame, so `now - k` spans microseconds.
+    pub(crate) frame_start_ticks: std::collections::VecDeque<u32>,
+    /// FX1: pending effect-window snapshots: (frame, tick) taken at
+    /// action application time; the effect oracle consumes them.
+    pub(crate) effect_window_snapshots: Vec<(u64, u32)>,
     /// Readiness gate: frames spent waiting for `GameReady` before
     /// scenario duration began accruing (UE IsReady analog).
     pub pre_ready_frames: u64,
@@ -338,6 +346,8 @@ impl PlaytestState {
             last_alive_frame: 0,
             last_intent_frame: None,
             inference_last_archetype_len: 0,
+            frame_start_ticks: Default::default(),
+            effect_window_snapshots: Vec::new(),
             pre_ready_frames: 0,
             planner: crate::planner::PlannerStack::default(),
             pending_gestures: std::collections::VecDeque::new(),

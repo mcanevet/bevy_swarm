@@ -66,6 +66,19 @@ fn discover_cases() -> Vec<(String, String)> {
 /// Run fixture-runner for a fixture+variant and return the report JSON read
 /// from the file the harness wrote (the user path).
 fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> serde_json::Value {
+    let scenario = build_scenario(expectation);
+    run_case_with_scenario(fixture, variant, &scenario)
+}
+
+/// FX1: fixture-runner writes reports to the SHARED runs/last path —
+/// concurrent tests would race on it and read each other's reports
+/// (the spinner "frozen_world" flake was actually the spawner's
+/// report). Serialize all fixture-runner invocations process-wide.
+static RUNNER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run fixture-runner with an explicit scenario string (FX1: the
+/// meta-test builds long-duration scenarios directly).
+fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde_json::Value {
     let bug_env = match variant {
         "clean" => None,
         v => Some(
@@ -75,11 +88,10 @@ fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> se
         ),
     };
 
-    let scenario = build_scenario(expectation);
-
+    let _guard = RUNNER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut cmd = Command::new("cargo");
     cmd.args(["run", "--quiet", "-p", "fixture-runner", "--", fixture])
-        .arg(&scenario)
+        .arg(scenario)
         .current_dir(env!("CARGO_MANIFEST_DIR"));
     if let Some(bug) = &bug_env {
         cmd.env("FIXTURE_BUG", bug);
@@ -378,5 +390,39 @@ fn report_matches_schema() {
             fixture,
             variant
         );
+    }
+}
+
+/// FX1 meta-test: clean fixtures with long duration must have zero violations.
+/// Currently fails (frozen_world + dead_verb false positives) — proves the bug.
+#[test]
+fn clean_fixtures_pass_long() {
+    let fixtures = ["walker", "spinner", "turn_based", "regression_pair"];
+    for fixture in &fixtures {
+        for seed in 1..=8 {
+            let scenario = serde_json::json!({
+                "bot": {"type": "chaos", "seed": seed},
+                "duration_s": 6.0,
+                "invariants": [],
+                "setup": {}
+            })
+            .to_string();
+            let report = run_case_with_scenario(fixture, "clean", &scenario);
+            let violations: Vec<String> = report["violations"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.get("rule").and_then(|r| r.as_str()).map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert!(
+                violations.is_empty(),
+                "clean {}/seed={} has violations: {:?}",
+                fixture,
+                seed,
+                violations
+            );
+        }
     }
 }

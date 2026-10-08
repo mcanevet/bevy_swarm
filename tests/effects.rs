@@ -71,10 +71,16 @@ fn effective_intent_has_full_effect_rate() {
 
 #[test]
 fn dead_verb_detected() {
-    // 10+ Wait-or-dead choice intents that the game ignores entirely
-    // (no state change anywhere) → dead_verb for that key.
+    // 10+ Choice intents that the game ignores entirely (no state
+    // change anywhere) → dead_verb for that key. We use Choice instead
+    // of Wait because Wait is a deliberate no-op on many surfaces.
     let inputs: Vec<String> = (1..=12)
-        .map(|f| format!(r#"{{"frame":{},"intent":{{"intent":"wait"}}}}"#, f * 4))
+        .map(|f| {
+            format!(
+                r#"{{"frame":{},"intent":{{"intent":"choice","index":0}}}}"#,
+                f * 4
+            )
+        })
         .collect();
     let scenario: Scenario = serde_json::from_str(&format!(
         r#"{{"bot":{{"type":"replay","inputs":[{}]}},"duration_s":2.0,"invariants":[]}}"#,
@@ -97,8 +103,8 @@ fn dead_verb_detected() {
     );
     let rate = rep
         .action_effect_rate
-        .get("intent:wait")
-        .expect("intent:wait must be tracked");
+        .get("intent:choice")
+        .expect("intent:choice must be tracked");
     assert_eq!(rate.effective, 0);
     assert!(rate.total >= 10);
 }
