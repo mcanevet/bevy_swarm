@@ -250,6 +250,7 @@ pub fn raw_input_preupdate_system(
                     .insert((frame, btn), frame + hold_frames as u64);
                 action_effects.record(&format!("raw:mouse:{:?}", btn), frame);
             }
+            #[cfg_attr(not(feature = "gamepad"), allow(unused_variables))]
             RawAction::GamepadButton {
                 button,
                 hold_frames,
@@ -411,6 +412,7 @@ fn inject_gamepad_button(
 
 #[cfg(not(feature = "gamepad"))]
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn inject_gamepad_button(
     button: &str,
     violations: &mut Violations,
