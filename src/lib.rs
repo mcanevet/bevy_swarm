@@ -54,6 +54,7 @@ pub mod minimize;
 pub mod oracles;
 pub mod planner;
 pub mod raw_input;
+pub mod robustness;
 pub mod rules;
 pub mod scenario;
 pub mod sinks;

@@ -152,6 +152,21 @@ Games contribute custom digest parts (RNG state, AI blackboards) via the
 `DigestHooks` resource. Normal runs pay nothing — digests are only recorded
 when a `StateTrace` resource is present.
 
+## Robustness margins (J1)
+
+Every invariant carries a signed robustness ρ — the distance to violation,
+positive when satisfied ("never violated, but came within 0.3 of the bound").
+`report.robustness` holds the min over the run per invariant, plus `overall`
+(the min of normalized mins, < 0 iff an invariant failed). Units normalize
+via an optional `scale` field (default `max(|threshold|, 1.0)`) so pixel-scale
+bounds don't swamp HP-scale ones. This continuous signal is the substrate for
+future guided search (choice mutation, Go-Explore) and LLM falsifiers.
+
+```json
+{"invariants": [{"name": "hp_floor", "rule": "custom", "path": "TestApi.hp",
+                 "check": "above", "value": 10, "scale": 100}]}
+```
+
 ## Security (agent feature)
 
 The `agent` feature exposes BRP (arbitrary world reads and **mutation**) over
