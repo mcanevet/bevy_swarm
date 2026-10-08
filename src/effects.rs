@@ -76,29 +76,44 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
         let state = world.resource::<PlaytestState>();
         (state.frame, state.tps)
     };
-    // Snapshot this frame's starting change tick for late-recorded
-    // actions (actuators emit during the frame, effects measured
-    // against state changes AFTER this tick).
-    let frame_tick = world.read_change_tick().get();
-    world
-        .get_resource_mut::<ActionEffects>()
-        .expect("ActionEffects initialized by plugin")
-        .tick_by_frame
-        .entry(frame)
-        .or_insert(frame_tick);
+    // FX1: anchor each action's effect window on the change tick
+    // snapshotted at the START of the action's frame (before bots and
+    // game systems ran) — recorded by tick_counter_system into
+    // PlaytestState. The previous late-snapshot (taken in Last, AFTER
+    // the game reacted) counted the reaction itself as pre-action
+    // state, marking every action ineffective.
+    let frame_ticks: HashMap<u64, u32> = {
+        let state = world.resource::<PlaytestState>();
+        state.effect_window_snapshots.iter().copied().collect()
+    };
 
-    let window = (tps as f32 / 2.0) as u64; // effect_window_frames: tps/2
+    // FX1: reaction window. Attribution must not span MULTIPLE actions:
+    // at the bot's input rate a 30-frame (tps/2) window overlaps the
+    // next several intents, letting a live neighbor mask a dead verb
+    // (walker/bug_dead_left_key scored 10/16 effective). Cap the window
+    // below the bot's inter-action interval: reactions in a frame-based
+    // game land within a couple frames; the default is the tighter of
+    // tps/10 and half the inter-fire interval.
+    let rate = world
+        .resource::<crate::driver::ScenarioResource>()
+        .0
+        .bot
+        .input_rate_hz
+        .max(1) as f32;
+    let interval = (tps as f32 / rate).max(1.0);
+    let window = ((tps as f32 / 10.0).min(interval / 2.0)).floor().max(1.0) as u64;
     if window == 0 {
         return;
     }
     let now_tick = world.read_change_tick().get();
     let _ = now_tick;
-    let (mut take_pending, tick_by_frame) = {
+    let mut take_pending = {
         let mut eff = world
             .get_resource_mut::<ActionEffects>()
             .expect("ActionEffects initialized by plugin");
-        (std::mem::take(&mut eff.pending), eff.tick_by_frame.clone())
+        std::mem::take(&mut eff.pending)
     };
+    let tick_by_frame = &frame_ticks;
     let mut still_pending = Vec::new();
     let mut new_rates: Vec<(String, bool)> = Vec::new();
     for p in take_pending.drain(..) {
@@ -135,15 +150,25 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
             )
         };
         if report_now {
-            world.resource_mut::<Violations>().report(
-                "dead_verb",
-                key.as_str(),
-                format!(
-                    "action '{}' produced no gameplay-state change in {} samples — the game may not implement it",
-                    key, total
-                ),
-                frame,
-            );
+            // FX1: dead_verb is Major only when the world was otherwise
+            // LIVE (something else responded all along). In a frozen
+            // world the liveness oracle owns the diagnosis; flagging
+            // every verb too just doubles the noise.
+            let world_live = {
+                let state = world.resource::<PlaytestState>();
+                frame.saturating_sub(state.last_alive_frame) <= window * 4
+            };
+            if world_live {
+                world.resource_mut::<Violations>().report(
+                    "dead_verb",
+                    key.as_str(),
+                    format!(
+                        "action '{}' produced no gameplay-state change in {} samples — the game may not implement it",
+                        key, total
+                    ),
+                    frame,
+                );
+            }
         }
     }
 }

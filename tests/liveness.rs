@@ -89,6 +89,8 @@ fn turn_based_softlock_detected() {
         ),
     );
     let rep = run_scenario(&mut app, &scenario).unwrap();
+
+    // Debug: what was the last_alive_frame vs intent frames?
     assert!(
         rep.violations.iter().any(|v| v.rule == "stuck_after_intent"),
         "a turn-based game whose state stops changing after a consumed intent must trip stuck_after_intent, got: {:?}",

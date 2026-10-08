@@ -677,7 +677,7 @@ fn frozen_world_oracle_fires_on_static_realtime_world() {
     // → frozen_world violation. Our Ball sits still by default.
     // Duration 2.2s crosses the 2s threshold at 60tps.
     let scenario: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":2.2,"invariants":[]}"#,
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":3.2,"invariants":[]}"#,
     )
     .unwrap();
     let mut app = build_app();
@@ -691,10 +691,41 @@ fn frozen_world_oracle_fires_on_static_realtime_world() {
 }
 
 #[test]
+fn liveness_counts_odd_frame_changes_as_live() {
+    // FX1 bead test: a component mutated only on ODD frames must count
+    // as LIVE across a 1s window — change ticks, not frame parity, are
+    // what liveness observes. Red phase for the old frame-counted
+    // window implementation (it fired frozen_world on this world).
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":3.2,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    // Odd-frame mutation: every other frame the Ball nudges by 1 unit.
+    app.add_systems(
+        bevy::app::Update,
+        |mut frame: bevy::ecs::system::Local<u32>, mut q: Query<&mut Transform, With<Name>>| {
+            *frame += 1;
+            if *frame % 2 == 1 {
+                for mut t in &mut q {
+                    t.translation.x += 1.0;
+                }
+            }
+        },
+    );
+    let rep = run_scenario(&mut app, &scenario).unwrap();
+    assert!(
+        !rep.violations.iter().any(|v| v.rule == "frozen_world"),
+        "odd-frame mutations are live: {:?}",
+        rep.violations
+    );
+}
+
+#[test]
 fn frozen_world_oracle_exempt_for_turn_based() {
     // Same static world, but a TurnBased marker entity exempts it.
     let scenario: Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":2.2,"invariants":[]}"#,
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":3.2,"invariants":[]}"#,
     )
     .unwrap();
     let mut app = build_app();

@@ -85,15 +85,46 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     if !frame.is_multiple_of(quarter) {
         return;
     }
+    // FX1: the liveness WINDOW is the timeout itself — "nothing changed
+    // for timeout_s" is tested directly against the frame-start tick
+    // recorded timeout_frames ago. A component mutated only on odd
+    // frames still lands inside the window (unit-tested).
+    let window_frames = timeout_frames.max(quarter * 2);
 
     let now = now_tick(world);
-    // Liveness window: everything since the previous liveness check.
-    let since = Tick::new(now.get().saturating_sub((quarter * 2) as u32));
+    // FX1: window in FRAMES, not raw change ticks (the tick counter
+    // advances per system run, dozens per frame, so `now - k` spans
+    // microseconds). Compare against the frame-start tick recorded
+    // `window_frames` frames ago.
+    //
     // Default liveness scope: components on Gameplay entities. The
     // TestApi resource is deliberately EXCLUDED by default: games
     // commonly sync it every frame (write without value change), which
     // would mask a genuinely frozen world.
-    let changed = gameplay_changed_since(world, since, now);
+    //
+    // Warmup: insufficient frame history → treat as LIVE (never flags
+    // a young world frozen).
+    let changed = {
+        let state = world.resource::<PlaytestState>();
+        match state
+            .frame_start_ticks
+            .iter()
+            .rev()
+            .nth(window_frames.saturating_sub(1) as usize)
+        {
+            // FX1: liveness scope includes game-owned RESOURCES (Z6
+            // GameTypes prefixes) — fixtures like regression_pair keep
+            // all state in resources; entity-component scanning alone
+            // saw a permanently frozen world. TestApi stays EXCLUDED
+            // (games sync it every frame; that masks real freezes).
+            Some(&t) => {
+                let since = Tick::new(t);
+                gameplay_changed_since(world, since, now)
+                    || game_resource_changed_since(world, since, now)
+            }
+            None => true,
+        }
+    };
 
     {
         let state = &mut world.resource_mut::<PlaytestState>();
@@ -106,8 +137,10 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     }
 
     if !turn_based {
-        // Real-time: contiguous dead time crosses the threshold → frozen.
-        if state_frozen(world) >= timeout_frames && timeout_frames > 0 {
+        // Real-time: the FULL timeout window observed with zero liveness
+        // → frozen. (changed=false above means nothing changed in the
+        // last window_frames = timeout_s of frames.)
+        if !changed && timeout_frames > 0 {
             let frozen = state_frozen(world);
             world.resource_mut::<Violations>().report(
                 "frozen_world",
@@ -124,9 +157,22 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
         // Turn-based: only require liveness AFTER an intent was consumed.
         if let Some(last_intent) = last_intent_frame {
             let idle_since_intent = frame.saturating_sub(last_intent);
+            // FX1: "alive after the intent" must mean state CHANGED
+            // after the intent's frame STARTED (same-frame reactions
+            // count — bots run in PreUpdate, games react in Update).
+            // Comparing frame numbers counted a change that happened
+            // EARLIER in the intent's own frame (false pass).
             let alive_after_intent = {
                 let state = world.resource::<PlaytestState>();
-                state.last_alive_frame >= last_intent
+                match frame_start_tick_of(state, last_intent) {
+                    Some(t) => {
+                        let since = Tick::new(t);
+                        gameplay_changed_since(world, since, now)
+                            || game_resource_changed_since(world, since, now)
+                    }
+                    // history evicted — fall back to the frame heuristic
+                    None => state.last_alive_frame >= last_intent,
+                }
             };
             if !alive_after_intent && idle_since_intent >= timeout_frames {
                 world.resource_mut::<Violations>().report(
@@ -149,11 +195,50 @@ fn state_frozen(world: &World) -> u64 {
     world.resource::<PlaytestState>().frozen_frames
 }
 
-/// Convenience: full `changed_since(world, scope, tick)` used by I4/I5.
-/// Scope: gameplay components + the TestApi resource (game-owned
-/// resources arrive with Z6).
+/// The change tick snapshotted at the START of frame `target`
+/// (bots emit in PreUpdate; a game reacting to that intent changes
+/// state strictly after this tick).
+fn frame_start_tick_of(state: &PlaytestState, target: u64) -> Option<u32> {
+    let len = state.frame_start_ticks.len() as u64;
+    let current = state.frame;
+    if target == 0 || target > current || current - target >= len {
+        return None;
+    }
+    let back = (current - target) as usize;
+    state.frame_start_ticks.iter().rev().nth(back).copied()
+}
+
+/// True if any GAME-OWNED resource changed in `(since, now]` — Z6
+/// GameTypes crate prefixes; engine resources (bevy_transform etc.)
+/// churn every frame and would mask a frozen world.
+pub fn game_resource_changed_since(world: &World, since: Tick, now: Tick) -> bool {
+    let prefixes: Vec<String> = world
+        .get_resource::<crate::game_types::GameTypes>()
+        .map(|gt| gt.prefixes.clone())
+        .unwrap_or_default();
+    if prefixes.is_empty() {
+        return false;
+    }
+    for (id, info, _) in world.iter_resources() {
+        let name = info.name().to_string();
+        if !prefixes.iter().any(|p| name.starts_with(p.as_str())) {
+            continue;
+        }
+        if let Some(ticks) = world.get_resource_change_ticks_by_id(id) {
+            if ticks.is_changed(since, now) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Convenience: full `changed_since(world, scope, tick)` used by I4/I5
+/// EFFECTS (not liveness): gameplay components + TestApi + game-owned
+/// resources. (Liveness excludes TestApi — see the liveness oracle.)
 pub fn changed_since(world: &World, since: Tick) -> bool {
     let now = now_tick(world);
     gameplay_changed_since(world, since, now)
         || resource_changed_since::<crate::contract::TestApi>(world, since, now)
+        || game_resource_changed_since(world, since, now)
 }

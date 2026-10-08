@@ -1019,7 +1019,8 @@ pub(crate) fn intent_audit_log_system(
 ) {
     if !reader.is_empty() {
         // I4: remember the last frame an intent was consumed (for the
-        // turn-based stuck_after_intent check).
+        // turn-based stuck_after_intent check). FX1: also the change
+        // tick so liveness can require changes strictly AFTER it.
         state.last_intent_frame = Some(state.frame);
     }
     for intent in reader.read() {
@@ -1030,8 +1031,34 @@ pub(crate) fn intent_audit_log_system(
             UserIntent::Select { .. } => "select",
             UserIntent::Wait => "wait",
         };
-        // I5: every audited action records a pending effect.
-        action_effects.record(&format!("intent:{}", variant), state.frame);
+        // I5/FX1: every audited action records a pending effect.
+        // Wait is a DELIBERATE no-op — the surface variant every
+        // turn-based/idle strategy emits — so it never counts as a
+        // dead verb.
+        if !matches!(intent, UserIntent::Wait) {
+            let key = match &intent {
+                // Direction-quadrant keys: a LEFT-dropping move bug
+                // (walker/bug_dead_left_key) must kill only the
+                // leftward verbs, not all of "intent:move".
+                UserIntent::Move { dir } => format!(
+                    "intent:move:{}",
+                    if dir.x < 0.0 {
+                        "left"
+                    } else if dir.x > 0.0 {
+                        "right"
+                    } else if dir.y < 0.0 {
+                        "down"
+                    } else {
+                        "up"
+                    }
+                ),
+                UserIntent::Choice { .. } => "intent:choice".to_string(),
+                UserIntent::Axis { name, .. } => format!("intent:axis:{}", name),
+                UserIntent::Select { .. } => "intent:select".to_string(),
+                UserIntent::Wait => unreachable!(),
+            };
+            action_effects.record(&key, state.frame);
+        }
         // Structured JSON via serde_json: no escaping bugs, lossless
         // float encoding (f32 -> f64 -> shortest repr round-trips
         // exactly, unlike the old {:.4} truncation).
