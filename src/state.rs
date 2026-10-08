@@ -90,7 +90,7 @@ impl Violations {
                     .and_then(|rest| rest.find("] "))
                     .map(|end| &e.detail["[intent: ".len() + end + 2..])
                     .unwrap_or(e.detail.as_str());
-                let norm = crate::fingerprint::default_normalizer();
+                let norm = crate::fingerprint::config_normalizer();
                 e.fingerprint = Some(norm.fingerprint(
                     "violation",
                     &e.rule,

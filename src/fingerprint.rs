@@ -66,17 +66,8 @@ impl Normalizer {
         message: &str,
     ) -> Fingerprint {
         let normalized = self.normalize(message);
-        let parts = FingerprintParts {
-            kind: kind.to_string(),
-            rule: rule.to_string(),
-            location: location.to_vec(),
-            normalized_message: normalized.clone(),
-        };
-        // FNV-1a over the concatenated fields — a stable, portable
-        // hash with no external dependencies. Two rounds (different
-        // seeds) to widen the 64-bit result to 128 hex chars... v0.2
-        // keeps a single round; the fingerprint is opaque and its
-        // length is not part of the contract.
+        // FX7: reject_keys split (key presence appends its value);
+        // merge_keys collapse (message suppressed entirely).
         fn fnv1a(bytes: &[u8]) -> u64 {
             let mut h: u64 = 0xcbf29ce484222325;
             for b in bytes {
@@ -89,12 +80,22 @@ impl Normalizer {
         buf.push_str(kind);
         buf.push('\u{1}');
         buf.push_str(rule);
-        for loc in &parts.location {
+        for loc in location {
             buf.push('\u{1}');
             buf.push_str(loc);
         }
         buf.push('\u{1}');
-        buf.push_str(&normalized);
+        if self.merge_keys.is_empty() {
+            buf.push_str(&normalized);
+        } else {
+            buf.push_str("[merged]");
+        }
+        for key in &self.reject_keys {
+            if normalized.contains(key.as_str()) {
+                buf.push('\u{1}');
+                buf.push_str(key);
+            }
+        }
         Fingerprint(format!("{:016x}", fnv1a(buf.as_bytes())))
     }
 }
@@ -102,6 +103,43 @@ impl Normalizer {
 /// Default normalizer for v0.2 (no special reject/merge keys yet).
 pub fn default_normalizer() -> Normalizer {
     Normalizer::default()
+}
+
+/// FX7: config-loaded normalizer. Reads `tests/swarm/config.json`
+/// (U1 conventions path) when present; falls back to the default.
+/// Structure: {"fingerprint_rules": {...}} sibling keys are tolerated;
+/// reject/merge keys are read from an optional "fingerprints" object:
+/// {"reject_keys": [...], "merge_keys": [...]}.
+pub fn config_normalizer() -> Normalizer {
+    let path = crate::conventions::config_path();
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Normalizer::default();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Normalizer::default();
+    };
+    let mut n = Normalizer::default();
+    if let Some(reject) = v
+        .get("fingerprints")
+        .and_then(|f| f.get("reject_keys"))
+        .and_then(|k| k.as_array())
+    {
+        n.reject_keys = reject
+            .iter()
+            .filter_map(|k| k.as_str().map(String::from))
+            .collect();
+    }
+    if let Some(merge) = v
+        .get("fingerprints")
+        .and_then(|f| f.get("merge_keys"))
+        .and_then(|k| k.as_array())
+    {
+        n.merge_keys = merge
+            .iter()
+            .filter_map(|k| k.as_str().map(String::from))
+            .collect();
+    }
+    n
 }
 
 /// Rewrite a single whitespace token: strip volatile numeric parts.
@@ -125,16 +163,63 @@ fn normalize_token(tok: &str) -> String {
             return "frame:*".to_string();
         }
     }
-    // Floats: 123.456
-    if tok.contains('.')
-        && tok
+    // Entity(12v3) — Bevy's Debug format for entity ids.
+    if let Some(inner) = tok
+        .strip_prefix("Entity(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        if is_entity_id(inner) {
+            return "Entity(*)".to_string();
+        }
+    }
+    // StableId(N) — sequence-stable but run-relative.
+    if let Some(inner) = tok
+        .strip_prefix("StableId(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        if inner.chars().all(|c| c.is_ascii_digit()) {
+            return "StableId(*)".to_string();
+        }
+    }
+    // seed=N
+    if let Some(numpart) = tok.strip_prefix("seed=") {
+        if numpart.chars().all(|c| c.is_ascii_digit()) {
+            return "seed=*".to_string();
+        }
+    }
+    // Floats adjacent to punctuation: "123.456", "(123.456,", "123.456)".
+    // Trim leading/trailing non-alphanumeric noise, then test the core.
+    let core = tok.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
+    if core.contains('.')
+        && core
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_digit() || c == '-')
     {
-        let digits: String = tok.chars().filter(|c| !c.is_ascii_digit()).collect();
-        if !digits.is_empty() && digits.chars().all(|c| c == '.' || c == '-' || c == ',') {
+        let digits: String = core.chars().filter(|c| !c.is_ascii_digit()).collect();
+        if !digits.is_empty() && digits.chars().all(|c| c == '.' || c == '-') {
             return "*".to_string();
+        }
+    }
+    // Bare integers with punctuation noise ("123,", "123)") — only
+    // wildcard when the whole token is numeric-plus-noise (a mixed
+    // token like "score3" stays).
+    if !core.is_empty() && core.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        return "*".to_string();
+    }
+    // key=<number> ("value=123.456", "score=3"): wildcard the numeric
+    // suffix but keep the key.
+    for sep in ['=', ':'] {
+        if let Some((head, tail)) = tok.split_once(sep) {
+            let tail_core =
+                tail.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
+            if !tail_core.is_empty()
+                && tail_core
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == '-')
+            {
+                return format!("{head}{sep}*");
+            }
         }
     }
     tok.to_string()
@@ -149,4 +234,85 @@ fn is_entity_id(s: &str) -> bool {
         && idx.chars().all(|c| c.is_ascii_digit())
         && !gen.is_empty()
         && gen.chars().all(|c| c.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fx7_normalize_table_driven() {
+        // FX7 T1: table-driven unit tests for each normalizer gap.
+        let n = Normalizer::default();
+        let cases = vec![
+            // Floats adjacent to punctuation
+            ("(20000.5,)", "*"),
+            ("123.456)", "*"),
+            ("value=123.456", "value=*"),
+            // Bare ints with punctuation
+            ("123,", "*"),
+            ("123)", "*"),
+            ("score3", "score3"), // mixed token stays
+            // Seeds
+            ("seed=12345", "seed=*"),
+            // Frame refs
+            ("frame 10", "frame *"),
+            ("frame:123", "frame:*"),
+            // Entity ids
+            ("Entity(12v3)", "Entity(*)"),
+            ("entity:123v4", "entity:*"),
+            // StableIds
+            ("StableId(42)", "StableId(*)"),
+            // Hex addresses
+            ("0xdeadbeef", "*"),
+        ];
+        for (input, expected) in cases {
+            let got = n.normalize(input);
+            assert_eq!(
+                got, expected,
+                "normalize({input}) = {got} (expected {expected})"
+            );
+        }
+    }
+
+    #[test]
+    fn fx7_fingerprint_stability_across_seeds() {
+        // FX7 T1: same bug on different entity/seed -> one fingerprint.
+        let n = Normalizer::default();
+        let fp1 = n.fingerprint(
+            "violation",
+            "panic",
+            &["world".to_string()],
+            "entity:12v3 panicked at seed=1",
+        );
+        let fp2 = n.fingerprint(
+            "violation",
+            "panic",
+            &["world".to_string()],
+            "entity:45v7 panicked at seed=2",
+        );
+        assert_eq!(
+            fp1, fp2,
+            "different entity/seed should yield same fingerprint"
+        );
+    }
+
+    #[test]
+    fn fx7_fingerprint_stability_different_entities() {
+        // FX7 T1: leak on two different spawned entities -> one fingerprint.
+        let n = Normalizer::default();
+        let fp1 = n.fingerprint(
+            "violation",
+            "leak",
+            &["world".to_string()],
+            "entity:12v3 leaked resource",
+        );
+        let fp2 = n.fingerprint(
+            "violation",
+            "leak",
+            &["world".to_string()],
+            "entity:45v7 leaked resource",
+        );
+        assert_eq!(fp1, fp2, "different entities should yield same fingerprint");
+    }
 }
