@@ -55,6 +55,7 @@ pub mod scenario;
 pub mod sinks;
 pub mod state;
 pub mod sweep;
+pub mod typed;
 
 #[cfg(test)]
 mod verify;
