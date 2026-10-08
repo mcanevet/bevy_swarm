@@ -375,6 +375,17 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         crate::entropy::reset_fallback_counter();
         crate::entropy::enter_run(scenario.bot.seed);
     }
+    // FX3: Drop guard ensures exit_run runs even on early returns/panics.
+    #[cfg(feature = "deterministic-entropy")]
+    struct EntropyGuard;
+    #[cfg(feature = "deterministic-entropy")]
+    impl Drop for EntropyGuard {
+        fn drop(&mut self) {
+            crate::entropy::exit_run();
+        }
+    }
+    #[cfg(feature = "deterministic-entropy")]
+    let _entropy_guard = EntropyGuard;
 
     // Z7: route Bevy errors/logs/panics from this run into a private sink
     // keyed by thread-local RunId, drained into Violations below. Install
@@ -715,6 +726,25 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // was pursued but not reached (progress-stall bug signature).
     let mut snap = violations.snapshot();
 
+    // FX3: emit informational rule for unattributed entropy draws.
+    #[cfg(feature = "deterministic-entropy")]
+    {
+        let count = crate::entropy::fallback_draw_count();
+        if count > 0 {
+            snap.push(crate::state::ViolationEntry {
+                rule: crate::rules::ENTROPY_UNATTRIBUTED_DRAWS.to_string(),
+                target: "".to_string(),
+                first_frame: 0,
+                last_frame: state.frame,
+                count: count as u64,
+                detail: format!("{} unattributed entropy draw(s) outside enter_run", count),
+                last_detail: format!("{} unattributed entropy draw(s) outside enter_run", count),
+                fingerprint: None,
+                fingerprint_scheme: 1,
+            });
+        }
+    }
+
     // Z7: drain the error/log/panic sink into the snapshot as
     // bevy_error / log_error / panic violations. Dedupe by
     // (rule, context) via Violations semantics.
@@ -856,10 +886,6 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // caller uses `minimize_crash`, which takes an app builder and the
     // report's action log, applies ddmin, and returns the minimal
     // reproducer plus a ready-to-save regression scenario.
-
-    // Z14: exit deterministic entropy run.
-    #[cfg(feature = "deterministic-entropy")]
-    crate::entropy::exit_run();
 
     Ok(PlaytestReport {
         schema_version: 1,

@@ -38,7 +38,6 @@ fn getrandom_fill_is_deterministic() {
     exit_run();
     assert_ne!(buf1, buf4);
 }
-
 #[test]
 fn uuid_v4_deterministic() {
     enter_run(7);
@@ -55,7 +54,6 @@ fn uuid_v4_deterministic() {
     exit_run();
     assert_ne!(u1, u3);
 }
-
 #[test]
 fn run_scenario_provides_entropy_scope() {
     use bevy_swarm::contract::TestApi;
@@ -70,11 +68,9 @@ fn run_scenario_provides_entropy_scope() {
         api.custom_numeric
             .insert("Uuid.HighBits".into(), res.0.as_u128() as f64);
     }
-
     fn make_uuid_system(mut res: ResMut<LatestUuid>) {
         res.0 = uuid::Uuid::new_v4();
     }
-
     let scenario: Scenario =
         serde_json::from_str(r#"{"bot":{"type":"chaos","seed":99},"duration_s":0.05}"#).unwrap();
 
@@ -107,7 +103,6 @@ fn run_scenario_provides_entropy_scope() {
     );
     assert!(!d1.is_empty());
 }
-
 #[test]
 fn error_layout_assertions() {
     // Verify getrandom 0.3 and 0.4 Error types have identical layout.
@@ -120,4 +115,54 @@ fn error_layout_assertions() {
     assert_eq!(size_of::<getrandom04::Error>(), 4); // NonZeroU32
     assert_eq!(align_of::<getrandom04::Error>(), 4);
     assert_eq!(size_of::<Result<(), getrandom04::Error>>(), 4);
+}
+/// FX3 GREEN: getrandom outside enter_run must NOT abort — it draws
+/// from the process-global fallback stream and increments the counter.
+/// (RED on main: the old extern "C" hook panic!ed, aborting the whole
+/// test process — see PR description for the SIGABRT proof.)
+#[test]
+fn draw_outside_run_does_not_abort() {
+    bevy_swarm::entropy::reset_fallback_counter();
+    let before = bevy_swarm::entropy::fallback_draw_count();
+    let mut buf = [0u8; 8];
+    // Must not panic or abort.
+    getrandom04::fill(&mut buf).unwrap();
+    let after = bevy_swarm::entropy::fallback_draw_count();
+    assert_eq!(after, before + 1, "unattributed draw must be counted");
+}
+
+/// FX3 GREEN: same seed → identical values; different seed → different.
+/// (Acceptance bullet: rand-style draws inside a game system.)
+#[test]
+fn same_seed_reproduces_across_two_apps() {
+    use bevy::prelude::*;
+
+    #[derive(Resource, Deref, DerefMut)]
+    struct Drawn(Vec<u64>);
+
+    let run = |seed: u64| {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Drawn(Vec::new()));
+        // Enter BEFORE any system draws.
+        bevy_swarm::entropy::enter_run(seed);
+        app.add_systems(Startup, |mut drawn: ResMut<Drawn>| {
+            // Draw 4 u64s via getrandom (the underlying source for
+            // rand::rng() and uuid v4).
+            for _ in 0..4 {
+                let mut buf = [0u8; 8];
+                getrandom04::fill(&mut buf).unwrap();
+                drawn.push(u64::from_ne_bytes(buf));
+            }
+        });
+        app.update();
+        bevy_swarm::entropy::exit_run();
+        app.world_mut().resource::<Drawn>().0.clone()
+    };
+
+    let a1 = run(42);
+    let a2 = run(42);
+    let b = run(43);
+    assert_eq!(a1, a2, "same seed must reproduce identical draws");
+    assert_ne!(a1, b, "different seeds must diverge");
 }

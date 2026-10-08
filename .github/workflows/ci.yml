@@ -51,6 +51,20 @@ jobs:
       - name: Clippy (agent feature)
         run: cargo clippy --all-targets --features agent -- -D warnings
 
+  entropy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+      
+      - name: Deterministic entropy (getrandom custom backend)
+        run: RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features deterministic-entropy --test entropy
+
   test:
     runs-on: ubuntu-latest
     steps:
