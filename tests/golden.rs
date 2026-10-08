@@ -5,21 +5,19 @@ use bevy::prelude::*;
 use bevy_swarm::contract::TestApi;
 use bevy_swarm::golden::{check_golden, record_golden, GoldenOutcome, GoldenSet, Tolerance};
 use bevy_swarm::headless::headless_app;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Damage formula flag: version A (original) vs B (changed logic).
-static DAMAGE_V2: AtomicBool = AtomicBool::new(false);
+/// FX9: per-app resource — a global static toggled mid-run by other
+/// tests made this suite flaky under parallel execution.
+#[derive(Resource, Clone, Copy)]
+struct DamageV2(bool);
 
 #[derive(Resource, Default)]
 struct EnemyDamage(u32);
 
-fn damage_system(mut dmg: ResMut<EnemyDamage>) {
+fn damage_system(mut dmg: ResMut<EnemyDamage>, v2: Option<Res<DamageV2>>) {
     // Deterministic damage: 1 per frame in v1, 2 in v2 (logic change).
-    let inc = if DAMAGE_V2.load(Ordering::Relaxed) {
-        2
-    } else {
-        1
-    };
+    let inc = if v2.is_some_and(|f| f.0) { 2 } else { 1 };
     dmg.0 += inc;
 }
 
@@ -47,6 +45,16 @@ impl Plugin for GamePlugin {
             custom_text: Default::default(),
         });
     }
+}
+
+fn game_v1() -> App {
+    headless_app(GamePlugin)()
+}
+
+fn game_v2() -> App {
+    let mut app = headless_app(GamePlugin)();
+    app.insert_resource(DamageV2(true));
+    app
 }
 
 fn scenario(seed: u64) -> bevy_swarm::scenario::Scenario {
@@ -86,18 +94,13 @@ fn golden_same_on_unchanged_game() {
     eprintln!("run1: {:?}", d1);
     eprintln!("run2: {:?}", d2);
     eprintln!("identical: {}", d1 == d2);
-    record_golden(
-        || headless_app(GamePlugin)(),
-        std::slice::from_ref(&scen),
-        &dir,
-    )
-    .unwrap();
+    record_golden(game_v1, std::slice::from_ref(&scen), &dir).unwrap();
 
     let set = GoldenSet {
-        scenarios: vec![("scenario-42".to_string(), scen.clone())],
+        scenarios: vec![("scenario-0-42".to_string(), scen.clone())],
         dir: dir.clone(),
     };
-    let report = check_golden(|| headless_app(GamePlugin)(), &set, &Tolerance::default()).unwrap();
+    let report = check_golden(game_v1, &set, &Tolerance::default()).unwrap();
     assert!(
         report.all_same(),
         "unchanged game must be Same: {:?}",
@@ -110,21 +113,14 @@ fn golden_detects_logic_change() {
     let dir = temp_dir("change");
     let scen = scenario(7);
 
-    DAMAGE_V2.store(false, Ordering::Relaxed);
-    record_golden(
-        || headless_app(GamePlugin)(),
-        std::slice::from_ref(&scen),
-        &dir,
-    )
-    .unwrap();
+    record_golden(game_v1, std::slice::from_ref(&scen), &dir).unwrap();
 
     // Changed damage formula: same inputs, different outcome.
-    DAMAGE_V2.store(true, Ordering::Relaxed);
     let set = GoldenSet {
-        scenarios: vec![("scenario-7".to_string(), scen.clone())],
+        scenarios: vec![("scenario-0-7".to_string(), scen.clone())],
         dir: dir.clone(),
     };
-    let report = check_golden(|| headless_app(GamePlugin)(), &set, &Tolerance::default()).unwrap();
+    let report = check_golden(game_v2, &set, &Tolerance::default()).unwrap();
     assert!(!report.all_same(), "logic change must diverge");
 
     let (_, outcome) = &report.per_scenario[0];
@@ -137,7 +133,6 @@ fn golden_detects_logic_change() {
         }
         other => panic!("expected Diverged, got {other:?}"),
     }
-    DAMAGE_V2.store(false, Ordering::Relaxed);
 }
 
 #[test]
@@ -147,17 +142,17 @@ fn golden_missing_is_not_same() {
         scenarios: vec![("never-recorded".to_string(), scenario(1))],
         dir: dir.clone(),
     };
-    let report = check_golden(|| headless_app(GamePlugin)(), &set, &Tolerance::default()).unwrap();
+    let report = check_golden(game_v1, &set, &Tolerance::default()).unwrap();
     assert!(!report.all_same());
     assert!(matches!(report.per_scenario[0].1, GoldenOutcome::Missing));
 }
 
 #[test]
 fn golden_update_env_rewrites() {
-    assert!(
-        bevy_swarm::golden::update_golden_enabled()
-            == (std::env::var("BEVY_SWARM_UPDATE_GOLDEN")
-                .map(|v| v == "1")
-                .unwrap_or(false))
-    );
+    // FX9: convention is BEVY_SWARM_UPDATE=golden, not
+    // BEVY_SWARM_UPDATE_GOLDEN.
+    unsafe { std::env::set_var("BEVY_SWARM_UPDATE", "golden") };
+    assert!(bevy_swarm::golden::update_golden_enabled());
+    unsafe { std::env::remove_var("BEVY_SWARM_UPDATE") };
+    assert!(!bevy_swarm::golden::update_golden_enabled());
 }
