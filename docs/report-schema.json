@@ -84,6 +84,9 @@
     },
     "action_effect_rate": {
       "$ref": "#/$defs/action_effect_rate"
+    },
+    "choices": {
+      "$ref": "#/$defs/choices"
     }
   },
   "additionalProperties": false,
@@ -316,6 +319,33 @@
             "minimum": 0
           },
           "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "choices": {
+      "type": "array",
+      "description": "J0: recorded bot choices (frame, reduced value, bound) \u2014 replay via bot.choices",
+      "items": {
+        "type": "object",
+        "required": [
+          "frame",
+          "value",
+          "bound"
+        ],
+        "properties": {
+          "frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "value": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bound": {
             "type": "integer",
             "minimum": 0
           }
