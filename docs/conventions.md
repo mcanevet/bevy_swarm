@@ -19,7 +19,7 @@ Every bead references these conventions instead of inventing new paths or format
 
 ```toml
 [workspace.dependencies]
-bevy = { version = "0.20.0-rc.2", features = ["debug"] }
+bevy = { version = "0.20.0-rc.2", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```

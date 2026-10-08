@@ -89,6 +89,7 @@ impl Plugin for RegressionPairGamePlugin {
 
 /// FX2: an unknown FIXTURE_BUG is a typo'd test case — panic loudly
 /// instead of silently running the clean game (vacuous pass).
+#[allow(dead_code)]
 fn known_bug(bug: &Option<String>, known: &[&str]) {
     if let Some(b) = bug.as_deref() {
         if !known.contains(&b) {

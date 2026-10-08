@@ -90,6 +90,7 @@ fn move_system_nan_rotation(
             t.translation += d;
             // Classic bug: normalizing a zero vector (0/0) yields NaN.
             let zero = Vec3::ZERO.length(); // 0.0
+            #[allow(clippy::eq_op)] // intentional 0/0 to produce NaN
             let s = zero / zero; // NaN
             t.rotation = Quat::from_xyzw(s, s, s, 1.0);
         }
