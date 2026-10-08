@@ -23,13 +23,27 @@ pub(crate) fn check_finite_transforms_system(
     q: Query<(Entity, &Transform), Changed<Transform>>,
     mut violations: ResMut<Violations>,
     state: Res<PlaytestState>,
+    names: Query<&Name>,
 ) {
     for (entity, transform) in q.iter() {
+        // FX7 T1: stable target label — Name when present, else
+        // "entity:<component>" (no raw entity ids in violation targets:
+        // the same bug on another entity must produce ONE fingerprint).
+        let label = match names.get(entity) {
+            Ok(n) => {
+                // Strip trailing digits: "Enemy 01"/"Enemy 02" — same
+                // bug signature across spawned instances.
+                let base = n.as_str();
+                let trimmed = base.trim_end_matches(|c: char| c.is_ascii_digit() || c == ' ');
+                format!("name:{}", if trimmed.is_empty() { base } else { trimmed })
+            }
+            Err(_) => "entity:transform".to_string(),
+        };
         let t = transform.translation;
         if !t.x.is_finite() || !t.y.is_finite() || !t.z.is_finite() {
             violations.report(
                 crate::rules::FINITE_TRANSFORMS,
-                &format!("entity:{}", entity),
+                &label,
                 format!("non-finite translation ({}, {}, {})", t.x, t.y, t.z),
                 state.frame,
             );
@@ -40,7 +54,7 @@ pub(crate) fn check_finite_transforms_system(
         if !transform.rotation.is_finite() || !transform.scale.is_finite() {
             violations.report(
                 crate::rules::FINITE_TRANSFORMS,
-                &format!("entity:{}", entity),
+                &label,
                 format!(
                     "non-finite rotation ({:?}) or scale ({:?})",
                     transform.rotation, transform.scale
@@ -52,7 +66,7 @@ pub(crate) fn check_finite_transforms_system(
             // not NaN — games may legitimately ignore this one.
             violations.report(
                 "nodes_rotation_unnormalized",
-                &format!("entity:{}", entity),
+                &label,
                 format!("rotation not normalized: {:?}", transform.rotation),
                 state.frame,
             );

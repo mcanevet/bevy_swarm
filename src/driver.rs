@@ -958,7 +958,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         (a.first_frame, &a.rule, &a.target).cmp(&(b.first_frame, &b.rule, &b.target))
     });
     {
-        let norm = crate::fingerprint::default_normalizer();
+        let norm = crate::fingerprint::config_normalizer();
         for e in &mut snap {
             if e.fingerprint.is_none() {
                 let raw_detail = e
