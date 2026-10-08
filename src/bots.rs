@@ -34,6 +34,7 @@ pub(crate) fn chaos_bot_system(
     mut intents: MessageWriter<UserIntent>,
     mut violations: ResMut<Violations>,
     surface: Option<Res<IntentSurface>>,
+    raw_queue: ResMut<crate::raw_input::RawActionQueue>,
     q: Query<Entity, With<Gameplay>>,
     q_named: Query<(Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
@@ -60,14 +61,88 @@ pub(crate) fn chaos_bot_system(
     if persona == crate::enums::Persona::Idle && !choices.chance(state.frame, 1, 8) {
         return;
     }
+    // FX4.4: tier-0 raw chaos. Without an IntentSurface the game is a
+    // tier-0 game (no testable-conventions) — chaos samples RAW input
+    // (keys / mouse buttons / gamepad from the scenario's RawSurface
+    // default set) into RawActionQueue via ChoiceStream. Audit-log
+    // entries come from the raw input actuator (raw:key:<K> etc.),
+    // which Replay can replay.
     let Some(surface) = surface else {
-        violations.report(
-            "chaos_bot_config",
-            "",
-            "game does not implement testable-conventions: IntentSurface resource missing — chaos cannot know which intents the game consumes"
-                .to_string(),
-            state.frame,
-        );
+        let raw = scenario.0.bot.raw_surface.clone().unwrap_or_default();
+        if raw.keys.is_empty()
+            && !raw.mouse_buttons
+            && !raw.gamepad
+            && !raw.wheel
+            && !raw.mouse_motion
+        {
+            violations.report(
+                "chaos_bot_config",
+                "",
+                "game does not implement testable-conventions: IntentSurface resource missing and no raw_surface configured — chaos cannot know which inputs the game consumes"
+                    .to_string(),
+                state.frame,
+            );
+            return;
+        }
+        // Build the candidate raw-action kinds (weighted: keys first,
+        // then mouse/gamepad if enabled).
+        let mut kinds: Vec<u8> = Vec::new();
+        if !raw.keys.is_empty() {
+            kinds.push(0);
+        }
+        if raw.mouse_buttons {
+            kinds.push(1);
+        }
+        if raw.gamepad {
+            kinds.push(2);
+        }
+        if raw.wheel {
+            kinds.push(3);
+        }
+        if raw.mouse_motion {
+            kinds.push(4);
+        }
+        let kind = kinds[choices.below(state.frame, kinds.len() as u64) as usize];
+        let action = match kind {
+            0 => {
+                let key =
+                    raw.keys[choices.below(state.frame, raw.keys.len() as u64) as usize].clone();
+                crate::scenario::RawAction::Key {
+                    key,
+                    hold_frames: choices.below(state.frame, 4) as u32 + 1,
+                }
+            }
+            1 => {
+                let left = choices.below(state.frame, 2) == 0;
+                crate::scenario::RawAction::MouseButton {
+                    button: if left {
+                        crate::scenario::MouseBtn::Left
+                    } else {
+                        crate::scenario::MouseBtn::Right
+                    },
+                    hold_frames: choices.below(state.frame, 4) as u32 + 1,
+                }
+            }
+            2 => {
+                const PAD_BUTTONS: &[&str] = &["South", "East", "North", "West"];
+                crate::scenario::RawAction::GamepadButton {
+                    button: PAD_BUTTONS
+                        [choices.below(state.frame, PAD_BUTTONS.len() as u64) as usize]
+                        .to_string(),
+                    hold_frames: choices.below(state.frame, 4) as u32 + 1,
+                }
+            }
+            3 => crate::scenario::RawAction::Wheel {
+                dy: choices.unit_f32(state.frame, -1.0, 1.0),
+            },
+            _ => crate::scenario::RawAction::MouseMove {
+                delta: (
+                    choices.unit_f32(state.frame, -5.0, 5.0),
+                    choices.unit_f32(state.frame, -5.0, 5.0),
+                ),
+            },
+        };
+        raw_queue.0.lock().unwrap().push_back((state.frame, action));
         return;
     };
     if surface.0.is_empty() {
