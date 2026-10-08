@@ -42,6 +42,7 @@ pub mod driver;
 pub mod entropy;
 pub mod enums;
 pub mod fingerprint;
+pub mod game_types;
 pub mod golden;
 pub mod harness;
 pub mod headless;
