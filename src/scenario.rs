@@ -179,6 +179,14 @@ pub struct BotConfig {
     /// (PlaytestAppExt::add_bot_policy). Unknown names reject at load.
     #[serde(default)]
     pub policy: Option<String>,
+    /// J0: replay prefix for the bot's random choices (recorded
+    /// values; each draw consumes one). Absent = pure PRNG from seed.
+    #[serde(default)]
+    pub choices: Option<Vec<crate::choice::Choice>>,
+    /// J0: continuation once replayed choices run out (prng/zeros/
+    /// reseed). Default prng.
+    #[serde(default)]
+    pub continuation: crate::choice::Continuation,
 }
 
 /// I4: liveness configuration.

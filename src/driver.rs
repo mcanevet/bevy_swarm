@@ -247,6 +247,10 @@ pub struct PlaytestReport {
     /// I5: per-action effect rates (key -> (effective, total)).
     /// Feeds dead_verb and the Z1 vacuity guard.
     pub action_effect_rate: std::collections::HashMap<String, crate::effects::EffectRate>,
+    /// J0: every bot random choice this run (frame, reduced value,
+    /// bound). Replay via bot.choices. Populated for chaos/curious
+    /// (and any bot drawing from the stream).
+    pub choices: Vec<crate::choice::Choice>,
 }
 
 impl PlaytestReport {
@@ -271,6 +275,7 @@ impl PlaytestReport {
             system_coverage: Default::default(),
             state_trace: None,
             action_effect_rate: Default::default(),
+            choices: vec![],
         }
     }
 }
@@ -585,6 +590,13 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     let mut state = PlaytestState::new(tps, scenario.bot.seed);
     state.coverage = coverage;
     app.insert_resource(state);
+    // J0: the bot's choice stream — replay prefix, continuation, and
+    // recording of every draw for persistence/mutation/shrinking.
+    let choice_stream = crate::choice::ChoiceStream::from_seed(scenario.bot.seed).with_replay(
+        scenario.bot.choices.clone().unwrap_or_default(),
+        scenario.bot.continuation,
+    );
+    app.insert_resource(choice_stream);
 
     let total_ticks = (scenario.duration_s * tps as f32) as u64;
     // Pre-run snapshot for code-aware (system) coverage — see
@@ -869,6 +881,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .remove_resource::<crate::determinism::StateTrace>()
             .map(|t| t.digests),
         action_effect_rate: crate::effects::effect_rates(app.world()),
+        choices: app
+            .world_mut()
+            .get_resource::<crate::choice::ChoiceStream>()
+            .map(|c| c.recorded.clone())
+            .unwrap_or_default(),
     })
 }
 

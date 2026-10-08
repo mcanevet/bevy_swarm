@@ -111,12 +111,6 @@ impl Violations {
 pub struct PlaytestState {
     pub frame: u64,
     pub tps: u64,
-    /// Raw PRNG state: xorshift64*. Deterministic from the scenario seed
-    /// — identical seeds replay identically. Statistical quality is
-    /// sufficient for playtesting traffic (not for crypto or Monte-Carlo
-    /// workloads; runs 2^64-period, passes PractRand to ~1TB). See
-    /// [`PlaytestState::next_rand`].
-    pub rng: u64,
     pub metrics: Metrics,
     pub delta_windows: HashMap<String, std::collections::VecDeque<(u64, f64)>>, // rule -> samples
     pub(crate) warned_paths: HashSet<String>,
@@ -327,11 +321,11 @@ impl PlaytestState {
     /// Construct a fresh playtest state for a run at `tps` ticks per
     /// second with the given RNG seed. Public entry point for callers
     /// driving the harness manually (e.g. calibration runs).
-    pub fn new(tps: u64, seed: u64) -> Self {
+    pub fn new(tps: u64, _seed: u64) -> Self {
+        // seed moved into ChoiceStream (J0); kept for API compat.
         PlaytestState {
             frame: 0,
             tps,
-            rng: if seed == 0 { 42 } else { seed },
             metrics: Metrics::default(),
             delta_windows: HashMap::default(),
             warned_paths: HashSet::default(),
@@ -350,30 +344,6 @@ impl PlaytestState {
             pending_actionability_checks: std::collections::VecDeque::new(),
             pending_key_releases: Vec::new(),
         }
-    }
-
-    /// Next pseudorandom draw: xorshift64* with the Vigna/Marsaglia
-    /// scrambler. Deterministic from the scenario seed, cheap (three
-    /// shifts + one multiply), no dependencies. Chosen deliberately over
-    /// pulling in `rand`: this drives bot intent sampling and jitter, not
-    /// security-sensitive or statistically-rigorous simulation, and the
-    /// whole state round-trips through serde in replay scenarios.
-    ///
-    /// Known weakness (fine here, documented for reviewers): the low
-    /// bits are the weakest part of the stream. Bot helpers consume it
-    /// via small-modulo reductions (`% len`, `% 100`) which sit squarely
-    /// on those low bits — acceptable because bot sampling needs
-    /// variety, not uniformity proofs, and the modulo biases at these
-    /// sizes are negligible (<1% even for a 64-bit draw `% 100`).
-    /// Do not reuse this for statistical tests over the drawn values.
-    pub fn next_rand(&mut self) -> u64 {
-        // xorshift64* — deterministic chaos bot from scenario seed
-        let mut x = self.rng;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.rng = x;
-        x.wrapping_mul(0x2545F4914F6CDD1D)
     }
 
     pub fn elapsed_s(&self) -> f32 {
