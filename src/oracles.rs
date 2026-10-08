@@ -868,12 +868,17 @@ pub(crate) fn check_custom_system(world: &mut World) {
 /// variant names), but the audit trail — what makes crashes found by ANY
 /// writer minimizable via ddmin — lives here and nowhere else.
 pub(crate) fn intent_audit_log_system(
-    state: Res<PlaytestState>,
+    mut state: ResMut<PlaytestState>,
     mut reader: bevy::ecs::message::MessageReader<UserIntent>,
     names: Query<&Name>,
     ids: Query<&crate::identity::StableId>,
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
 ) {
+    if !reader.is_empty() {
+        // I4: remember the last frame an intent was consumed (for the
+        // turn-based stuck_after_intent check).
+        state.last_intent_frame = Some(state.frame);
+    }
     for intent in reader.read() {
         let variant = match &intent {
             UserIntent::Move { .. } => "move",
@@ -939,44 +944,6 @@ pub(crate) fn intent_audit_log_system(
 // frame_time_p99_below threshold misses. Zero game knowledge: measures
 // the update loop itself.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-
-/// Detects a "frozen world" — no Gameplay entity's Transform changed for
-/// 2+ seconds while a real-time scenario runs. Turn-based games are
-/// exempt: if any entity carries the `TurnBased` marker component,
-/// waiting between turns is by design, not a soft-lock.
-/// Zero contract: pure ECS change detection, O(changes) per tick.
-pub(crate) fn frozen_world_oracle_system(
-    q_changed: Query<(), (With<crate::contract::Gameplay>, Changed<GlobalTransform>)>,
-    q_turn_based: Query<(), With<crate::contract::TurnBased>>,
-    mut state: ResMut<PlaytestState>,
-    mut violations: ResMut<Violations>,
-) {
-    // Turn-based exemption: legitimate long pauses between turns.
-    if q_turn_based.iter().next().is_some() {
-        return;
-    }
-    if q_changed.iter().next().is_some() {
-        state.frozen_frames = 0;
-        return;
-    }
-    state.frozen_frames += 1;
-    let threshold = state.tps.saturating_mul(2);
-    if state.frozen_frames == threshold {
-        violations.report(
-            "frozen_world",
-            "world",
-            format!(
-                "no Gameplay entity changed for 2.0s ({} frames) — world may be stuck (soft-lock)",
-                state.frozen_frames
-            ),
-            state.frame,
-        );
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Readiness gate (UE PrepareTest/IsReady analog)

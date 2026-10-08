@@ -145,6 +145,10 @@ pub struct PlaytestState {
     /// Transform mutations (see `frozen_world_oracle_system`). Reports a
     /// soft-lock suspicion after 2s of silence in real-time games.
     pub frozen_frames: u64,
+    /// Last frame where any liveness signal was observed (I4).
+    pub last_alive_frame: u64,
+    /// Last frame where an intent/action was consumed (I4 turn-based mode).
+    pub last_intent_frame: Option<u64>,
     /// Readiness gate: frames spent waiting for `GameReady` before
     /// scenario duration began accruing (UE IsReady analog).
     pub pre_ready_frames: u64,
@@ -335,6 +339,8 @@ impl PlaytestState {
             api_history: HashMap::default(),
             eventually_state: HashMap::default(),
             frozen_frames: 0,
+            last_alive_frame: 0,
+            last_intent_frame: None,
             pre_ready_frames: 0,
             planner: crate::planner::PlannerStack::default(),
             pending_gestures: std::collections::VecDeque::new(),

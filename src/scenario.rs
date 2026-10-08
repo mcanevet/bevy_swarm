@@ -45,6 +45,9 @@ pub struct Scenario {
     /// reject at load time (ScenarioError::Rejected).
     #[serde(default)]
     pub oracles: Option<Vec<String>>,
+    /// I4: liveness configuration (default 2s timeout, real-time mode).
+    #[serde(default)]
+    pub liveness: LivenessConfig,
 }
 /// Key name → KeyCode (common subset; extend as games need).
 pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {
@@ -176,6 +179,48 @@ pub struct BotConfig {
     /// (PlaytestAppExt::add_bot_policy). Unknown names reject at load.
     #[serde(default)]
     pub policy: Option<String>,
+}
+
+/// I4: liveness configuration.
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LivenessConfig {
+    /// Liveness mode (default: real-time).
+    #[serde(default)]
+    pub mode: LivenessMode,
+    /// Timeout for liveness signal (seconds).
+    #[serde(default = "default_liveness_timeout")]
+    pub timeout_s: f32,
+    /// Optional watched resources/components by type path (future Z6).
+    #[serde(default)]
+    pub watch: Vec<String>,
+}
+
+fn default_liveness_timeout() -> f32 {
+    2.0
+}
+
+impl Default for LivenessConfig {
+    fn default() -> Self {
+        Self {
+            mode: LivenessMode::default(),
+            timeout_s: default_liveness_timeout(),
+            watch: Vec::new(),
+        }
+    }
+}
+
+/// I4: liveness mode.
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LivenessMode {
+    /// Real-time: violation if no liveness signal for timeout_s.
+    #[default]
+    RealTime,
+    /// Turn-based: idle is fine, but after an intent some liveness must occur.
+    AfterIntent,
+    /// Disable the liveness oracle (loud: recorded in report warnings).
+    Off,
 }
 
 fn default_seed() -> u64 {

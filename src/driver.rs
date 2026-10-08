@@ -11,7 +11,6 @@ use bevy::ecs::world::World;
 
 use crate::bots::*;
 use crate::contract::{ResetHooks, TestApi};
-use crate::oracles::check_custom_system;
 use crate::oracles::*;
 use crate::scenario::*;
 use crate::state::*;
@@ -179,7 +178,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
         app.add_systems(
             bevy::app::Last,
             (
-                frozen_world_oracle_system,
+                // I4: liveness oracle (replaces frozen_world_oracle_system).
+                crate::liveness::liveness_oracle_system,
                 check_finite_transforms_system,
                 check_bounds_gameplay_system,
                 check_custom_system,
