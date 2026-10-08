@@ -23,7 +23,7 @@ jobs:
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97
-      - name: Check the whole workspace (FX11: was root-package build only)
+      - name: 'Check the whole workspace (FX11: was root-package build only)'
         run: cargo check --workspace --all-targets
 
   audit:
@@ -41,7 +41,7 @@ jobs:
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Assert default features pull no render/winit/audio (H2)
+      - name: 'Assert default features pull no render/winit/audio (H2)'
         run: |
           cargo tree -e features -i bevy
           if cargo tree -e features -i bevy | grep -qE 'bevy feature "(render|winit|audio)"'; then
@@ -89,17 +89,17 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       
-      - name: Build (FX11: whole workspace, all features)
+      - name: 'Build (FX11: whole workspace, all features)'
         run: cargo build --workspace --all-targets --all-features
         env:
           CARGO_INCREMENTAL: "0"
       
-      - name: Run all tests (FX11: workspace + all-features)
+      - name: 'Run all tests (FX11: workspace + all-features)'
         run: cargo test --workspace --all-features
         env:
           CARGO_INCREMENTAL: "0"
       
-      - name: Lint with Clippy (deny warnings, FX11: workspace + all-features)
+      - name: 'Lint with Clippy (deny warnings, FX11: workspace + all-features)'
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
         env:
           CARGO_INCREMENTAL: "0"
