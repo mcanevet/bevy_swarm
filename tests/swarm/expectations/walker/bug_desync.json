@@ -1,0 +1,15 @@
+{
+  "status": "fail",
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_report": [
+    {
+      "rule": "frozen_world",
+      "detail_contains": "no gameplay-relevant state changed"
+    }
+  ],
+  "must_not_report": []
+}

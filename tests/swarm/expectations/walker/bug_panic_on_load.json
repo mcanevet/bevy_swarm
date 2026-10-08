@@ -1,10 +1,10 @@
 {
-  "status": "pass",
   "scaffold": "adapter",
   "seeds": [
     42
   ],
   "duration_s": 6.0,
-  "must_report": [],
-  "must_not_report": []
+  "must_not_report": [],
+  "status": "crash",
+  "must_report": []
 }

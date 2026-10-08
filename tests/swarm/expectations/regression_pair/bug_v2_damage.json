@@ -1,0 +1,15 @@
+{
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_not_report": [],
+  "status": "fail",
+  "must_report": [
+    {
+      "rule": "golden_diverged"
+    }
+  ],
+  "pending": "swarm-qo7.9"
+}

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+
 use fixture_walker::WalkerGamePlugin;
 
 fn main() {

@@ -9,15 +9,20 @@
     {
       "name": "score_is_fifty",
       "rule": "custom",
-      "check": "equals",
-      "value": 50.0
+      "check": "ne",
+      "value": 50.0,
+      "path": "TestApi.score"
     }
   ],
   "must_report": [
     {
-      "rule": "score_is_fifty"
+      "rule": "score_is_fifty",
+      "detail_contains": "50"
     }
   ],
   "must_not_report": [],
-  "pending": "swarm-cj8.8"
+  "liveness": {
+    "mode": "after_intent",
+    "timeout_s": 2.0
+  }
 }

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### FX2: Acceptance Harness Integrity (swarm-qo7.2)
+
+- **FX2.1**: `fixture-runner --out <path>` for unique report paths per case; fatal errors on write failure.
+- **FX2.2**: Extended `must_report` with `detail_contains`, `target`, `min_count` filters; pinned actual bug details in expectation files (walker/bug_dead_left_key pins "intent:move:left").
+- **FX2.3**: All fixtures panic on unknown `FIXTURE_BUG`; walker/turn_based/spawner use `known_bug()` helper; regression_pair refactored to Bug enum.
+- **FX2.4**: turn_based adapter syncs Score → TestApi.score; bug_checkop_boundary.json rewritten with custom rule pinning score==50; pending key removed.
+- **FX2.5**: X2 coverage expanded — walker 9 bugs, turn_based 5 bugs; regression_pair/bug_v2_damage.json added; clean.json asserts no frozen_world/dead_verb.
+- **FX2.6**: Renamed tests/swarm/golden → tests/swarm/expectations; deleted bogus trajectories (scenario-42.golden.json, scenario-7.golden.json).
+- **FX2.7**: Added `schema_version` to config.json and expectation files; removed `$schema` from expectations (kept only in docs/report-schema.json).
+- **FX2.8**: Updated docs/report-schema.json with state_trace field, deduped last_detail; added full JSON-schema validation via jsonschema dev-dependency.
+- **FX2.9**: Created Rule enum registry in src/rules.rs; unit test asserts emitted == registered; renamed finite_transforms oracle output from "nodes_finite" to registry name.
+- **FX2.10**: Added `fixtures_have_no_harness_plumbing` test forbidding Gameplay/RealTime/PlaytestPlugin/IntentSurface in fixture crates.
+- **FX2.11**: All fixture Cargo.tomls now have edition/license/publish.workspace=true.
+
+### FX1: Liveness & Dead Verb Fixes (swarm-qo7.1) — MERGED & CLOSED
+
+- Fixed false-positive frozen_world in turn_based/spawner by extending liveness scope to game-owned resources (via GameTypes prefixes).
+- Excluded Wait intents from dead_verb detection; per-direction Move keys (intent:move:left) isolate direction-specific bugs.
+- Anchored effect windows on frame-start ticks (PlaytestState.effect_window_snapshots) instead of Last oracle ticks.
+- Added "world live" gating before reporting dead_verb.
+- Updated clean.json files to duration_s >= 6.0; added meta-test clean_fixtures_pass_long.
+
+
 ### Fixed
 - **FX1: clean fixtures falsely report `frozen_world`/`dead_verb`** — four root causes: (1) the liveness window counted raw change ticks (dozens per frame) instead of frames — now windowed via per-frame start-tick snapshots in `PlaytestState`, with warmup history treated as live; (2) effect windows anchored on a post-reaction tick, counting the game's response as pre-action state — now anchored on the intent frame's start tick, and capped below the bot's inter-action interval (tps/2 windows overlapped neighboring intents, masking dead verbs); (3) fixture adapters tagged `Gameplay` in Startup before the game's spawn commands applied — now `Added<T>`-filtered Update systems; (4) `intent:wait` is a deliberate no-op — excluded from dead-verb tracking, and move verbs keyed per direction (`intent:move:left` etc.) so partial input wiring isolates. Liveness now also covers game-owned resources (Z6 `GameTypes` prefixes) — resource-only games (turn_based, regression_pair) were invisible to component scans. `stuck_after_intent` compares state changes strictly after the intent frame's start tick, not `last_alive_frame >= last_intent` (which counted pre-intent same-frame changes). Acceptance harness serialized (shared `runs/last` raced across parallel tests). Clean fixtures pass 6s chaos runs (meta-test `clean_fixtures_pass_long`); odd-frame mutations count as live (new unit test).
 

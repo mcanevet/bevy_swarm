@@ -31,10 +31,10 @@ use bevy_swarm::golden::{record_golden, check_golden, GoldenSet, Tolerance};
 
 // Record a baseline (once):
 let scenarios = vec![/* ... */];
-record_golden(|| App::new(), &scenarios, "tests/swarm/golden").unwrap();
+record_golden(|| App::new(), &scenarios, "tests/swarm/expectations").unwrap();
 
 // Check against goldens (in CI or tests):
-let set = GoldenSet::load("tests/swarm/golden").unwrap();
+let set = GoldenSet::load("tests/swarm/expectations").unwrap();
 let report = check_golden(|| App::new(), &set, &Tolerance::default()).unwrap();
 assert!(report.all_same(), "no regressions");
 ```
@@ -109,7 +109,7 @@ Two loops (see docs/conventions.md):
 
 - **Outer loop (acceptance):** plain fixture games with ZERO bevy_swarm
   plumbing (`fixtures/*`) + JSON expectation files
-  (`tests/swarm/golden/<fixture>/<variant>.json`). The runner
+  (`tests/swarm/expectations/<fixture>/<variant>.json`). The runner
   (`tests/acceptance.rs`) drives the fixture-runner binary — the same
   path a user takes — and asserts on the report JSON contract
   (`docs/report-schema.json`). Bug variants are selected at runtime via
@@ -119,7 +119,7 @@ Two loops (see docs/conventions.md):
 
 To add a fixture: create `fixtures/<game>/` (depends on bevy ONLY),
 add an adapter + arm in `tests/fixture-runner`, and write expectation
-files under `tests/swarm/golden/<game>/` (clean.json is the
+files under `tests/swarm/expectations/<game>/` (clean.json is the
 false-positive guard; every `bug_<name>.json` documents a planted bug).
 
 ## Development

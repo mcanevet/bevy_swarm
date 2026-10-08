@@ -60,6 +60,9 @@ render = ["bevy/bevy_render"]
 [dev-dependencies]
 # Z14 entropy tests: uuid uses getrandom 0.4 for v4 generation
 uuid = { version = "1", features = ["v4", "rng-getrandom"] }
+# FX2: full draft-2020-12 validation of reports against the schema
+jsonschema = { version = "0.30", default-features = false }
+fixture-turn-based = { package = "fixture_turn_based", path = "fixtures/turn_based" }
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -1,0 +1,14 @@
+{
+  "status": "pass",
+  "scaffold": "adapter",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_report": [],
+  "must_not_report": [],
+  "liveness": {
+    "mode": "after_intent",
+    "timeout_s": 2.0
+  }
+}
