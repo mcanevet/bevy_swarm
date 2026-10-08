@@ -134,6 +134,23 @@ pub fn can_update(category: &str) -> bool {
 /// Schema version helper: current version is 1 (until v0.2 release).
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// ISO-8601 UTC timestamp for a SystemTime (no chrono dep).
+pub fn iso_timestamp(t: SystemTime) -> String {
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let secs_of_day = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60
+    )
+}
+
 /// Generate a run ID: `<UTC_yyyyMMddTHHmmss>-<8hex-of-scenario+seed-hash>`
 pub fn run_id(scenario_hash: u64, seed: u64) -> String {
     let (year, month, day, hour, minute, second) = utc_now_components();

@@ -133,10 +133,10 @@ pub fn run_matrix(
                     // A structured scenario error (rejection etc.) is
                     // reported as a Crash-status outcome, not a torn-down
                     // whole matrix.
-                    Err(_) => BranchOutcome {
+                    Err(e) => BranchOutcome {
                         variant_name: name,
                         ticks_run: 0,
-                        report: PlaytestReport::crashed_empty(),
+                        report: PlaytestReport::scenario_error(&e.to_string()),
                     },
                 };
                 results.lock().unwrap().push((idx, outcome));

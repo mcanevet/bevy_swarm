@@ -288,6 +288,28 @@ impl PlaytestReport {
     }
 }
 
+impl PlaytestReport {
+    /// FX4.3: a scenario rejected before running gets a Crash-status
+    /// report WITH a scenario_error violation (not an empty one), so
+    /// aggregation counts it as a failure instead of 0 violations.
+    pub fn scenario_error(msg: &str) -> Self {
+        let mut rep = Self::crashed_empty();
+        rep.error = Some(msg.to_string());
+        rep.violations = vec![crate::state::ViolationEntry {
+            rule: crate::rules::SCENARIO_ERROR.to_string(),
+            target: "scenario".to_string(),
+            first_frame: 0,
+            last_frame: 0,
+            count: 1,
+            detail: msg.to_string(),
+            last_detail: msg.to_string(),
+            fingerprint: None,
+            fingerprint_scheme: 1,
+        }];
+        rep
+    }
+}
+
 /// Run a validated scenario against an already-built headless App.
 ///
 /// Contract requirements, enforced loudly (a missing contract piece is a

@@ -62,17 +62,34 @@ pub fn headless_platform() -> PluginGroupBuilder {
         ..default()
     });
 
+    // FX4.6: strip OS/GPU/process-global plugins by TYPE PRESENCE in
+    // the group — independent of bevy_swarm's own feature cfgs. A game
+    // compiled with default bevy features pulls in WinitPlugin (needs
+    // a display), AudioPlugin (rodio), GilrsPlugin (controllers), and
+    // TerminalCtrlPlugin (Ctrl-C handlers) — all unusable or unwanted
+    // in a headless harness. `contains` guards the disables so this
+    // stays correct for any feature combination.
+    // Winit: requires an event loop; without DISPLAY it panics in build.
+    let group = {
+        #[cfg(feature = "winit")]
+        let group = if group.contains::<bevy_winit::WinitPlugin>() {
+            group.disable::<bevy_winit::WinitPlugin>()
+        } else {
+            group
+        };
+        #[cfg(not(feature = "winit"))]
+        let group = group;
+        group
+    };
+
     // With a render feature enabled (e.g. via `agent` or `render`),
     // DefaultPlugins includes RenderPlugin, which requires a GPU at
     // finish(). Disable it so the platform stays headless.
     #[cfg(any(feature = "render", feature = "agent"))]
-    let group = {
-        use bevy::render::RenderPlugin;
-        if group.contains::<RenderPlugin>() {
-            group.disable::<RenderPlugin>()
-        } else {
-            group
-        }
+    let group = if group.contains::<bevy::render::RenderPlugin>() {
+        group.disable::<bevy::render::RenderPlugin>()
+    } else {
+        group
     };
 
     group

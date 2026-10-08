@@ -26,7 +26,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use crate::branch::InProcess;
 use crate::enums::PlaytestStatus;
@@ -105,8 +105,11 @@ impl AutotestConfig {
 }
 
 fn default_chaos_scenario() -> Scenario {
+    // FX4.2: match the library defaults — single_threaded: true
+    // (reproducibility), deny_ambiguities: false (many games have
+    // benign ambiguities; ambiguity rejection is opt-in).
     serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":0},"duration_s":20.0,"invariants":[],"deny_ambiguities":true,"single_threaded":false}"#,
+        r#"{"bot":{"type":"chaos","seed":0},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap()
 }
@@ -131,6 +134,9 @@ pub struct AutotestReport {
     pub coverage: Option<Coverage>,
     /// Wall-clock timing.
     pub timing: TimingSummary,
+    /// FX4.5: stable run identifier (conventions::run_id) — prevents
+    /// directory collisions between consecutive autotests.
+    pub run_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -175,8 +181,8 @@ impl AutotestReport {
             self.timing.elapsed_ms / 1000,
             (100.0
                 * (self.scope.seeds_run as f32
-                    - self.failures.iter().map(|f| f.occurrences).sum::<u64>() as f32)
-                / self.scope.seeds_run as f32) as u32
+                    - self.runs.iter().filter(|r| r.status != "pass").count() as f32)
+                / self.scope.seeds_run.max(1) as f32) as u32
         )
     }
 }
@@ -188,7 +194,30 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     config: AutotestConfig,
 ) -> Result<AutotestReport, Box<dyn std::error::Error>> {
     let start = Instant::now();
-    let start_iso = format!("{}", start.elapsed().as_secs());
+    let start_ts = SystemTime::now();
+    let start_iso = crate::conventions::iso_timestamp(start_ts);
+
+    // FX4.5: apply environment overrides on top of the explicit config
+    // (BEVY_SWARM_SEEDS / _DURATION / _THREADS win when set).
+    let mut config = config;
+    if let Some(n) = std::env::var(ENV_SEEDS)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        config.num_seeds = n;
+    }
+    if let Some(d) = std::env::var(ENV_DURATION)
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        config.duration_s = d;
+    }
+    if let Some(th) = std::env::var(ENV_THREADS)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        config.parallel = th;
+    }
 
     // Build the headless app factory (Z2): headless_app RETURNS a
     // builder closure; call it per run.
@@ -214,9 +243,12 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         .collect();
 
     let matrix_results = crate::branch::run_matrix(&runner, variants, config.parallel);
+    let end_ts = SystemTime::now();
+    let elapsed_ms_total = start.elapsed().as_millis() as u64;
 
     // Aggregate results from BranchMatrixReport.
     let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
+    let num_runs_f32 = config.num_seeds.max(1) as f64;
     for outcome in matrix_results?.outcomes {
         let seed: u64 = outcome
             .variant_name
@@ -225,7 +257,7 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
             .parse()
             .unwrap_or(0);
         let rep = outcome.report;
-        let elapsed_ms = outcome.ticks_run; // Approximate timing from ticks
+        let elapsed_ms = (elapsed_ms_total as f64 / num_runs_f32) as u64;
 
         let status = match rep.status {
             PlaytestStatus::Pass => "pass",
@@ -261,8 +293,6 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     }
 
     let failures: Vec<FingerprintSummary> = failures_by_fp.into_values().collect();
-    let elapsed_ms = start.elapsed().as_millis() as u64;
-    let end_iso = format!("{}", start.elapsed().as_secs());
     let report = AutotestReport {
         schema_version: "0.1.0".to_string(),
         contract_tier: "tier-0".to_string(),
@@ -277,9 +307,13 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         coverage: Some(aggregate_coverage),
         timing: TimingSummary {
             start: start_iso,
-            end: end_iso,
-            elapsed_ms,
+            end: crate::conventions::iso_timestamp(end_ts),
+            elapsed_ms: elapsed_ms_total,
         },
+        run_id: Some(crate::conventions::run_id(
+            elapsed_ms_total,
+            config.num_seeds,
+        )),
     };
 
     // Write report to disk.
@@ -296,9 +330,15 @@ fn write_report(
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
 
-    let run_dir = target_dir
-        .join(output_dir)
-        .join(format!("autotest-{}", report.timing.elapsed_ms));
+    // FX4.5: use conventions::run_id (timestamp + hash) so consecutive
+    // autotests never collide on the same directory.
+    let run_dir = target_dir.join(output_dir).join(format!(
+        "autotest-{}",
+        report
+            .run_id
+            .clone()
+            .unwrap_or_else(|| crate::conventions::run_id(0, report.timing.elapsed_ms))
+    ));
     std::fs::create_dir_all(&run_dir)?;
 
     let report_path = run_dir.join("report.json");
@@ -353,6 +393,7 @@ mod tests {
                 end: "".to_string(),
                 elapsed_ms: 5000,
             },
+            run_id: None,
         };
 
         let summary = report.summary();
