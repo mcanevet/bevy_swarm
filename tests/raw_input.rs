@@ -233,3 +233,162 @@ fn raw_gamepad_reports_disabled_violation() {
         .iter()
         .any(|(_, e)| e.rule == "raw_gamepad_disabled"));
 }
+
+// ---------------------------------------------------------------------------
+// FX8: state-effect tests (RED on main — raw input wrote events Bevy's
+// input systems never consumed, so ButtonInput/Gamepad never changed).
+// ---------------------------------------------------------------------------
+
+fn build_input_fixture() -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        bevy::input::InputPlugin,
+        TestConventionsPlugin,
+        PlaytestPlugin,
+    ));
+    app.add_message::<bevy::window::WindowEvent>();
+    #[cfg(feature = "gamepad")]
+    {
+        app.add_message::<bevy::input::gamepad::GamepadConnectionEvent>();
+        app.add_message::<bevy::input::gamepad::RawGamepadButtonChangedEvent>();
+        app.add_message::<bevy::input::gamepad::RawGamepadAxisChangedEvent>();
+    }
+    app.insert_resource(IntentSurface::new(vec![
+        SurfaceVariant::Choice(3),
+        SurfaceVariant::Wait,
+    ]));
+    app.world_mut().spawn((
+        Name::new("Player"),
+        Gameplay,
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
+    app.world_mut()
+        .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+    app
+}
+
+/// Key press must reach ButtonInput<KeyCode> SAME-FRAME.
+#[test]
+fn fx8_key_press_reaches_button_input() {
+    let mut app = build_input_fixture();
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::Key {
+                key: "ArrowRight".to_string(),
+                hold_frames: 1,
+            },
+        ));
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(
+        keys.pressed(KeyCode::ArrowRight),
+        "key press must reach ButtonInput<KeyCode> the same frame"
+    );
+}
+
+/// Mouse press must reach ButtonInput<MouseButton> (not just a WindowEvent).
+#[test]
+fn fx8_mouse_press_reaches_button_input() {
+    let mut app = build_input_fixture();
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::MouseButton {
+                button: MouseBtn::Left,
+                hold_frames: 1,
+            },
+        ));
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+    let buttons = app.world().resource::<ButtonInput<MouseButton>>();
+    assert!(
+        buttons.pressed(MouseButton::Left),
+        "mouse press must reach ButtonInput<MouseButton>"
+    );
+}
+
+/// Gamepad button must reach Gamepad::pressed (via RawGamepadEvent::Button).
+#[cfg(feature = "gamepad")]
+#[test]
+fn fx8_gamepad_button_reaches_gamepad_state() {
+    use bevy::input::gamepad::Gamepad;
+
+    let mut app = build_input_fixture();
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::GamepadButton {
+                button: "South".to_string(),
+                hold_frames: 1,
+            },
+        ));
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+
+    for pad in app.world_mut().query::<&Gamepad>().iter(app.world()) {
+        assert!(
+            pad.pressed(bevy::input::gamepad::GamepadButton::South),
+            "gamepad button press must reach Gamepad component state"
+        );
+    }
+}
+
+/// hold_frames: button released after N frames.
+#[test]
+fn fx8_hold_frames_releases() {
+    let mut app = build_input_fixture();
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::Key {
+                key: "KeyA".to_string(),
+                hold_frames: 1,
+            },
+        ));
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+    assert!(
+        app.world()
+            .resource::<ButtonInput<KeyCode>>()
+            .pressed(KeyCode::KeyA),
+        "held on frame 0"
+    );
+
+    // Frame 1: hold expired — must be released.
+    app.world_mut().resource_mut::<PlaytestState>().frame = 1;
+    app.update();
+    assert!(
+        !app.world()
+            .resource::<ButtonInput<KeyCode>>()
+            .pressed(KeyCode::KeyA),
+        "hold_frames=1 must release after 1 frame"
+    );
+}
