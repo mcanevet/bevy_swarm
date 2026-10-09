@@ -16,7 +16,8 @@ Expectation files (X2) reference only these names.
 | `NONDETERMINISTIC` | `nondeterministic` | determinism |
 | `GOLDEN_DIVERGED` | `golden_diverged` | determinism |
 | `DEAD_WIDGET` | `dead_widget` | informational |
-| `DEAD_VERB` | `dead_verb` | informational |
+| `DEAD_VERB` | `dead_verb` | major |
+| `TRANSFORM_DESYNC` | `transform_desync` | major |
 | `PERF_BUDGET_EXCEEDED` | `perf_budget_exceeded` | informational |
 
 Notes:

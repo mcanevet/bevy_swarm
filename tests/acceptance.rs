@@ -8,7 +8,7 @@
 //! - strict xfail semantics for "pending" cases
 //! - prints a summary: passed / pending / failed / unexpected passes
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug)]
@@ -135,6 +135,11 @@ fn build_scenario(expectation: &serde_json::Value) -> String {
     }
     if let Some(liveness) = expectation.get("liveness") {
         scenario["liveness"] = liveness.clone();
+    }
+    // An explicit bot (e.g. a deterministic replay forcing a corner
+    // condition) overrides the default chaos bot.
+    if let Some(bot) = expectation.get("bot") {
+        scenario["bot"] = bot.clone();
     }
     if let Some(rate) = expectation.get("input_rate_hz").and_then(|r| r.as_u64()) {
         scenario["bot"]["input_rate_hz"] = serde_json::json!(rate);
@@ -533,17 +538,46 @@ fn pending_expectations_reference_open_beads() {
 }
 
 /// FX1 meta-test: clean fixtures with long duration must have zero violations.
-/// Currently fails (frozen_world + dead_verb false positives) — proves the bug.
+/// Iterates the fixtures directory (not a hardcoded list) so new
+/// fixtures are automatically covered.
 #[test]
 fn clean_fixtures_pass_long() {
-    let fixtures = ["walker", "spinner", "turn_based", "regression_pair"];
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixtures_dir = manifest.join("fixtures");
+    let mut fixtures: Vec<String> = std::fs::read_dir(&fixtures_dir)
+        .expect("fixtures dir exists")
+        .filter_map(|e| {
+            let p = e.ok()?.path();
+            if p.is_dir() {
+                p.file_name()?.to_str().map(String::from)
+            } else {
+                None
+            }
+        })
+        .collect();
+    fixtures.sort();
+    assert!(
+        fixtures.len() >= 5,
+        "expected at least 5 fixtures, found {:?}",
+        fixtures
+    );
     for fixture in &fixtures {
+        // Spawner is self-limiting by design (spawn 10, then idle) —
+        // a clean quiescent real-time game. Its acceptance expectation
+        // declares liveness mode off; mirror that here. (FX1 re-review:
+        // the harness adapter no longer lies with a TurnBased tag.)
+        let liveness = if fixture == "spawner" {
+            serde_json::json!({"mode": "off"})
+        } else {
+            serde_json::json!({"mode": "real_time"})
+        };
         for seed in 1..=8 {
             let scenario = serde_json::json!({
                 "bot": {"type": "chaos", "seed": seed},
                 "duration_s": 6.0,
                 "invariants": [],
-                "setup": {}
+                "setup": {},
+                "liveness": liveness
             })
             .to_string();
             let report = run_case_with_scenario(fixture, "clean", &scenario);
@@ -563,5 +597,77 @@ fn clean_fixtures_pass_long() {
                 violations
             );
         }
+    }
+}
+
+/// FX1 re-review: a swallow-everything softlock (bug_softlock_turn_4)
+/// must be detected EVEN WHILE THE BOT KEEPS RETRYING — the stuck
+/// streak counts time since the last successful reaction, not since
+/// the last attempt. With timeout 2.0s and a default-rate bot, the
+/// old code never fired (idle resets on every retry).
+#[test]
+fn softlock_detected_while_bot_retries() {
+    for timeout_s in [0.5f64, 2.0] {
+        let scenario = serde_json::json!({
+            "bot": {"type": "chaos", "seed": 42},
+            "duration_s": 10.0,
+            "invariants": [],
+            "setup": {},
+            "liveness": {"mode": "after_intent", "timeout_s": timeout_s}
+        })
+        .to_string();
+        let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+        let stuck = report["violations"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("stuck_after_intent"))
+            })
+            .unwrap_or(false);
+        assert!(
+            stuck,
+            "bug_softlock_turn_4 (timeout {}s) not detected — stuck streak broken?",
+            timeout_s
+        );
+    }
+}
+
+/// FX1 re-review: Wait intents must NOT arm the stuck_after_intent
+/// check. Clean turn_based with a tight 0.5s timeout over 8 seeds
+/// must report ZERO stuck_after_intent violations.
+#[test]
+fn clean_turn_based_no_stuck_on_wait() {
+    for seed in 1..=8u64 {
+        let scenario = serde_json::json!({
+            "bot": {"type": "chaos", "seed": seed},
+            "duration_s": 3.0,
+            "invariants": [],
+            "setup": {},
+            "liveness": {"mode": "after_intent", "timeout_s": 0.5}
+        })
+        .to_string();
+        let report = run_case_with_scenario("turn_based", "clean", &scenario);
+        let stuck: Vec<String> = report["violations"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter(|v| {
+                        v.get("rule").and_then(|r| r.as_str()) == Some("stuck_after_intent")
+                    })
+                    .filter_map(|v| {
+                        v.get("detail")
+                            .or_else(|| v.get("last_detail"))
+                            .and_then(|d| d.as_str())
+                            .map(String::from)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            stuck.is_empty(),
+            "clean turn_based seed={} fired stuck_after_intent on Wait intents: {:?}",
+            seed,
+            stuck
+        );
     }
 }

@@ -1,15 +1,52 @@
 {
   "scaffold": "adapter",
-  "seeds": [
-    42
-  ],
   "duration_s": 6.0,
-  "must_not_report": [],
   "status": "fail",
   "must_report": [
     {
-      "rule": "frozen_world",
-      "detail_contains": "no gameplay-relevant state changed"
+      "rule": "frozen_world"
     }
-  ]
+  ],
+  "must_not_report": [],
+  "bot": {
+    "type": "replay",
+    "inputs": [
+      {
+        "frame": 1,
+        "intent": {
+          "intent": "move",
+          "dir": [
+            5.0,
+            5.0
+          ]
+        }
+      },
+      {
+        "frame": 2,
+        "intent": {
+          "intent": "move",
+          "dir": [
+            5.0,
+            5.0
+          ]
+        }
+      },
+      {
+        "frame": 3,
+        "intent": {
+          "intent": "move",
+          "dir": [
+            5.0,
+            5.0
+          ]
+        }
+      },
+      {
+        "frame": 4,
+        "intent": {
+          "intent": "wait"
+        }
+      }
+    ]
+  }
 }

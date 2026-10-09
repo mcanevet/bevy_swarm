@@ -19,5 +19,8 @@
     }
   ],
   "must_report": [],
-  "must_not_report": []
+  "must_not_report": [],
+  "liveness": {
+    "mode": "off"
+  }
 }

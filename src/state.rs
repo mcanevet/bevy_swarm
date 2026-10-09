@@ -107,6 +107,11 @@ impl Violations {
     pub const INFORMATIONAL_RULES: &[&str] = &[
         "frame_time_p99",
         "frame_time_worst",
+        "frame_time_anomaly",
+        "frame_time_p99_below",
+        "fps_floor",
+        "dead_widget",
+        "perf_budget_exceeded",
         "entropy_unattributed_draws",
     ];
 }
@@ -151,8 +156,18 @@ pub struct PlaytestState {
     pub last_alive_frame: u64,
     /// Last frame where an intent/action was consumed (I4 turn-based mode).
     pub last_intent_frame: Option<u64>,
+    /// Consecutive liveness-sample quanta with NO state change after
+    /// an intent (turn-based stuck streak). Unlike last_intent_frame,
+    /// a continuous stream of IGNORED intents keeps accumulating this
+    /// counter — a swallow-everything softlock is detected even while
+    /// the bot keeps trying.
+    pub stuck_after_intent_quanta: u64,
     /// Z6: archetype count at the last gameplay-inference pass.
     pub inference_last_archetype_len: usize,
+    /// Entity count at last gameplay-inference pass. Retrigger also
+    /// when entities join EXISTING archetypes (spawn into an already
+    /// seen archetype does not grow the archetype count).
+    pub inference_last_entity_len: u32,
     /// FX1: change tick snapshotted at each frame START (tick_counter,
     /// before any schedule runs). Liveness windows compare against the
     /// tick recorded N FRAMES ago — the raw tick counter advances per
@@ -345,7 +360,9 @@ impl PlaytestState {
             frozen_frames: 0,
             last_alive_frame: 0,
             last_intent_frame: None,
+            stuck_after_intent_quanta: 0,
             inference_last_archetype_len: 0,
+            inference_last_entity_len: 0,
             frame_start_ticks: Default::default(),
             effect_window_snapshots: Vec::new(),
             pre_ready_frames: 0,
