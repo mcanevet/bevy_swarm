@@ -122,6 +122,8 @@ pub struct PlaytestState {
     pub metrics: Metrics,
     pub delta_windows: HashMap<String, std::collections::VecDeque<(u64, f64)>>, // rule -> samples
     pub(crate) warned_paths: HashSet<String>,
+    /// FX12 (I4): one-shot — liveness.mode was off this run.
+    pub(crate) warned_liveness_off: bool,
     pub coverage: Coverage,
     /// Execution-time oracle state (Welford per-frame stats).
     pub frame_timing: FrameTimingStats,
@@ -285,24 +287,16 @@ pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
 /// systems whose last_run tick ADVANCED past the pre-run snapshot.
 /// A `before` snapshot of None-entry means the system was added
 /// mid-run (still counts as executed).
-/// Harness module paths: systems defined in these bevy_swarm modules
-/// are the harness's own (they run every frame or under run conditions
-/// and would inflate fraction()). Test-fixture or game systems defined
-/// elsewhere in the crate (e.g. bevy_swarm::verify:: under cfg(test))
-/// are NOT excluded.
-const HARNESS_MODULES: &[&str] = &[
-    "bevy_swarm::bots::",
-    "bevy_swarm::oracles::",
-    "bevy_swarm::planner::",
-    "bevy_swarm::state::",
-    "bevy_swarm::driver::",
-    "bevy_swarm::scenario::",
-    "bevy_swarm::contract::",
-    "bevy_swarm::diagnostics::",
-];
-
+/// FX12 (C3): harness systems are excluded from game coverage. The
+/// original hardcoded list of 8 modules silently went stale — newer
+/// harness modules (liveness, effects, raw_input, identity, sinks,
+/// game_types) inflated game coverage. Matching the whole `bevy_swarm`
+/// crate prefix is exhaustive by construction: every harness system
+/// lives there, and games/fxtures define their systems elsewhere.
+/// bevy_swarm::verify:: under cfg(test) is exempted explicitly so
+/// coverage of TEST-game systems is still measurable in unit tests.
 pub fn is_harness_system(name: &str) -> bool {
-    HARNESS_MODULES.iter().any(|m| name.contains(m))
+    name.contains("bevy_swarm::") && !name.contains("bevy_swarm::verify::")
 }
 
 pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> SystemCoverage {
@@ -343,6 +337,7 @@ impl PlaytestState {
             metrics: Metrics::default(),
             delta_windows: HashMap::default(),
             warned_paths: HashSet::default(),
+            warned_liveness_off: false,
             coverage: Coverage::default(),
             frame_timing: FrameTimingStats::default(),
             api_history: HashMap::default(),

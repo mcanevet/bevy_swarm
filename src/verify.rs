@@ -2711,10 +2711,12 @@ fn sweep_replays_regressions_first() {
         parallel: 1,
         minimize: false,
     };
-    let (records, sweep) =
-        crate::sweep::run_regressions_and_sweep(&runner, base, cfg, &dir).unwrap();
-    assert!(records.is_empty(), "empty dir → no regressions loaded");
-    assert_eq!(sweep.seeds_run, 3);
-    assert!(sweep.failures.is_empty(), "clean game → no failures");
+    let report = crate::sweep::run_regressions_and_sweep(&runner, base, cfg, &dir).unwrap();
+    assert!(
+        report.replays.is_empty(),
+        "empty dir → no regressions loaded"
+    );
+    assert_eq!(report.sweep.seeds_run, 3);
+    assert!(report.sweep.failures.is_empty(), "clean game → no failures");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -13,7 +13,7 @@ use bevy::app::App;
 /// Outcome of a single variant in a branch matrix: how many ticks ran
 /// before the status was decided, and the report (if the run reached
 /// completion or crashed; early-stopped branches carry a partial report).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BranchOutcome {
     /// Human-readable variant name (from the scenario's bot config or caller)
     pub variant_name: String,
@@ -31,7 +31,7 @@ impl BranchOutcome {
 }
 
 /// Result of a branch matrix run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BranchMatrixReport {
     /// Ordered outcomes — same order as input scenarios.
     pub outcomes: Vec<BranchOutcome>,
@@ -123,7 +123,21 @@ pub fn run_matrix(
             let results = Arc::clone(&results);
             // Fresh thread per scenario (never a pooled worker).
             let handle = s.spawn(move || {
-                let res = runner.run(&scenario);
+                // FX12 (E1): a panic in the app factory (OUTSIDE
+                // run_scenario's catch_unwind) must not tear down the
+                // whole matrix via join().unwrap() — catch it and
+                // degrade to a Crash outcome for THIS scenario only.
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runner.run(&scenario)
+                }));
+                let res = res.unwrap_or_else(|payload| {
+                    let msg = payload
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "scenario runner panicked".to_string());
+                    Err(ScenarioError::Rejected(msg))
+                });
                 let outcome = match res {
                     Ok(report) => BranchOutcome {
                         variant_name: name,
@@ -174,3 +188,57 @@ pub fn run_branch_matrix(
 }
 
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noop_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::MinimalPlugins);
+        app
+    }
+
+    #[test]
+    fn fx12_panic_in_one_scenario_is_isolated() {
+        // Factory panics for seed 7 (outside run_scenario's
+        // catch_unwind — in the app factory). The OTHER scenarios must
+        // still complete and the matrix must survive.
+        struct PanicOnSeven;
+        impl ScenarioRunner for PanicOnSeven {
+            fn run(&self, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
+                if scenario.bot.seed == 7 {
+                    panic!("factory blew up");
+                }
+                let mut app = noop_app();
+                run_scenario(&mut app, scenario)
+            }
+        }
+        let variants: Vec<(String, Scenario)> = (1..=9)
+            .map(|seed| {
+                (
+                    format!("s{seed}"),
+                    serde_json::from_str(&format!(
+                        r#"{{"bot":{{"type":"chaos","seed":{seed}}},"duration_s":0.05,"invariants":[]}}"#
+                    ))
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let matrix = run_matrix(&PanicOnSeven, variants, 4).expect("matrix survives");
+        assert_eq!(matrix.outcomes.len(), 9);
+        // Seed 7's outcome is a Crash, not a torn-down matrix.
+        let panicked = matrix
+            .outcomes
+            .iter()
+            .find(|o| o.variant_name == "s7")
+            .expect("outcome for seed 7");
+        assert_eq!(panicked.report.status, crate::enums::PlaytestStatus::Crash);
+    }
+
+    #[test]
+    fn fx12_branch_matrix_report_serializes() {
+        let report = BranchMatrixReport { outcomes: vec![] };
+        serde_json::to_string(&report).expect("BranchMatrixReport is Serialize");
+    }
+}

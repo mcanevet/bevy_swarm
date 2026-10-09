@@ -66,6 +66,10 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     };
     let liveness = scenario_res.0.liveness.clone();
     if matches!(liveness.mode, crate::scenario::LivenessMode::Off) {
+        // FX12 (I4): liveness off must be LOUD — recorded in
+        // report.warnings (surfaced by the driver) so a disabled
+        // oracle is never mistaken for a green run.
+        world.resource_mut::<PlaytestState>().warned_liveness_off = true;
         return;
     }
     let (frame, tps, last_intent_frame) = {
@@ -212,6 +216,24 @@ fn frame_start_tick_of(state: &PlaytestState, target: u64) -> Option<u32> {
 /// GameTypes crate prefixes; engine resources (bevy_transform etc.)
 /// churn every frame and would mask a frozen world.
 pub fn game_resource_changed_since(world: &World, since: Tick, now: Tick) -> bool {
+    // FX12 (I4): explicitly WATCHED resources (liveness.watch) count
+    // as liveness signals regardless of GameTypes prefixes.
+    let watched: Vec<String> = world
+        .get_resource::<ScenarioResource>()
+        .map(|s| s.0.liveness.watch.clone())
+        .unwrap_or_default();
+    if !watched.is_empty() {
+        for (id, info, _) in world.iter_resources() {
+            let name = info.name().to_string();
+            if watched.iter().any(|w| name.contains(w.as_str())) {
+                if let Some(ticks) = world.get_resource_change_ticks_by_id(id) {
+                    if ticks.is_changed(since, now) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     let prefixes: Vec<String> = world
         .get_resource::<crate::game_types::GameTypes>()
         .map(|gt| gt.prefixes.clone())

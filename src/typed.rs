@@ -26,6 +26,14 @@ pub struct TypedRegistry {
         std::collections::HashMap<String, SystemId<(), Option<crate::contract::UserIntent>>>,
 }
 
+impl TypedRegistry {
+    /// FX12 (I3): registered goal-predicate names (load-time
+    /// validation of planner trees).
+    pub fn predicate_names(&self) -> Vec<String> {
+        self.predicates.keys().cloned().collect()
+    }
+}
+
 /// Extension trait for registering typed oracles/predicates/policies.
 pub trait PlaytestAppExt {
     /// Register a named oracle system (evaluated every frame in Oracles set).

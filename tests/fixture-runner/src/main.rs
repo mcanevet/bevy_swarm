@@ -2,7 +2,7 @@
 
 use bevy_swarm::contract::{IntentSurface, SurfaceVariant};
 use bevy_swarm::conventions;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
+use bevy_swarm::driver::PlaytestPlugin;
 use bevy_swarm::scenario::Scenario;
 use fixture_runner::{
     headless_app, write_report, RegressionPairAdapterPlugin, SpawnerAdapterPlugin,
@@ -41,47 +41,54 @@ fn main() {
 
     let scenario: Scenario = serde_json::from_str(&scenario_json).expect("parse scenario");
 
-    let mut app = headless_app();
-    app.add_plugins(bevy_swarm::contract::TestConventionsPlugin);
-    app.add_plugins(PlaytestPlugin);
-    // Insert AFTER TestConventionsPlugin so it persists
+    // FX12 (E1): build the app via a factory closure, then run through
+    // InProcess (ScenarioRunner trait) — the binary now exercises the
+    // same execution path as matrix/sweep consumers.
+    let build_app = || {
+        let mut app = headless_app();
+        app.add_plugins(bevy_swarm::contract::TestConventionsPlugin);
+        app.add_plugins(PlaytestPlugin);
+        // Insert AFTER TestConventionsPlugin so it persists
 
-    match fixture.as_str() {
-        "spinner" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(SpinnerAdapterPlugin);
-            app.add_plugins(fixture_spinner::SpinnerGamePlugin);
+        match fixture.as_str() {
+            "spinner" => {
+                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+                app.add_plugins(SpinnerAdapterPlugin);
+                app.add_plugins(fixture_spinner::SpinnerGamePlugin);
+            }
+            "walker" => {
+                app.insert_resource(IntentSurface::new(vec![
+                    SurfaceVariant::Move,
+                    SurfaceVariant::Wait,
+                ]));
+                app.add_plugins(WalkerAdapterPlugin);
+                app.add_plugins(fixture_walker::WalkerGamePlugin);
+            }
+            "spawner" => {
+                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+                app.add_plugins(SpawnerAdapterPlugin);
+                app.add_plugins(fixture_spawner::SpawnerGamePlugin);
+            }
+            "turn_based" => {
+                app.insert_resource(IntentSurface::new(vec![
+                    SurfaceVariant::Choice(3),
+                    SurfaceVariant::Wait,
+                ]));
+                app.add_plugins(TurnBasedAdapterPlugin);
+                app.add_plugins(fixture_turn_based::TurnBasedGamePlugin);
+            }
+            "regression_pair" => {
+                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+                app.add_plugins(RegressionPairAdapterPlugin);
+                app.add_plugins(fixture_regression_pair::RegressionPairGamePlugin);
+            }
+            _ => panic!("unknown fixture: {}", fixture),
         }
-        "walker" => {
-            app.insert_resource(IntentSurface::new(vec![
-                SurfaceVariant::Move,
-                SurfaceVariant::Wait,
-            ]));
-            app.add_plugins(WalkerAdapterPlugin);
-            app.add_plugins(fixture_walker::WalkerGamePlugin);
-        }
-        "spawner" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(SpawnerAdapterPlugin);
-            app.add_plugins(fixture_spawner::SpawnerGamePlugin);
-        }
-        "turn_based" => {
-            app.insert_resource(IntentSurface::new(vec![
-                SurfaceVariant::Choice(3),
-                SurfaceVariant::Wait,
-            ]));
-            app.add_plugins(TurnBasedAdapterPlugin);
-            app.add_plugins(fixture_turn_based::TurnBasedGamePlugin);
-        }
-        "regression_pair" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(RegressionPairAdapterPlugin);
-            app.add_plugins(fixture_regression_pair::RegressionPairGamePlugin);
-        }
-        _ => panic!("unknown fixture: {}", fixture),
-    }
+        app
+    };
 
-    let report = run_scenario(&mut app, &scenario).expect("run scenario");
+    let runner = bevy_swarm::branch::InProcess { factory: build_app };
+    let report = bevy_swarm::branch::ScenarioRunner::run(&runner, &scenario).expect("run scenario");
     let scenario_hash = serde_json::to_string(&scenario)
         .map(|s| {
             let mut h = 0xcbf29ce484222325u64;

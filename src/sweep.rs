@@ -59,6 +59,10 @@ pub struct SweepReport {
 /// Run a seed sweep over the configured range, deduplicating by
 /// fingerprint (T1). Early-stop at max_failures if set. Optionally
 /// minimizes failures (B2).
+///
+/// FX12 (E3): runs in PARALLEL via the E1 matrix (was sequential);
+/// a single ScenarioError no longer aborts the sweep — it becomes a
+/// Crash-status failure for that seed only.
 pub fn sweep_seeds<F: Fn() -> bevy::app::App + Sync>(
     runner: &InProcess<F>,
     base_scenario: Scenario,
@@ -69,19 +73,41 @@ pub fn sweep_seeds<F: Fn() -> bevy::app::App + Sync>(
     let mut seeds_run: u64 = 0;
     let mut early_stop = false;
 
-    for seed in config.start_seed..=config.end_seed {
-        let mut scenario = base_scenario.clone();
-        scenario.bot.seed = seed;
-        let rep = runner.run(&scenario)?;
-        seeds_run += 1;
+    let variants: Vec<(String, Scenario)> = (config.start_seed..=config.end_seed)
+        .map(|seed| {
+            let mut scenario = base_scenario.clone();
+            scenario.bot.seed = seed;
+            (format!("seed-{seed}"), scenario)
+        })
+        .collect();
+    // FX12 (E3): parallel via E1's run_matrix (panic-isolated).
+    let matrix = crate::branch::run_matrix(runner, variants, config.parallel.max(1))?;
 
+    for outcome in &matrix.outcomes {
+        seeds_run += 1;
+        let rep = &outcome.report;
+        // FX12 (E3): scenario errors surface as Crash status —
+        // recorded as a synthetic failure, not an abort.
+        if rep.status == crate::enums::PlaytestStatus::Crash && rep.violations.is_empty() {
+            if let Some(err) = &rep.error {
+                failures.push(SweepFailure {
+                    seed: 0,
+                    fingerprint: Fingerprint(format!("crash:{err}")),
+                    rule: "scenario_error".to_string(),
+                });
+            }
+        }
         // Extract fingerprints from violations (T1)
         for v in &rep.violations {
             if let Some(fp) = &v.fingerprint {
                 if !seen_fps.contains(fp) {
                     seen_fps.insert(fp.clone());
                     failures.push(SweepFailure {
-                        seed,
+                        seed: outcome
+                            .variant_name
+                            .strip_prefix("seed-")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0),
                         fingerprint: fp.clone(),
                         rule: v.rule.clone(),
                     });
@@ -169,20 +195,69 @@ pub fn write_regression(record: &RegressionRecord, dir: &Path) -> Result<(), std
     fs::write(dir.join(filename), serde_json::to_string_pretty(record)?)
 }
 
+/// Replay outcome for a persisted regression.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegressionReplay {
+    pub fingerprint: Fingerprint,
+    /// true = still reproduces (failures present); false = flaky/fixed.
+    pub still_fails: bool,
+}
+
+/// Combined report (FX12 E3): replay outcomes + sweep, serializable
+/// for embedding in the run report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegressionsAndSweepReport {
+    pub replays: Vec<RegressionReplay>,
+    pub sweep: SweepReport,
+}
+
+/// Should new regression files be written? U1 conventions:
+/// BEVY_SWARM_UPDATE=regressions (or =all).
+pub fn update_regressions_enabled() -> bool {
+    crate::conventions::can_update("regressions")
+}
+
 /// Run persisted regressions first (replay), then sweep new seeds.
-/// Returns a combined report.
+/// Returns a combined report. FX12 (E3): replay outcomes are TRACKED
+/// (still_fails), new failures are persisted (one file per
+/// fingerprint) when BEVY_SWARM_UPDATE=regressions, and one
+/// ScenarioError aborts only that seed (handled inside sweep_seeds).
 pub fn run_regressions_and_sweep<F: Fn() -> bevy::app::App + Sync>(
     runner: &InProcess<F>,
     base_scenario: Scenario,
     sweep_config: SweepConfig,
     reg_dir: &Path,
-) -> Result<(Vec<RegressionRecord>, SweepReport), Box<dyn std::error::Error>> {
+) -> Result<RegressionsAndSweepReport, Box<dyn std::error::Error>> {
     let records = load_regressions(reg_dir)?;
-    // Replay each regression (they should still fail)
+    let base_for_persist = base_scenario.clone();
+    // Replay each regression (they should still fail).
+    let mut replays = Vec::new();
     for rec in &records {
-        let _ = runner.run(&rec.scenario);
-        // TODO: track replay status; promote/quarantine logic later.
+        let rep = runner.run(&rec.scenario)?;
+        let still_fails = !matches!(rep.status, crate::enums::PlaytestStatus::Pass);
+        replays.push(RegressionReplay {
+            fingerprint: rec.fingerprint.clone(),
+            still_fails,
+        });
     }
     let sweep = sweep_seeds(runner, base_scenario, sweep_config)?;
-    Ok((records, sweep))
+    // FX12 (E3): persist new failures (one file per fingerprint) when
+    // the conventions update mode is on.
+    if update_regressions_enabled() {
+        for f in &sweep.failures {
+            let record = RegressionRecord {
+                schema_version: 1,
+                fingerprint: f.fingerprint.clone(),
+                found_by_seeds: vec![f.seed],
+                status: "staging".to_string(),
+                scenario: {
+                    let mut s = base_for_persist.clone();
+                    s.bot.seed = f.seed;
+                    s
+                },
+            };
+            write_regression(&record, reg_dir)?;
+        }
+    }
+    Ok(RegressionsAndSweepReport { replays, sweep })
 }

@@ -19,6 +19,19 @@ use crate::driver::ScenarioResource;
 // Invariants
 // ---------------------------------------------------------------------------
 
+// FX12 (H1): one-shot warning that an [idx] selector was used
+// (unstable across spawns/despawns). Thread-local — resolve_world_percept
+// only receives &World; cleared and surfaced per-run by the driver.
+thread_local! {
+    static WARNED_INDEX_SELECTOR: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Drain the idx-selector warning (driver calls this when building a report).
+pub fn take_index_selector_warning() -> Option<String> {
+    WARNED_INDEX_SELECTOR.with(|w| w.borrow_mut().take())
+}
+
 pub(crate) fn check_finite_transforms_system(
     q: Query<(Entity, &Transform), Changed<Transform>>,
     mut violations: ResMut<Violations>,
@@ -402,7 +415,20 @@ pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue
                     }
                 }
             }
-            Selector::Index(idx, _warn) => {
+            Selector::Index(idx, warn) => {
+                // FX12 (H1): one-time warning that [idx] selectors are
+                // unstable across despawns (prefer {Name} or @stable_id).
+                if warn {
+                    WARNED_INDEX_SELECTOR.with(|w| {
+                        let mut w = w.borrow_mut();
+                        if w.is_none() {
+                            *w = Some(format!(
+                                "[idx] selector on {}[{}] is unstable across spawns/despawns — prefer {{Name}} or @stable_id",
+                                type_path, idx
+                            ));
+                        }
+                    });
+                }
                 // Both [N] and the implicit first form use the sorted
                 // candidate list; the caller-visible warning about index
                 // instability is emitted where the report is built.
