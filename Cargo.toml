@@ -45,6 +45,8 @@ bevy = { workspace = true, features = [
     "bevy_camera",
     "bevy_log",
     "bevy_winit",
+    "x11",
+    "wayland",
     "bevy_audio",
     "bevy_gilrs",
     "bevy_render",
