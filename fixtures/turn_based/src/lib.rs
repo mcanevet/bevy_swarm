@@ -83,13 +83,14 @@ impl Plugin for TurnBasedGamePlugin {
                 app.add_systems(Update, card_played_softlock);
             }
             Some("thread_rng") => {
-                // Pending (swarm-1w8.13): nondeterministic entropy —
-                // clean behavior otherwise, expectation marked pending.
-                app.add_systems(Update, card_played_system);
+                // Nondeterministic entropy: same seed, different score
+                // deltas per run — breaks replay/determinism checks.
+                app.add_systems(Update, card_played_thread_rng_system);
             }
             Some("hashmap_order") => {
-                // Pending (swarm-1w8.13): iteration-order nondeterminism.
-                app.add_systems(Update, card_played_system);
+                // Iteration-order nondeterminism: score depends on
+                // HashMap iteration order.
+                app.add_systems(Update, card_played_hashmap_order_system);
             }
             Some("unconsumed_event") => {
                 // Pending (swarm-716.24): unconsumed_message oracle.
@@ -99,6 +100,42 @@ impl Plugin for TurnBasedGamePlugin {
                 app.add_systems(Update, card_played_system);
             }
         }
+    }
+}
+
+/// Thread RNG bug: non-deterministic entropy — same seed, different
+/// score deltas per run.
+fn card_played_thread_rng_system(mut events: MessageReader<CardPlayed>, mut score: ResMut<Score>) {
+    for _ev in events.read() {
+        // Non-deterministic: SystemTime varies per run.
+        let micros = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() % 10)
+            .unwrap_or(0) as i32
+            + 1;
+        score.0 += micros as f64;
+    }
+}
+
+/// HashMap order bug: score depends on HashMap iteration order.
+fn card_played_hashmap_order_system(
+    mut events: MessageReader<CardPlayed>,
+    mut score: ResMut<Score>,
+) {
+    use std::collections::HashMap;
+    let mut map: HashMap<i32, i32> = HashMap::new();
+    for i in 0..10 {
+        map.insert(i, i * 2);
+    }
+    for _ev in events.read() {
+        // Sum is order-independent... but assignment order affects
+        // overflow-sensitive consumers. Simulate iteration-order
+        // dependence by folding in map iteration order.
+        let mut acc = 0.0f64;
+        for v in map.values() {
+            acc += *v as f64 / 3.0;
+        }
+        score.0 = acc;
     }
 }
 

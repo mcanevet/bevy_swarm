@@ -566,7 +566,7 @@ pub fn planner_bot_system(world: &mut World) {
                         let intent = replay_intent_to_user(ri, world);
                         if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
                             violations.report(
-                                "planner_select_target_missing",
+                                crate::rules::PLANNER_SELECT_TARGET_MISSING,
                                 &miss,
                                 format!(
                                     "planner Select target '{miss}' not found in identity index"
@@ -606,7 +606,7 @@ pub fn planner_bot_system(world: &mut World) {
                         let intent = replay_intent_to_user(ri, world);
                         if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
                             violations.report(
-                                "planner_select_target_missing",
+                                crate::rules::PLANNER_SELECT_TARGET_MISSING,
                                 &miss,
                                 format!(
                                     "planner Select target '{miss}' not found in identity index"

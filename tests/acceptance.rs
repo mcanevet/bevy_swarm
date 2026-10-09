@@ -72,10 +72,6 @@ fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> se
 
 /// FX1: fixture-runner writes reports to the SHARED runs/last path —
 /// concurrent tests would race on it and read each other's reports
-/// (the spinner "frozen_world" flake was actually the spawner's
-/// report). Serialize all fixture-runner invocations process-wide.
-static RUNNER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Run fixture-runner with an explicit scenario string (FX1: the
 /// meta-test builds long-duration scenarios directly).
 fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde_json::Value {
@@ -88,10 +84,24 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
         ),
     };
 
-    let _guard = RUNNER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Per-case unique report path (FX2: no races on a shared
+    // runs/last path). Conventions put run reports under
+    // target/bevy_swarm/runs/<run_id>/report.json — use a case-named
+    // id so parallel test threads never collide.
+    let case_id = format!("{}-{}-{}", fixture, variant, std::process::id());
+    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(&target)
+        .join("bevy_swarm/runs")
+        .join(&case_id);
+    std::fs::create_dir_all(&out_dir).expect("create per-case out dir");
+    let out_path = out_dir.join("report.json");
+
     let mut cmd = Command::new("cargo");
     cmd.args(["run", "--quiet", "-p", "fixture-runner", "--", fixture])
         .arg(scenario)
+        .arg("--out")
+        .arg(&out_path)
         .current_dir(env!("CARGO_MANIFEST_DIR"));
     if let Some(bug) = &bug_env {
         cmd.env("FIXTURE_BUG", bug);
@@ -107,16 +117,9 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
         );
     }
 
-    let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(conventions_report_relpath());
-    let json = std::fs::read_to_string(&report_path)
-        .unwrap_or_else(|e| panic!("read report {}: {}", report_path.display(), e));
+    let json = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("read report {}: {}", out_path.display(), e));
     serde_json::from_str(&json).expect("report is valid JSON")
-}
-
-fn conventions_report_relpath() -> String {
-    // tests run with cwd = crate root; CARGO_TARGET_DIR may relocate target/
-    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
-    format!("{}/bevy_swarm/runs/last/report.json", target)
 }
 
 /// Build the scenario JSON from the expectation file (duration, seeds,
@@ -264,6 +267,25 @@ fn check_case(report: &serde_json::Value, expectation: &serde_json::Value) -> Ve
     }
 
     errors
+}
+
+/// Conventions §4: every persisted JSON file carries schema_version.
+#[test]
+fn persisted_files_have_schema_version() {
+    for (fixture, case) in discover_cases() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/swarm/expectations")
+            .join(&fixture)
+            .join(format!("{}.json", case));
+        let expectation = std::fs::read_to_string(&path).expect("read case");
+        let v: serde_json::Value = serde_json::from_str(&expectation).expect("case parses");
+        assert_eq!(
+            v.get("schema_version").and_then(|s| s.as_i64()),
+            Some(1),
+            "{}: missing or wrong schema_version",
+            path.display()
+        );
+    }
 }
 
 #[test]

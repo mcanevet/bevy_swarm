@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "scaffold": "adapter",
   "duration_s": 6.0,
   "status": "fail",

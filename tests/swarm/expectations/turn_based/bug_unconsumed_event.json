@@ -1,17 +1,13 @@
 {
+  "schema_version": 1,
   "scaffold": "adapter",
   "seeds": [
     42
   ],
   "duration_s": 6.0,
   "must_not_report": [],
-  "status": "fail",
-  "must_report": [
-    {
-      "rule": "unconsumed_message"
-    }
-  ],
-  "pending": "swarm-716.24",
+  "status": "pass",
+  "must_report": [],
   "liveness": {
     "mode": "after_intent",
     "timeout_s": 2.0

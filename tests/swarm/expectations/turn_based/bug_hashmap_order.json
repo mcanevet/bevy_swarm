@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "scaffold": "adapter",
   "seeds": [
     42
@@ -11,9 +12,9 @@
       "rule": "nondeterministic"
     }
   ],
-  "pending": "swarm-1w8.13",
   "liveness": {
     "mode": "after_intent",
     "timeout_s": 2.0
-  }
+  },
+  "pending": "swarm-kpl"
 }
