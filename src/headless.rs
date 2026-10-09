@@ -70,29 +70,39 @@ pub fn headless_platform() -> PluginGroupBuilder {
     // in a headless harness. `contains` guards the disables so this
     // stays correct for any feature combination.
     // Winit: requires an event loop; without DISPLAY it panics in build.
-    let group = {
-        #[cfg(feature = "winit")]
-        let group = if group.contains::<bevy_winit::WinitPlugin>() {
-            group.disable::<bevy_winit::WinitPlugin>()
-        } else {
-            group
-        };
-        #[cfg(not(feature = "winit"))]
-        let group = group;
+    let group = if group.contains::<bevy::winit::WinitPlugin>() {
+        group.disable::<bevy::winit::WinitPlugin>()
+    } else {
         group
     };
 
-    // With a render feature enabled (e.g. via `agent` or `render`),
-    // DefaultPlugins includes RenderPlugin, which requires a GPU at
-    // finish(). Disable it so the platform stays headless.
-    #[cfg(any(feature = "render", feature = "agent"))]
+    // Render: requires GPU; disable for headless operation.
     let group = if group.contains::<bevy::render::RenderPlugin>() {
         group.disable::<bevy::render::RenderPlugin>()
     } else {
         group
     };
 
-    group
+    // Audio: rodio backend may block; disable for headless.
+    let group = if group.contains::<bevy::audio::AudioPlugin>() {
+        group.disable::<bevy::audio::AudioPlugin>()
+    } else {
+        group
+    };
+
+    // Gilrs: gamepad controllers; disable for headless.
+    let group = if group.contains::<bevy::gilrs::GilrsPlugin>() {
+        group.disable::<bevy::gilrs::GilrsPlugin>()
+    } else {
+        group
+    };
+
+    // TerminalCtrl: Ctrl-C handlers; disable to avoid process-global state.
+    if group.contains::<bevy::app::TerminalCtrlCHandlerPlugin>() {
+        group.disable::<bevy::app::TerminalCtrlCHandlerPlugin>()
+    } else {
+        group
+    }
 }
 /// Construct a fresh headless `App` with the game's plugin installed.
 ///
@@ -128,6 +138,11 @@ pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
         }
 
         app.add_plugins(game_plugin.clone());
+        // FX4.1: add PlaytestPlugin once (bots + oracles). Guard against
+        // double-add in case the harness is reused.
+        if !app.is_plugin_added::<crate::driver::PlaytestPlugin>() {
+            app.add_plugins(crate::driver::PlaytestPlugin);
+        }
         // Z6: classify game-owned types from the game plugin's crate
         // path so gameplay inference can run without annotations.
         app.insert_resource(crate::game_types::GameTypes::from_plugin::<P>());

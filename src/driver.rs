@@ -83,7 +83,12 @@ impl bevy::app::Plugin for PlaytestPlugin {
         // Synthetic keyboard bot writes KeyboardInput; register so apps
         // without DefaultPlugins don't fail parameter validation.
         app.add_message::<bevy::input::keyboard::KeyboardInput>();
-        app.init_resource::<Violations>();
+        // The default contract's UserIntent message + core resources:
+        // headless apps built by headless_app() get PlaytestPlugin
+        // without the game adding TestConventionsPlugin, so register
+        // everything the harness systems read. Idempotent.
+        app.add_message::<crate::contract::UserIntent>();
+        app.init_resource::<crate::state::Violations>();
         // I1: identity index + observers (idempotent).
         crate::identity::install_identity(app);
         // I3: typed oracle/predicate/policy registry.
@@ -302,6 +307,8 @@ impl PlaytestReport {
     pub fn scenario_error(msg: &str) -> Self {
         let mut rep = Self::crashed_empty();
         rep.error = Some(msg.to_string());
+        let scheme = crate::fingerprint::default_normalizer();
+        let fp = scheme.fingerprint("crash", crate::rules::SCENARIO_ERROR, &[], msg);
         rep.violations = vec![crate::state::ViolationEntry {
             rule: crate::rules::SCENARIO_ERROR.to_string(),
             target: "scenario".to_string(),
@@ -310,7 +317,7 @@ impl PlaytestReport {
             count: 1,
             detail: msg.to_string(),
             last_detail: msg.to_string(),
-            fingerprint: None,
+            fingerprint: Some(fp),
             fingerprint_scheme: 1,
         }];
         rep

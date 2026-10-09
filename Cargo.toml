@@ -44,6 +44,12 @@ bevy = { workspace = true, features = [
     "bevy_window",
     "bevy_camera",
     "bevy_log",
+    "bevy_winit",
+    "x11",
+    "wayland",
+    "bevy_audio",
+    "bevy_gilrs",
+    "bevy_render",
     "debug",
     "reflect_auto_register",
 ] }
@@ -58,11 +64,13 @@ gamepad = ["bevy/gamepad"]
 render = ["bevy/bevy_render"]
 
 [dev-dependencies]
+serial_test = "3"
 # Z14 entropy tests: uuid uses getrandom 0.4 for v4 generation
 uuid = { version = "1", features = ["v4", "rng-getrandom"] }
 # FX2: full draft-2020-12 validation of reports against the schema
 jsonschema = { version = "0.30", default-features = false }
 fixture-turn-based = { package = "fixture_turn_based", path = "fixtures/turn_based" }
+fixture-walker = { package = "fixture_walker", path = "fixtures/walker" }
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -254,7 +254,7 @@ fn default_deadzone() -> f32 {
 
 /// Raw input surface declaration (Z3). Defines what raw inputs are available
 /// for chaos/curious bots to sample from.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RawSurface {
     #[serde(default)]
     pub keys: Vec<String>,
@@ -268,6 +268,35 @@ pub struct RawSurface {
     pub gamepad: bool,
     #[serde(default)]
     pub clickables: bool, // ClickEntity targets discovered by Z6/Z5
+}
+
+impl Default for RawSurface {
+    fn default() -> Self {
+        // FX4.4: non-empty default surface for tier-0 chaos. When no
+        // IntentSurface exists, chaos samples these raw inputs into
+        // RawActionQueue. Standard set: arrows, WASD, space, enter,
+        // escape, mouse left, gamepad south/dpad.
+        Self {
+            keys: vec![
+                "KeyW".into(),
+                "KeyA".into(),
+                "KeyS".into(),
+                "KeyD".into(),
+                "ArrowUp".into(),
+                "ArrowDown".into(),
+                "ArrowLeft".into(),
+                "ArrowRight".into(),
+            ],
+            // Mouse/gamepad stay OFF by default: tier-0 games frequently
+            // ignore them, and the dead_verb oracle would flag every
+            // unused button as a dead verb. Authors opt in per-scenario.
+            mouse_buttons: false,
+            mouse_motion: false,
+            wheel: false,
+            gamepad: false,
+            clickables: false,
+        }
+    }
 }
 
 /// A typed replay intent. Whatever intent sequence a scenario author

@@ -7,7 +7,7 @@ publish = false
 description = "Acceptance fixture: player moves via Move intents (clean) vs input desync (bug)"
 
 [dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["keyboard", "bevy_window", "bevy_winit"] }
 
 [[bin]]
 name = "fixture_walker"

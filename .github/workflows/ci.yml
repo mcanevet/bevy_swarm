@@ -19,8 +19,8 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies (bevy_render via agent feature)
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97
       - name: 'Check the whole workspace (FX11: was root-package build only)'
@@ -37,8 +37,8 @@ jobs:
   features:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies (bevy_render via agent feature)
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: 'Assert default features pull no render/winit/audio (H2)'
@@ -52,8 +52,8 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Linux dependencies (bevy_render via agent feature)
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build + test (agent feature)
@@ -65,7 +65,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
@@ -83,8 +86,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       
-      - name: Install Linux dependencies (bevy_render via agent feature)
-        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       
       - name: Cache
         uses: Swatinem/rust-cache@v2
@@ -113,6 +116,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: dtolnay/rust-toolchain@stable
       - name: Build docs
         env:

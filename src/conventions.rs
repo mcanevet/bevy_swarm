@@ -151,11 +151,22 @@ pub fn iso_timestamp(t: SystemTime) -> String {
     )
 }
 
-/// Generate a run ID: `<UTC_yyyyMMddTHHmmss>-<8hex-of-scenario+seed-hash>`
+/// Generate a run ID: `<UTC_yyyyMMddTHHmmss>-<8hex-of-scenario+seed-hash+nano>`
+/// Unique even for back-to-back autotests (includes nanosecond suffix).
 pub fn run_id(scenario_hash: u64, seed: u64) -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let (year, month, day, hour, minute, second) = utc_now_components();
-    let hash_hex = format!("{:08x}", (scenario_hash ^ seed) as u32);
-    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{hash_hex}")
+    // Uniqueness: process counter + pid + subsec nanos. Back-to-back
+    // autotests within the same second still get distinct suffixes.
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let mix = (scenario_hash as u32) ^ (seed as u32) ^ count ^ nanos ^ pid;
+    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{mix:08x}")
 }
 
 /// Current UTC calendar time, computed without a chrono dependency
@@ -257,7 +268,9 @@ mod tests {
         let id = run_id(0xDEADBEEF, 0);
         let parts: Vec<&str> = id.split('-').collect();
         assert_eq!(parts.len(), 2);
-        assert_eq!(parts[1], "deadbeef");
+        // Suffix is 8 hex chars (hash + nanos mixed)
+        assert_eq!(parts[1].len(), 8);
+        assert!(parts[1].chars().all(|c| c.is_ascii_hexdigit()));
         // Timestamp should match YYYYMMDDTHHMMSS
         assert_eq!(parts[0].len(), 15);
         assert_eq!(parts[0].chars().nth(8), Some('T'));
