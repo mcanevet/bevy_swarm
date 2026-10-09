@@ -14,6 +14,5 @@
   "liveness": {
     "mode": "after_intent",
     "timeout_s": 0.5
-  },
-  "input_rate_hz": 1
+  }
 }

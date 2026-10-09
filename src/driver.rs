@@ -194,6 +194,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 // I5: action-effect oracle (per-action effect rates).
                 crate::effects::action_effect_oracle_system,
                 check_finite_transforms_system,
+                check_transform_desync_system,
                 check_bounds_gameplay_system,
                 check_custom_system,
                 // I3: typed oracles after the JSON-DSL checker.

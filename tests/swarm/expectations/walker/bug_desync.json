@@ -7,9 +7,12 @@
   "duration_s": 6.0,
   "must_report": [
     {
-      "rule": "frozen_world",
-      "detail_contains": "no gameplay-relevant state changed"
+      "rule": "transform_desync"
     }
   ],
-  "must_not_report": []
+  "must_not_report": [
+    {
+      "rule": "frozen_world"
+    }
+  ]
 }

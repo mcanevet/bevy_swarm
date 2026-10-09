@@ -32,6 +32,78 @@ pub fn take_index_selector_warning() -> Option<String> {
     WARNED_INDEX_SELECTOR.with(|w| w.borrow_mut().take())
 }
 
+/// Detect when a visual Transform diverges from a paired logical
+/// position component on the same entity. Games pair a component
+/// named `...LogicalPosition` (a tuple struct holding a `Vec2`)
+/// with their rendered Transform; this oracle finds pairs via
+/// reflection, so games stay pure-Bevy with zero harness imports.
+pub(crate) fn check_transform_desync_system(world: &mut World) {
+    let frame = world.resource::<PlaytestState>().frame;
+    let transform_id = match world
+        .components()
+        .get_valid_id(std::any::TypeId::of::<Transform>())
+    {
+        Some(id) => id,
+        None => return,
+    };
+    let mut found: Vec<(String, String)> = Vec::new();
+    {
+        let registry = world
+            .resource::<bevy::ecs::reflect::AppTypeRegistry>()
+            .0
+            .read();
+        for (logical_id, info) in world.components().iter_registered() {
+            if !info.name().ends_with("LogicalPosition") {
+                continue;
+            }
+            let Some(type_id) = info.type_id() else {
+                continue;
+            };
+            let Some(rc) = registry.get_type_data::<bevy::ecs::reflect::ReflectComponent>(type_id)
+            else {
+                continue;
+            };
+            for archetype in world.archetypes().iter() {
+                if !archetype.contains(logical_id) || !archetype.contains(transform_id) {
+                    continue;
+                }
+                for entity in archetype.entities() {
+                    let Ok(er) = world.get_entity(entity.id()) else {
+                        continue;
+                    };
+                    let Some(lr) = rc.reflect(er) else { continue };
+                    // LogicalPosition is a tuple struct: field 0 is the Vec2.
+                    let Ok(ts) = lr.reflect_ref().as_tuple_struct() else {
+                        continue;
+                    };
+                    let Some(field0) = ts.field(0) else { continue };
+                    let Some(v2) = field0.try_downcast_ref::<bevy::math::Vec2>() else {
+                        continue;
+                    };
+                    let Some(tr) = er.get::<Transform>() else {
+                        continue;
+                    };
+                    let rendered = bevy::math::Vec2::new(tr.translation.x, tr.translation.y);
+                    let diff = (rendered - *v2).length();
+                    if diff > 0.01 {
+                        found.push((
+                            "entity:transform".to_string(),
+                            format!(
+                                "rendered ({:.2},{:.2}) != logical ({:.2},{:.2}) — visual state diverged by {:.2}",
+                                rendered.x, rendered.y, v2.x, v2.y, diff
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    let mut v = world.resource_mut::<Violations>();
+    for (target, detail) in found {
+        v.report(crate::rules::TRANSFORM_DESYNC, &target, detail, frame);
+    }
+}
+
 pub(crate) fn check_finite_transforms_system(
     q: Query<(Entity, &Transform), Changed<Transform>>,
     mut violations: ResMut<Violations>,
@@ -1070,13 +1142,13 @@ pub(crate) fn intent_audit_log_system(
     mut action_log: Option<ResMut<crate::contract::ActionLog>>,
     mut action_effects: ResMut<crate::effects::ActionEffects>,
 ) {
-    if !reader.is_empty() {
-        // I4: remember the last frame an intent was consumed (for the
-        // turn-based stuck_after_intent check). FX1: also the change
-        // tick so liveness can require changes strictly AFTER it.
-        state.last_intent_frame = Some(state.frame);
-    }
     for intent in reader.read() {
+        // FX1: remember the last frame a NON-WAIT intent was consumed
+        // (for the turn-based stuck_after_intent check). Wait is a
+        // deliberate no-op and must not arm the stuck check.
+        if !matches!(intent, UserIntent::Wait) {
+            state.last_intent_frame = Some(state.frame);
+        }
         let variant = match &intent {
             UserIntent::Move { .. } => "move",
             UserIntent::Choice { .. } => "choice",

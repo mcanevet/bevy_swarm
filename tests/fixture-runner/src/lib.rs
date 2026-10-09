@@ -99,10 +99,7 @@ impl Plugin for SpawnerAdapterPlugin {
             Update,
             |mut commands: Commands, q: Query<Entity, Added<fixture_spawner::LeakyEntity>>| {
                 for e in &q {
-                    // TurnBased: the spawner is bursty by design (spawn
-                    // 10, then idle) — real-time liveness semantics
-                    // would flag its natural idle as a soft-lock.
-                    commands.entity(e).insert((Gameplay, TurnBased));
+                    commands.entity(e).insert(Gameplay);
                 }
             },
         );
@@ -151,7 +148,11 @@ impl Plugin for TurnBasedAdapterPlugin {
             bevy::app::Update,
             |score: Res<fixture_turn_based::Score>,
              mut api: ResMut<bevy_swarm::contract::TestApi>| {
-                api.score = score.0 as i64;
+                // FX1: value-aware write so dead_verb can fire when
+                // Score genuinely stops changing (softlock).
+                if api.score != score.0 as i64 {
+                    api.score = score.0 as i64;
+                }
             },
         );
     }

@@ -12,45 +12,67 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct Player;
 
+/// Logical position (game state) — separate from visual Transform.
+/// Desync bug: Transform moves but LogicalPosition stays frozen.
+/// Pure-bevy component; the harness oracle finds it by type name
+/// via reflection (games never import harness types).
+#[derive(Component, Reflect, Default, Clone, Copy)]
+#[reflect(Component)]
+pub struct LogicalPosition(pub Vec2);
+
 #[derive(Message, Clone, Debug)]
 pub struct MoveEvent {
     pub dir: Vec2,
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn((Player, Transform::default()));
+    commands.spawn((Player, Transform::default(), LogicalPosition::default()));
 }
 
 /// Clean: consume Move events and move the player.
 fn move_system_clean(
     mut events: MessageReader<MoveEvent>,
-    mut q: Query<&mut Transform, With<Player>>,
+    mut q: Query<(&mut Transform, &mut LogicalPosition), With<Player>>,
 ) {
     for ev in events.read() {
         let d = Vec3::new(ev.dir.x, ev.dir.y, 0.0);
-        for mut t in &mut q {
+        for (mut t, mut lp) in &mut q {
             t.translation += d;
+            lp.0 += Vec2::new(ev.dir.x, ev.dir.y);
         }
     }
 }
 
-/// Buggy: input wiring broken — never consumes events.
-fn move_system_buggy(_events: MessageReader<MoveEvent>, _q: Query<&mut Transform, With<Player>>) {}
+/// Buggy: desync — Transform moves but LogicalPosition stays frozen.
+/// Detectable: rendered position ≠ logical position.
+fn move_system_desync(
+    mut events: MessageReader<MoveEvent>,
+    mut q: Query<(&mut Transform, &mut LogicalPosition), With<Player>>,
+) {
+    for ev in events.read() {
+        let d = Vec3::new(ev.dir.x, ev.dir.y, 0.0);
+        for (mut t, _lp) in &mut q {
+            t.translation += d;
+            // BUG: LogicalPosition not updated — desync!
+        }
+    }
+}
 
 /// Buggy: dead_left_key — the game drops all "move left" intents.
 /// Leftward movement is a declared verb on the surface but never takes
 /// effect: a dead verb.
 fn move_system_dead_left(
     mut events: MessageReader<MoveEvent>,
-    mut q: Query<&mut Transform, With<Player>>,
+    mut q: Query<(&mut Transform, &mut LogicalPosition), With<Player>>,
 ) {
     for ev in events.read() {
         if ev.dir.x < 0.0 {
             continue; // left moves silently dropped — dead verb
         }
         let d = Vec3::new(ev.dir.x, ev.dir.y, 0.0);
-        for mut t in &mut q {
+        for (mut t, mut lp) in &mut q {
             t.translation += d;
+            lp.0 += Vec2::new(ev.dir.x, ev.dir.y);
         }
     }
 }
@@ -60,20 +82,23 @@ fn move_system_dead_left(
 #[derive(Component)]
 pub struct ChildSprite;
 
-/// Buggy: stuck_corner — velocity is zeroed when moving diagonally, so
-/// the player wedges in place forever (frozen world).
+/// Buggy: stuck_corner — the player wedges when trying to move
+/// diagonally AWAY FROM THE ORIGIN (corner-like behavior at start).
+/// This triggers reliably on the first diagonal intent.
 fn move_system_stuck_corner(
     mut events: MessageReader<MoveEvent>,
-    mut q: Query<&mut Transform, With<Player>>,
+    mut q: Query<(&mut Transform, &mut LogicalPosition), With<Player>>,
 ) {
     for ev in events.read() {
-        // Zero the velocity when BOTH axes are nonzero (corner bug).
-        if ev.dir.x != 0.0 && ev.dir.y != 0.0 {
-            continue;
-        }
-        let d = Vec3::new(ev.dir.x, ev.dir.y, 0.0);
-        for mut t in &mut q {
-            t.translation += d;
+        for (mut t, mut lp) in &mut q {
+            let dist = t.translation.length();
+            let diagonal = ev.dir.x != 0.0 && ev.dir.y != 0.0;
+            let away_from_origin = (ev.dir.x * t.translation.x + ev.dir.y * t.translation.y) > 0.0;
+            if dist < 1.0 && diagonal && away_from_origin {
+                continue; // stuck at corner (origin) — input swallowed
+            }
+            t.translation += Vec3::new(ev.dir.x, ev.dir.y, 0.0);
+            lp.0 += Vec2::new(ev.dir.x, ev.dir.y);
         }
     }
 }
@@ -82,12 +107,13 @@ fn move_system_stuck_corner(
 /// NaN quaternion, then propagates.
 fn move_system_nan_rotation(
     mut events: MessageReader<MoveEvent>,
-    mut q: Query<&mut Transform, With<Player>>,
+    mut q: Query<(&mut Transform, &mut LogicalPosition), With<Player>>,
 ) {
     for ev in events.read() {
         let d = Vec3::new(ev.dir.x, ev.dir.y, 0.0);
-        for mut t in &mut q {
+        for (mut t, mut lp) in &mut q {
             t.translation += d;
+            lp.0 += Vec2::new(ev.dir.x, ev.dir.y);
             // Classic bug: normalizing a zero vector (0/0) yields NaN.
             let zero = Vec3::ZERO.length(); // 0.0
             #[allow(clippy::eq_op)] // intentional 0/0 to produce NaN
@@ -137,6 +163,7 @@ pub struct WalkerGamePlugin;
 
 impl Plugin for WalkerGamePlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<LogicalPosition>();
         let bug = std::env::var("FIXTURE_BUG").ok().map(|s| s.to_lowercase());
 
         app.add_message::<MoveEvent>();
@@ -158,7 +185,7 @@ impl Plugin for WalkerGamePlugin {
         );
         match bug.as_deref() {
             Some("desync") => {
-                app.add_systems(Update, move_system_buggy);
+                app.add_systems(Update, move_system_desync);
             }
             Some("dead_left_key") => {
                 app.add_systems(Update, move_system_dead_left);

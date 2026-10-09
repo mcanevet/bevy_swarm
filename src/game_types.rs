@@ -94,10 +94,20 @@ pub fn infer_gameplay_archetypes(world: &World, types: &GameTypes) -> HashSet<Ar
         }
     }
 
+    // Bevy 0.20 stores resources as entities (IsResource marker) —
+    // they are not gameplay entities and must never be tagged.
+    let is_resource_id =
+        components.get_valid_id(std::any::TypeId::of::<bevy::ecs::resource::IsResource>());
+
     let mut result = HashSet::new();
     for arch in world.archetypes().iter() {
         if arch.is_empty() {
             continue;
+        }
+        if let Some(rid) = is_resource_id {
+            if arch.contains(rid) {
+                continue;
+            }
         }
         let has_game = arch
             .components()
@@ -122,13 +132,12 @@ pub fn infer_gameplay_archetypes(world: &World, types: &GameTypes) -> HashSet<Ar
 /// If the game placed ANY explicit `Gameplay` marker, inference is OFF
 /// (explicit markers override; the driver reports this in scope).
 pub fn tag_inferred_gameplay_entities(world: &mut World, types: &GameTypes) -> usize {
-    // Explicit markers override: no inference when any exist.
-    if world
-        .query_filtered::<(), With<Gameplay>>()
-        .iter(world)
-        .next()
-        .is_some()
-    {
+    // Explicit markers override: no inference when any exist. Only
+    // GAME-placed markers count — harness-inferred tags (InferredGameplay)
+    // must not disable inference for entities spawned later.
+    let mut existing =
+        world.query_filtered::<Entity, (With<Gameplay>, Without<InferredGameplay>)>();
+    if existing.iter(world).next().is_some() {
         return 0;
     }
     let inferred_archetypes = infer_gameplay_archetypes(world, types);
@@ -163,15 +172,19 @@ pub fn apply_gameplay_inference(world: &mut World) {
     let last = world
         .resource::<crate::state::PlaytestState>()
         .inference_last_archetype_len;
+    let entities = world.entities().len();
+    let last_entities = world
+        .resource::<crate::state::PlaytestState>()
+        .inference_last_entity_len;
     let current = world.archetypes().len();
-    if current == last {
+    if current == last && entities == last_entities {
         return;
     }
     let tagged = tag_inferred_gameplay_entities(world, &types);
     let _ = tagged;
-    world
-        .resource_mut::<crate::state::PlaytestState>()
-        .inference_last_archetype_len = current;
+    let mut state = world.resource_mut::<crate::state::PlaytestState>();
+    state.inference_last_archetype_len = current;
+    state.inference_last_entity_len = entities;
 }
 
 /// True if gameplay inference is active (GameTypes present and no
@@ -181,7 +194,18 @@ pub fn inference_active(world: &World) -> bool {
         && world
             .components()
             .get_valid_id(std::any::TypeId::of::<Gameplay>())
-            .is_none_or(|gid| world.archetypes().iter().all(|a| !a.contains(gid)))
+            .is_none_or(|gid| {
+                // Only GAME-placed Gameplay markers disable inference.
+                // Harness-inferred tags live in archetypes that also
+                // carry InferredGameplay.
+                let inferred = world
+                    .components()
+                    .get_valid_id(std::any::TypeId::of::<InferredGameplay>());
+                world
+                    .archetypes()
+                    .iter()
+                    .all(|a| !a.contains(gid) || inferred.is_some_and(|iid| a.contains(iid)))
+            })
 }
 
 #[cfg(test)]
@@ -235,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn tagging_is_sticky_and_applies_real_marker() {
+    fn inference_tags_new_entities_after_first_pass() {
         let mut world = World::new();
         world.spawn(PlayerHealth);
         let tagged = tag_inferred_gameplay_entities(&mut world, &types());
@@ -244,7 +268,28 @@ mod tests {
         let e = q.single(&world).unwrap();
         assert!(world.entity(e).contains::<Gameplay>());
         assert!(world.entity(e).contains::<InferredGameplay>());
-        // Second run tags nothing new (sticky; no explicit marker added).
-        assert_eq!(tag_inferred_gameplay_entities(&mut world, &types()), 0);
+        // Second run: NEW entities spawned in the same archetype ARE tagged.
+        // (Sticky only means we don't untag already-tagged entities.)
+        world.spawn(PlayerHealth);
+        let tagged2 = tag_inferred_gameplay_entities(&mut world, &types());
+        let arch_count = world.archetypes().len();
+        assert_eq!(
+            tagged2, 1,
+            "new entity in same archetype gets tagged (archetypes={})",
+            arch_count
+        );
+    }
+
+    #[test]
+    fn inference_skips_is_resource_archetypes() {
+        // Spawn a resource entity (Bevy 0.20 stores resources as entities)
+        // and ensure it never gets tagged as Gameplay.
+        use bevy::ecs::resource::IsResource;
+        let mut world = World::new();
+        let cid = world.register_component::<PlayerHealth>();
+        let res_e = world.spawn(IsResource::new(cid)).id();
+        let tagged = tag_inferred_gameplay_entities(&mut world, &types());
+        assert_eq!(tagged, 0);
+        assert!(!world.entity(res_e).contains::<Gameplay>());
     }
 }

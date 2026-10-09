@@ -18,6 +18,7 @@ pub enum Rule {
     GoldenDiverged,
     DeadWidget,
     DeadVerb,
+    TransformDesync,
     PerfBudgetExceeded,
     StuckAfterIntent,
     NodesRotationUnnormalized,
@@ -59,6 +60,7 @@ impl Rule {
         Rule::GoldenDiverged,
         Rule::DeadWidget,
         Rule::DeadVerb,
+        Rule::TransformDesync,
         Rule::PerfBudgetExceeded,
         Rule::StuckAfterIntent,
         Rule::NodesRotationUnnormalized,
@@ -100,6 +102,7 @@ impl Rule {
             Rule::GoldenDiverged => "golden_diverged",
             Rule::DeadWidget => "dead_widget",
             Rule::DeadVerb => "dead_verb",
+            Rule::TransformDesync => "transform_desync",
             Rule::PerfBudgetExceeded => "perf_budget_exceeded",
             Rule::StuckAfterIntent => "stuck_after_intent",
             Rule::NodesRotationUnnormalized => "nodes_rotation_unnormalized",
@@ -141,6 +144,7 @@ pub const NONDETERMINISTIC: &str = "nondeterministic";
 pub const GOLDEN_DIVERGED: &str = "golden_diverged";
 pub const DEAD_WIDGET: &str = "dead_widget";
 pub const DEAD_VERB: &str = "dead_verb";
+pub const TRANSFORM_DESYNC: &str = "transform_desync";
 pub const PERF_BUDGET_EXCEEDED: &str = "perf_budget_exceeded";
 pub const STUCK_AFTER_INTENT: &str = "stuck_after_intent";
 pub const NODES_ROTATION_UNNORMALIZED: &str = "nodes_rotation_unnormalized";
@@ -180,6 +184,7 @@ pub const ALL_RULES: &[&str] = &[
     GOLDEN_DIVERGED,
     DEAD_WIDGET,
     DEAD_VERB,
+    TRANSFORM_DESYNC,
     PERF_BUDGET_EXCEEDED,
     STUCK_AFTER_INTENT,
     NODES_ROTATION_UNNORMALIZED,
@@ -246,6 +251,7 @@ mod tests {
             "finite_transforms",
             "nodes_rotation_unnormalized",
             "dead_verb",
+            "transform_desync",
             "stuck_after_intent",
             "readiness_timeout",
             "planner_postcondition",
@@ -277,5 +283,35 @@ mod tests {
         // And the registry must not contain anything NEVER emitted
         // (dead entries rot into confusion).
         let _ = Rule::ALL.len();
+    }
+
+    /// docs/rules.md severity column must agree with the code's
+    /// informational-rule list: a rule documented as informational
+    /// MUST be in INFORMATIONAL_RULES, and a rule documented as
+    /// major/determinism MUST NOT (informational rules are excluded
+    /// from digests/fingerprints; everything else fails runs).
+    #[test]
+    fn docs_severity_agrees_with_code() {
+        let docs = include_str!("../docs/rules.md");
+        for line in docs.lines() {
+            let Some(line) = line.strip_prefix('|') else {
+                continue;
+            };
+            let cols: Vec<&str> = line.split('|').map(|c| c.trim()).collect();
+            if cols.len() < 3 || !cols[1].starts_with('`') {
+                continue;
+            }
+            let name = cols[1].trim_matches('`');
+            let severity = cols[2];
+            let informational = crate::state::Violations::INFORMATIONAL_RULES.contains(&name);
+            assert_eq!(
+                severity == "informational",
+                informational,
+                "docs/rules.md documents '{}' as '{}' but code informational-list says {} — make docs and code agree",
+                name,
+                severity,
+                informational
+            );
+        }
     }
 }

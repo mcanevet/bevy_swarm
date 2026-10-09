@@ -178,14 +178,29 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
                     None => state.last_alive_frame >= last_intent,
                 }
             };
-            if !alive_after_intent && idle_since_intent >= timeout_frames {
+            // Accumulate a STUCK STREAK: consecutive no-reaction quanta.
+            // A softlock that swallows every intent keeps the bot
+            // retrying — idle_since_intent alone would reset on every
+            // attempt and never reach the timeout. The streak counts
+            // time since the LAST successful reaction to an intent.
+            {
+                let state = &mut world.resource_mut::<PlaytestState>();
+                if alive_after_intent {
+                    state.stuck_after_intent_quanta = 0;
+                } else {
+                    state.stuck_after_intent_quanta += quarter;
+                }
+            }
+            let stuck_quanta = world.resource::<PlaytestState>().stuck_after_intent_quanta;
+            if !alive_after_intent && stuck_quanta >= timeout_frames && idle_since_intent >= quarter
+            {
                 world.resource_mut::<Violations>().report(
                     "stuck_after_intent",
                     "world",
                     format!(
                         "no gameplay-relevant state changed for {:.1}s ({} frames) after the intent at frame {} — the game may be ignoring input or soft-locked in a turn",
                         liveness.timeout_s,
-                        idle_since_intent,
+                        stuck_quanta,
                         last_intent
                     ),
                     frame,
@@ -256,11 +271,9 @@ pub fn game_resource_changed_since(world: &World, since: Tick, now: Tick) -> boo
 }
 
 /// Convenience: full `changed_since(world, scope, tick)` used by I4/I5
-/// EFFECTS (not liveness): gameplay components + TestApi + game-owned
-/// resources. (Liveness excludes TestApi — see the liveness oracle.)
+/// EFFECTS (not liveness): gameplay components + game-owned resources.
+/// TestApi is EXCLUDED (effect detection must not count harness writes).
 pub fn changed_since(world: &World, since: Tick) -> bool {
     let now = now_tick(world);
-    gameplay_changed_since(world, since, now)
-        || resource_changed_since::<crate::contract::TestApi>(world, since, now)
-        || game_resource_changed_since(world, since, now)
+    gameplay_changed_since(world, since, now) || game_resource_changed_since(world, since, now)
 }
