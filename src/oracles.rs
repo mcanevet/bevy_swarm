@@ -27,7 +27,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// Drain the [idx] warning (driver calls this when building a report).
+/// Drain the idx-selector warning (driver calls this when building a report).
 pub fn take_index_selector_warning() -> Option<String> {
     WARNED_INDEX_SELECTOR.with(|w| w.borrow_mut().take())
 }
