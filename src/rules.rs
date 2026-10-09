@@ -147,6 +147,7 @@ pub const DEAD_VERB: &str = "dead_verb";
 pub const TRANSFORM_DESYNC: &str = "transform_desync";
 pub const PERF_BUDGET_EXCEEDED: &str = "perf_budget_exceeded";
 pub const STUCK_AFTER_INTENT: &str = "stuck_after_intent";
+pub const PLANNER_SELECT_TARGET_MISSING: &str = "planner_select_target_missing";
 pub const NODES_ROTATION_UNNORMALIZED: &str = "nodes_rotation_unnormalized";
 pub const READINESS_TIMEOUT: &str = "readiness_timeout";
 pub const PLANNER_POSTCONDITION: &str = "planner_postcondition";
@@ -187,6 +188,7 @@ pub const ALL_RULES: &[&str] = &[
     TRANSFORM_DESYNC,
     PERF_BUDGET_EXCEEDED,
     STUCK_AFTER_INTENT,
+    PLANNER_SELECT_TARGET_MISSING,
     NODES_ROTATION_UNNORMALIZED,
     READINESS_TIMEOUT,
     PLANNER_POSTCONDITION,
@@ -242,46 +244,102 @@ mod tests {
     /// allowlisted).
     #[test]
     fn emitted_rules_are_registered() {
-        // The emitted set, collected mechanically from the codebase
-        // (grep '.report(' src/). Kept as data so drift fails HERE
-        // rather than in production.
-        let emitted = [
-            "frozen_world",
-            "nodes_in_bounds",
-            "finite_transforms",
-            "nodes_rotation_unnormalized",
-            "dead_verb",
-            "transform_desync",
-            "stuck_after_intent",
-            "readiness_timeout",
-            "planner_postcondition",
-            "planner_goal_timeout",
-            "planner_bot_config",
-            "planner_any_exhausted",
-            "oracle_error",
-            "chaos_bot_config",
-            "custom_bot_config",
-            "pursuit_bot_config",
-            "replay_target_missing",
-            "synthetic_pointer_config",
-            "synthetic_keyboard_config",
-            "raw_key_invalid",
-            "raw_gamepad_button_invalid",
-            "raw_gamepad_axis_invalid",
-            "raw_gamepad_disabled",
-            "raw_click_entity_unimplemented",
-            "pointer_not_actionable",
-            "chaos_select_unnamed",
-        ];
-        for e in emitted {
-            assert!(
-                ALL_RULES.contains(&e),
-                "rule '{}' is emitted but NOT in the registry (src/rules.rs)",
-                e
-            );
+        // Mechanically scan every `.report(` call site across src/
+        // (excluding this test module): the first argument is either a
+        // string literal (must be in ALL_RULES) or a rules constant
+        // reference (must resolve to a registered name). This closes
+        // registry drift without hand-maintained lists.
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let mut emitted: Vec<String> = Vec::new();
+        let src_dir = std::path::Path::new(manifest).join("src");
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        for entry in std::fs::read_dir(&src_dir).expect("src dir") {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && path.file_name().and_then(|n| n.to_str()) != Some("rules.rs")
+            {
+                files.push(path);
+            }
         }
-        // And the registry must not contain anything NEVER emitted
-        // (dead entries rot into confusion).
+        for path in files {
+            let content = std::fs::read_to_string(&path).unwrap();
+            let mut rest = content.as_str();
+            while let Some(pos) = rest.find(".report(") {
+                let after = &rest[pos + 8..];
+                let arg = after.trim_start();
+                if let Some(lit) = arg.strip_prefix('"') {
+                    let end = lit.find('"').unwrap_or(lit.len());
+                    emitted.push(lit[..end].to_string());
+                } else {
+                    let tok: String = arg
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+                        .collect();
+                    if !tok.is_empty() {
+                        emitted.push(tok);
+                    }
+                }
+                rest = after;
+            }
+        }
+        assert!(!emitted.is_empty(), "scan found no .report( call sites?");
+        // Test-only rule names used in unit tests of other modules.
+        emitted.retain(|e| e != "test_rule");
+        // Dynamic, user-named rules (typed-oracle names) pass a local
+        // variable, not a literal — they are per-scenario by design.
+        emitted.retain(|e| e != "name");
+        for e in &emitted {
+            // Constants like `crate::rules::FROZEN_WORLD` resolve via a
+            // name→value map; bare strings must be registered directly.
+            let name = e.rsplit("::").next().unwrap_or(e);
+            if e.contains("::") {
+                // Constant reference: resolve via this module's consts.
+                #[allow(clippy::redundant_slicing)]
+                let value = match &name[..] {
+                    "FROZEN_WORLD" => FROZEN_WORLD,
+                    "NODES_IN_BOUNDS" => NODES_IN_BOUNDS,
+                    "FINITE_TRANSFORMS" => FINITE_TRANSFORMS,
+                    "FRAME_TIME_ANOMALY" => FRAME_TIME_ANOMALY,
+                    "FRAME_TIME_P99_BELOW" => FRAME_TIME_P99_BELOW,
+                    "FPS_FLOOR" => FPS_FLOOR,
+                    "METAMORPHIC_TICK_RATE" => METAMORPHIC_TICK_RATE,
+                    "AGGREGATE_CONSERVATION" => AGGREGATE_CONSERVATION,
+                    "NONDETERMINISTIC" => NONDETERMINISTIC,
+                    "GOLDEN_DIVERGED" => GOLDEN_DIVERGED,
+                    "DEAD_WIDGET" => DEAD_WIDGET,
+                    "DEAD_VERB" => DEAD_VERB,
+                    "TRANSFORM_DESYNC" => TRANSFORM_DESYNC,
+                    "PERF_BUDGET_EXCEEDED" => PERF_BUDGET_EXCEEDED,
+                    "ENTROPY_UNATTRIBUTED_DRAWS" => ENTROPY_UNATTRIBUTED_DRAWS,
+                    "SCENARIO_ERROR" => SCENARIO_ERROR,
+                    "STUCK_AFTER_INTENT" => STUCK_AFTER_INTENT,
+                    "PLANNER_SELECT_TARGET_MISSING" => PLANNER_SELECT_TARGET_MISSING,
+                    _ => {
+                        panic!(
+                            "emission references unknown rule constant '{}' — \
+                             add it to this test's resolver and ALL_RULES",
+                            e
+                        );
+                    }
+                };
+                assert!(
+                    ALL_RULES.contains(&value),
+                    "constant '{}' resolves to '{}' which is NOT in ALL_RULES",
+                    e,
+                    value
+                );
+            } else if e.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                // Bare string literal (collected without quotes):
+                // lowercase rule names must be registered. Identifiers
+                // (dynamic, user-named rules from typed oracles) are
+                // skipped — they are per-scenario names by design.
+                assert!(
+                    ALL_RULES.contains(&e.as_str()),
+                    "rule '{}' is emitted as a bare literal but NOT in the registry",
+                    e
+                );
+            }
+        }
         let _ = Rule::ALL.len();
     }
 

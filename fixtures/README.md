@@ -25,7 +25,7 @@ Plain Bevy games for the outer-loop acceptance suite. Zero bevy_swarm plumbing.
 | Fixture       | Bug variant         | Expected rule(s)      | Owner bead (pending) |
 |---------------|---------------------|-----------------------|----------------------|
 | spinner       | frozen              | frozen_world          | FX2                  |
-| walker        | desync              | frozen_world          | FX2                  |
+| walker        | desync              | transform_desync      | FX2                  |
 | walker        | dead_left_key       | dead_verb             | FX2                  |
 | walker        | stuck_corner        | frozen_world          | FX2                  |
 | walker        | nan_rotation        | finite_transforms     | FX2                  |

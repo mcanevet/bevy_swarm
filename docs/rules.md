@@ -18,6 +18,7 @@ Expectation files (X2) reference only these names.
 | `DEAD_WIDGET` | `dead_widget` | informational |
 | `DEAD_VERB` | `dead_verb` | major |
 | `TRANSFORM_DESYNC` | `transform_desync` | major |
+| `PLANNER_SELECT_TARGET_MISSING` | `planner_select_target_missing` | major |
 | `PERF_BUDGET_EXCEEDED` | `perf_budget_exceeded` | informational |
 
 Notes:
