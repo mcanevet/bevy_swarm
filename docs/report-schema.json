@@ -41,6 +41,16 @@
       "type": "integer",
       "minimum": 0
     },
+    "tps": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Configured ticks-per-second of the run (A1)."
+    },
+    "simulated_duration_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Simulated duration in seconds (frame_count / tps) (A1)."
+    },
     "error": {
       "type": [
         "string",

@@ -4,7 +4,7 @@ use bevy::app::App;
 use bevy::ecs::world::World;
 use bevy::prelude::*;
 
-use crate::contract::{IntentSurface, ResetHooks, TestApi, HARNESS_TYPE_PATHS};
+use crate::contract::{IntentSurface, ResetHooks, TestApi, TestApiResolver, HARNESS_TYPE_PATHS};
 use crate::driver::ScenarioResource;
 use crate::scenario::{Scenario, ScenarioError};
 use crate::state::{PlaytestState, Violations};
@@ -388,19 +388,25 @@ pub fn calibrate_world_opts(
                 }
             }
 
-            // Sample the numeric percepts of game-owned resources
-            // (score/active_players plus game-defined custom_numeric fields)
-            // instead of only the hard-coded TestApi.score.
-            if let Some(api) = app.world().get_resource::<TestApi>() {
-                resource_values
-                    .entry("TestApi.score".into())
-                    .or_default()
-                    .push(api.score as f64);
-                for (name, val) in &api.custom_numeric {
-                    resource_values
-                        .entry(format!("TestApi.{}", name))
-                        .or_default()
-                        .push(*val);
+            // FX12 (D1): sample numeric percepts through the
+            // type-erased resolver (resolve_path) instead of reading
+            // the concrete TestApi directly — games registering a
+            // custom TestApi via register_test_api are now sampled too.
+            {
+                let world = app.world();
+                if world.get_resource::<TestApiResolver>().is_some()
+                    || world.get_resource::<TestApi>().is_some()
+                {
+                    for probe in ["TestApi.score", "TestApi.active_players"] {
+                        if let Some(crate::contract::TestFieldValue::Numeric(v)) =
+                            crate::contract::resolve_path(world, probe)
+                        {
+                            resource_values
+                                .entry(probe.to_string())
+                                .or_default()
+                                .push(v);
+                        }
+                    }
                 }
             }
         }

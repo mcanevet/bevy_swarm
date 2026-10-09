@@ -220,6 +220,10 @@ pub struct PlaytestReport {
     pub metrics: Metrics,
     pub coverage: Coverage,
     pub frame_count: u64,
+    /// FX12 (A1): configured ticks-per-second of the run.
+    pub tps: u64,
+    /// FX12 (A1): simulated duration in seconds = frame_count / tps.
+    pub simulated_duration_s: f64,
     /// Frames spent waiting for GameReady before the scenario began.
     pub pre_ready_frames: u64,
     pub error: Option<String>,
@@ -272,6 +276,8 @@ impl PlaytestReport {
             metrics: Default::default(),
             coverage: Default::default(),
             frame_count: 0,
+            tps: 0,
+            simulated_duration_s: 0.0,
             pre_ready_frames: 0,
             error: None,
             action_log: vec![],
@@ -551,7 +557,15 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .as_deref()
             .or(inv.requires_path.as_deref())
             .is_some_and(|p| p.starts_with("TestApi."))
-    }) || matches!(scenario.bot.bot_type, crate::enums::BotType::Planner);
+    }) || (matches!(scenario.bot.bot_type, crate::enums::BotType::Planner)
+        // FX12 (I3): a planner run only needs a TestApi resolver if
+        // the goal tree contains TestApi Primitives — predicate-only
+        // trees (typed Bevy systems) work without any resolver.
+        && scenario
+            .bot
+            .goals
+            .as_ref()
+            .is_some_and(crate::planner::goal_tree_needs_resolver));
     if needs_test_api
         && app
             .world()
@@ -564,6 +578,17 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
              call register_test_api::<YourApi>() or add TestConventionsPlugin (or use Resource:/Component: percept paths)"
                 .to_string(),
         ));
+    }
+
+    // FX12 (I3): validate typed Predicate names at LOAD time against
+    // the TypedRegistry (a typo'd name otherwise fails silently as
+    // "never achieved").
+    if let Some(goals) = scenario.bot.goals.as_ref() {
+        if let Some(registry) = app.world().get_resource::<crate::typed::TypedRegistry>() {
+            let names = registry.predicate_names();
+            crate::planner::validate_predicate_names(goals, &|n| names.contains(&n.to_string()))
+                .map_err(ScenarioError::Rejected)?;
+        }
     }
 
     // ResetHooks: required only if the scenario declares resets — a game
@@ -775,9 +800,16 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     }
                 }
                 if let Some(note) = anomaly_note {
+                    // FX12 (A1): use state.frame (simulated time counter)
+                    // instead of frame_idx (wall-clock loop index).
+                    let frame = app
+                        .world()
+                        .get_resource::<PlaytestState>()
+                        .map(|s| s.frame)
+                        .unwrap_or(0);
                     if let Some(mut violations) = app.world_mut().get_resource_mut::<Violations>() {
                         for name in &scenario_frame_rules {
-                            violations.report(name, "", note.clone(), frame_idx);
+                            violations.report(name, "", note.clone(), frame);
                         }
                     }
                 }
@@ -1012,6 +1044,19 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .filter(|ta| crate::minimize::action_to_replay_intent(ta).is_none())
         .count();
     let mut warnings = Vec::new();
+    // FX12 (I4): liveness.mode: off is surfaced as a report warning.
+    if let Some(state) = app.world().get_resource::<crate::harness::PlaytestState>() {
+        if state.warned_liveness_off {
+            warnings.push(
+                "liveness.mode is off — frozen-world detection disabled for this run".to_string(),
+            );
+        }
+    }
+    // FX12 (H1): one-time [idx] selector warning (thread-local from
+    // resolve_world_percept).
+    if let Some(w) = crate::oracles::take_index_selector_warning() {
+        warnings.push(w);
+    }
     if scenario.bot.bot_type == crate::enums::BotType::Replay && scenario.bot.inputs.is_empty() {
         warnings.push(
             "replay bot has an empty inputs list — the run does nothing;              record intents first (audit-log -> replay, B1)"
@@ -1042,6 +1087,12 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         metrics: final_metrics,
         coverage: state.coverage,
         frame_count: state.frame,
+        tps: state.tps,
+        simulated_duration_s: if state.tps == 0 {
+            0.0
+        } else {
+            state.frame as f64 / state.tps as f64
+        },
         pre_ready_frames: state.pre_ready_frames,
         error: result.err().map(|payload| {
             payload

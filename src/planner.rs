@@ -31,6 +31,47 @@ fn default_repeat_max_s() -> f32 {
 /// intents to emit while it is unachieved; combinators control ordering,
 /// alternatives, and retries. This is the high-level planner bot: a
 /// scenario author writes WHAT to achieve, not WHEN to press.
+/// FX12 (I3): does this goal tree reference TestApi.* primitives?
+/// Predicate-only trees (typed Bevy systems) need no resolver.
+pub fn goal_tree_needs_resolver(node: &GoalNode) -> bool {
+    match node {
+        GoalNode::Seq { children } => children.iter().any(goal_tree_needs_resolver),
+        GoalNode::Any { children, .. } => children.iter().any(goal_tree_needs_resolver),
+        GoalNode::Repeat { child, .. } => goal_tree_needs_resolver(child),
+        GoalNode::Predicate { .. } => false,
+        GoalNode::Primitive { path, .. } => path.starts_with("TestApi."),
+    }
+}
+
+/// FX12 (I3): validate typed Predicate names at LOAD time — every
+/// Predicate must reference a registered goal predicate (a typo'd
+/// name otherwise fails silently at runtime with "never achieved").
+pub fn validate_predicate_names(
+    node: &GoalNode,
+    registered: &dyn Fn(&str) -> bool,
+) -> Result<(), String> {
+    match node {
+        GoalNode::Seq { children } => children
+            .iter()
+            .try_for_each(|c| validate_predicate_names(c, registered)),
+        GoalNode::Any { children, .. } => children
+            .iter()
+            .try_for_each(|c| validate_predicate_names(c, registered)),
+        GoalNode::Repeat { child, .. } => validate_predicate_names(child, registered),
+        GoalNode::Predicate { name, .. } => {
+            if registered(name) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "planner goal references unknown predicate '{}' — register it before the run",
+                    name
+                ))
+            }
+        }
+        GoalNode::Primitive { .. } => Ok(()),
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GoalNode {
