@@ -16,9 +16,15 @@ use std::fs;
 
 /// Minimal headless app builder for fixtures (v0.2; Z2 replaces with real
 /// headless_platform). MinimalPlugins provides Time/task/chedule plumbing.
+/// InputPlugin is included so fixtures reading `ButtonInput<KeyCode>`
+/// (plain-Bevy keyboard handling, tier-0 chaos) work headlessly.
 pub fn headless_app() -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin));
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::transform::TransformPlugin,
+        bevy::input::InputPlugin,
+    ));
     app
 }
 

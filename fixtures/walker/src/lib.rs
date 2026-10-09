@@ -29,6 +29,49 @@ fn setup(mut commands: Commands) {
     commands.spawn((Player, Transform::default(), LogicalPosition::default()));
 }
 
+/// Tier-0 input: translate keyboard state (ButtonInput<KeyCode>) into
+/// MoveEvents. Plain Bevy — a zero-contract run can drive this game.
+fn keyboard_system(keys: Res<ButtonInput<KeyCode>>, mut events: MessageWriter<MoveEvent>) {
+    let mut dir = Vec2::ZERO;
+    if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
+        dir.y += 1.0;
+    }
+    if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
+        dir.y -= 1.0;
+    }
+    if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
+        dir.x += 1.0;
+    }
+    if keys.pressed(KeyCode::ArrowLeft) || keys.pressed(KeyCode::KeyA) {
+        dir.x -= 1.0;
+    }
+    if dir != Vec2::ZERO {
+        events.write(MoveEvent { dir });
+    }
+}
+
+/// Tier-0 input with the dead_left_key bug: ArrowLeft is never wired
+/// (both Left arrows), so pressing it moves nothing — a dead verb.
+fn keyboard_system_dead_left(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut events: MessageWriter<MoveEvent>,
+) {
+    let mut dir = Vec2::ZERO;
+    if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
+        dir.y += 1.0;
+    }
+    if keys.pressed(KeyCode::ArrowDown) || keys.pressed(KeyCode::KeyS) {
+        dir.y -= 1.0;
+    }
+    if keys.pressed(KeyCode::ArrowRight) || keys.pressed(KeyCode::KeyD) {
+        dir.x += 1.0;
+    }
+    // BUG: ArrowLeft / KeyA never wired — left is dead.
+    if dir != Vec2::ZERO {
+        events.write(MoveEvent { dir });
+    }
+}
+
 /// Clean: consume Move events and move the player.
 fn move_system_clean(
     mut events: MessageReader<MoveEvent>,
@@ -159,6 +202,7 @@ fn dangling_target_setup(mut commands: Commands) {
     commands.spawn((Player, ChaseTarget(target), Transform::default()));
 }
 
+#[derive(Clone, Default)]
 pub struct WalkerGamePlugin;
 
 impl Plugin for WalkerGamePlugin {
@@ -168,6 +212,8 @@ impl Plugin for WalkerGamePlugin {
 
         app.add_message::<MoveEvent>();
         app.add_systems(Startup, setup);
+        // Clean: keyboard drives MoveEvents.
+        app.add_systems(Update, keyboard_system);
 
         known_bug(
             &bug,
@@ -188,7 +234,8 @@ impl Plugin for WalkerGamePlugin {
                 app.add_systems(Update, move_system_desync);
             }
             Some("dead_left_key") => {
-                app.add_systems(Update, move_system_dead_left);
+                // Buggy keyboard (ArrowLeft dead) + buggy move handler.
+                app.add_systems(Update, (keyboard_system_dead_left, move_system_dead_left));
             }
             Some("stuck_corner") => {
                 app.add_systems(Update, move_system_stuck_corner);

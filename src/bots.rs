@@ -42,11 +42,7 @@ pub(crate) fn chaos_bot_system(
     // Persona bias (): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.
-    let persona = scenario
-        .0
-        .bot
-        .persona
-        .unwrap_or(crate::enums::Persona::Curious);
+    let persona = scenario.0.bot.persona.unwrap_or_default();
     let rate = scenario.0.bot.input_rate_hz.max(1);
     let effective_rate = if persona == crate::enums::Persona::Aggressive {
         rate.saturating_mul(2)
@@ -84,10 +80,14 @@ pub(crate) fn chaos_bot_system(
             );
             return;
         }
-        // Build the candidate raw-action kinds (weighted: keys first,
-        // then mouse/gamepad if enabled).
+        // Build the candidate raw-action kinds, weighted toward keys
+        // (keyboard is the dominant input surface for most games and
+        // gives the dead-verb oracle enough samples per key).
         let mut kinds: Vec<u8> = Vec::new();
         if !raw.keys.is_empty() {
+            kinds.push(0);
+            kinds.push(0);
+            kinds.push(0);
             kinds.push(0);
         }
         if raw.mouse_buttons {
@@ -143,6 +143,7 @@ pub(crate) fn chaos_bot_system(
             },
         };
         raw_queue.0.lock().unwrap().push_back((state.frame, action));
+        state.metrics.input_count += 1;
         return;
     };
     if surface.0.is_empty() {

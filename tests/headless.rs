@@ -79,3 +79,20 @@ fn bundled_default_plugins_reports_guidance() {
         "unexpected panic message: {msg}"
     );
 }
+
+/// FX4.6: a game built with bevy_winit (x11) runs headless with
+/// DISPLAY/WAYLAND_DISPLAY unset — WinitPlugin is disabled by runtime
+/// type presence, no event-loop panic.
+#[test]
+fn headless_platform_runs_with_winit_without_display() {
+    // fixture_walker depends on bevy with bevy_winit enabled.
+    std::env::remove_var("DISPLAY");
+    std::env::remove_var("WAYLAND_DISPLAY");
+    let build = headless_app(fixture_walker::WalkerGamePlugin);
+    let mut app = build();
+    for _ in 0..10 {
+        app.update();
+    }
+    // If WinitPlugin had run, app.update() would panic ("Failed to
+    // build event loop") without a display.
+}

@@ -228,8 +228,6 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     let seeds: Vec<u64> = (1..=config.num_seeds).collect();
     let mut run_summaries: Vec<RunSummary> = Vec::new();
     let mut all_violations: Vec<(u64, crate::state::ViolationEntry)> = Vec::new();
-    let aggregate_coverage = Coverage::default();
-
     // Run seeds in parallel via run_matrix (one scoped thread per
     // scenario, capped by config.parallel; fresh App per run).
     let variants: Vec<(String, Scenario)> = seeds
@@ -248,6 +246,7 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
 
     // Aggregate results from BranchMatrixReport.
     let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
+    let mut aggregate_coverage = Coverage::default();
     let num_runs_f32 = config.num_seeds.max(1) as f64;
     for outcome in matrix_results?.outcomes {
         let seed: u64 = outcome
@@ -289,7 +288,20 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
                 entry.occurrences += 1;
             }
         }
-        // aggregate_coverage.merge(&rep.system_coverage); // TODO
+        // Union coverage across runs (intent variants, TestApi paths,
+        // reset kinds, chaos surface indices).
+        for (k, c) in rep.coverage.intents_emitted {
+            *aggregate_coverage.intents_emitted.entry(k).or_default() += c;
+        }
+        for p in rep.coverage.test_api_paths_read {
+            aggregate_coverage.test_api_paths_read.insert(p);
+        }
+        for k in rep.coverage.resets_invoked {
+            aggregate_coverage.resets_invoked.insert(k);
+        }
+        for i in rep.coverage.chaos_surface_indices {
+            aggregate_coverage.chaos_surface_indices.insert(i);
+        }
     }
 
     let failures: Vec<FingerprintSummary> = failures_by_fp.into_values().collect();
@@ -344,6 +356,17 @@ fn write_report(
     let report_path = run_dir.join("report.json");
     let json = serde_json::to_string_pretty(report)?;
     std::fs::write(&report_path, json)?;
+
+    // Conventions §2: write a `last` pointer to the latest run.
+    let last_pointer = target_dir.join(output_dir).join("last");
+    let _ = std::fs::write(
+        &last_pointer,
+        run_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .as_bytes(),
+    );
 
     eprintln!("autotest report written to {}", report_path.display());
     Ok(())
