@@ -46,12 +46,6 @@ bevy = { workspace = true, features = [
     "bevy_window",
     "bevy_camera",
     "bevy_log",
-    "bevy_winit",
-    "x11",
-    "wayland",
-    "bevy_audio",
-    "bevy_gilrs",
-    "bevy_render",
     "debug",
     "reflect_auto_register",
 ] }
@@ -61,11 +55,12 @@ tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 
 [features]
-default = []
+default = ["render", "audio", "gamepad"]
+render = ["bevy/bevy_render", "bevy/x11", "bevy/wayland"]
+audio = ["bevy/bevy_audio"]
+gamepad = ["bevy/gamepad", "bevy/bevy_gilrs"]
 deterministic-entropy = ["getrandom04"]
 agent = ["bevy/bevy_remote", "bevy/bevy_render"]
-gamepad = ["bevy/gamepad"]
-render = ["bevy/bevy_render"]
 
 [dev-dependencies]
 serial_test = "3"

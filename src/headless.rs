@@ -70,6 +70,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     // in a headless harness. `contains` guards the disables so this
     // stays correct for any feature combination.
     // Winit: requires an event loop; without DISPLAY it panics in build.
+    #[cfg(feature = "render")]
     let group = if group.contains::<bevy::winit::WinitPlugin>() {
         group.disable::<bevy::winit::WinitPlugin>()
     } else {
@@ -77,6 +78,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     };
 
     // Render: requires GPU; disable for headless operation.
+    #[cfg(feature = "render")]
     let group = if group.contains::<bevy::render::RenderPlugin>() {
         group.disable::<bevy::render::RenderPlugin>()
     } else {
@@ -84,6 +86,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     };
 
     // Audio: rodio backend may block; disable for headless.
+    #[cfg(feature = "audio")]
     let group = if group.contains::<bevy::audio::AudioPlugin>() {
         group.disable::<bevy::audio::AudioPlugin>()
     } else {
@@ -91,6 +94,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     };
 
     // Gilrs: gamepad controllers; disable for headless.
+    #[cfg(feature = "gamepad")]
     let group = if group.contains::<bevy::gilrs::GilrsPlugin>() {
         group.disable::<bevy::gilrs::GilrsPlugin>()
     } else {
