@@ -17,12 +17,6 @@ use std::path::PathBuf;
 #[derive(Resource, Clone, Copy, Default)]
 struct CounterResource(u32);
 
-/// Nondeterminism injector: a process-global toggle flipped on every
-/// App construction. Two successive runs of the same scenario produce
-/// DIFFERENT traces — genuine nondeterminism for fx9_item4. (Scoped to
-/// this one test's game; no other test reads it.)
-static NONDET_TOGGLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// Logic-change knob: increments counter by `speed` per frame
 /// (speed=2 is a logic change → diverges from a speed=1 golden).
 #[derive(Resource, Clone, Copy)]
@@ -36,11 +30,22 @@ fn speed_system(mut counter: ResMut<CounterResource>, speed: Option<Res<Speed>>)
 #[derive(Resource, Clone, Copy)]
 struct NondeterminismFlag(bool);
 
-fn nondet_system(mut counter: ResMut<CounterResource>, flag: Option<Res<NondeterminismFlag>>) {
+/// Per-instance random seed injected at App construction.
+#[derive(Resource, Clone, Copy)]
+struct NondetSeed(pub u64);
+
+fn nondet_system(
+    mut counter: ResMut<CounterResource>,
+    flag: Option<Res<NondeterminismFlag>>,
+    seed: Option<Res<NondetSeed>>,
+) {
     counter.0 += 1;
-    // Inject perturbation when flag is enabled AND the global toggle is on.
-    if flag.is_some_and(|f| f.0) && NONDET_TOGGLE.load(std::sync::atomic::Ordering::Relaxed) {
-        counter.0 += 100;
+    // Inject perturbation when flag is enabled. Uses the per-instance
+    // seed so two runs of the same scenario produce different traces.
+    if flag.is_some_and(|f| f.0) {
+        if let Some(seed) = seed {
+            counter.0 += (seed.0 % 9973) as u32;
+        }
     }
 }
 
@@ -106,9 +111,10 @@ impl Plugin for SurfaceGamePlugin {
 }
 
 /// Nondeterministic counter game: when `inject` is true, a hidden
-/// nondeterministic perturbation (process-global toggle flipped per
-/// App construction) changes one run's counter relative to another.
-/// Also supports a `speed` multiplier (logic change for item5).
+/// nondeterministic perturbation based on a per-instance random seed
+/// changes the counter. Each App construction generates a fresh seed,
+/// ensuring two runs of the same scenario produce different traces.
+/// Also supports a `speed` multiplier.
 #[derive(Clone)]
 struct NondetGamePlugin {
     inject: bool,
@@ -119,12 +125,16 @@ impl Plugin for NondetGamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CounterResource>();
         app.insert_resource(NondeterminismFlag(self.inject));
+        // Per-instance random seed for nondeterminism (immune to
+        // global-state races under parallel tests).
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        app.insert_resource(NondetSeed(seed));
         if self.speed != 1 {
             app.insert_resource(Speed(self.speed));
         }
-        // Flip the global toggle on every App construction — two runs
-        // of the same scenario produce different traces when inject=true.
-        NONDET_TOGGLE.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
         app.add_systems(Update, (speed_system, nondet_system));
         app.add_systems(Last, sync_counter_to_api);
         app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
