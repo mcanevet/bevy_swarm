@@ -241,6 +241,7 @@ pub struct MinimizeOutcome {
 /// they are NOT minimized, the cheat scheduler replays them verbatim).
 fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f32) -> Scenario {
     Scenario {
+        name: scenario.name.clone(),
         tps: scenario.tps,
         simulated_time: scenario.simulated_time,
         single_threaded: scenario.single_threaded,

@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::determinism::{canonical_state, StateTrace};
+use crate::determinism::StateTrace;
 use crate::scenario::Scenario;
 
 /// A set of golden scenarios to record/check.
@@ -55,14 +55,25 @@ impl GoldenSet {
         })
     }
 
-    /// Save a golden set to disk (deprecated — use record_golden).
-    /// FX9: this method now panics if called (it wiped digests in the
-    /// original implementation; callers must use record_golden which
-    /// preserves digests/inputs/snapshots).
+    /// Save a loaded golden set back to disk, preserving each file's
+    /// digests/inputs/snapshots. Round-trip safe: load → save → load
+    /// preserves all trajectory data (previously this re-wrote files
+    /// with EMPTY digests, wiping goldens).
     pub fn save(&self) -> Result<(), std::io::Error> {
-        Err(std::io::Error::other(
-            "GoldenSet::save() is deprecated — use record_golden()",
-        ))
+        for (name, _scenario) in &self.scenarios {
+            let path = self.dir.join(format!("{}.golden.json", name));
+            // Only rewrite files that don't exist; existing goldens
+            // already hold the digests/inputs/snapshots and are
+            // rewritten exclusively by check_golden's update mode or
+            // record_golden — never blind-saved.
+            if !path.exists() {
+                return Err(std::io::Error::other(format!(
+                    "cannot save golden '{name}': no golden file to preserve \
+                     (use record_golden to create goldens)"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -81,8 +92,9 @@ pub struct GoldenFile {
     pub bevy_swarm_version: String,
     pub platform: String,
     pub scenario: Scenario,
-    /// Inputs that reproduce this run (replay actions, not seeds).
-    pub inputs: Vec<String>,
+    /// Inputs that reproduce this run (frame-indexed replay
+    /// intents decoded from the audit log — NOT a seed to re-chaos).
+    pub inputs: Vec<crate::scenario::ReplayInput>,
     /// Per-frame digests (hex strings for compactness).
     pub digests: Vec<String>,
     /// Periodic snapshots (every `snapshot_every_s` seconds).
@@ -175,8 +187,10 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
 
     for (scenario_idx, scenario) in scenarios.iter().enumerate() {
         let mut app = app_factory();
+        // Snapshots are taken per-frame during the run (StateTrace
+        // with_snapshots=true), not re-canonicalized after it.
         app.insert_resource(StateTrace {
-            with_snapshots: false,
+            with_snapshots: true,
             stop_after: None,
             digests: vec![],
         });
@@ -191,44 +205,38 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
             .map(|d| format!("{:016x}", d.hash))
             .collect();
 
-        // Collect snapshots at 1s intervals
-        let mut snapshots = Vec::new();
-        let mut last_snapshot_frame = 0u64;
-        // FX9: use the SCENARIO's tps, not a hardcoded 60.
-        let tps = scenario.tps.max(1) as f32;
-        let snapshot_interval_frames = (tps * 1.0) as u64; // Every 1s
-
-        for (frame_idx, _digest) in report.state_trace.iter().flatten().enumerate() {
-            if frame_idx as u64 >= last_snapshot_frame + snapshot_interval_frames {
-                let world = app.world();
-                let state = canonical_state(world);
-                snapshots.push(SnapshotEntry {
-                    frame: frame_idx as u64,
-                    time_s: (frame_idx as f32) / tps,
-                    state,
-                });
-                last_snapshot_frame = frame_idx as u64;
-            }
-        }
+        // Snapshots come from FrameDigest.snapshot (captured during
+        // the run) instead of re-canonicalizing the final world.
+        let snapshots: Vec<SnapshotEntry> = report
+            .state_trace
+            .iter()
+            .flatten()
+            .filter_map(|fd| {
+                fd.snapshot.as_ref().map(|snap| SnapshotEntry {
+                    frame: fd.frame,
+                    time_s: (fd.frame as f32) / (scenario.tps.max(1) as f32),
+                    state: snap.clone(),
+                })
+            })
+            .collect();
 
         let golden = GoldenFile {
             bevy_swarm_version: env!("CARGO_PKG_VERSION").to_string(),
             platform: platform.clone(),
             scenario: scenario.clone(),
-            // FX9: store the audit log so goldens replay recorded
-            // inputs instead of drifting with the input surface.
-            inputs: app
-                .world()
-                .get_resource::<crate::contract::ActionLog>()
-                .map(|l| l.entries.iter().map(|e| e.action.clone()).collect())
-                .unwrap_or_default(),
+            inputs: recorded_replay_inputs(&report),
             digests,
             snapshots,
         };
 
-        // FX9: name by scenario name + seed — two scenarios with the
-        // same seed must not overwrite each other.
-        let entry_name = format!("scenario-{}-{}", scenario_idx, scenario.bot.seed);
+        // Naming: use scenario.name (if present) + seed; fall back to
+        // index+seed for backwards compatibility. Unique scenario names
+        // prevent reordering from renaming/overwriting golden files.
+        let scenario_name = scenario
+            .name
+            .clone()
+            .unwrap_or_else(|| scenario_idx.to_string());
+        let entry_name = format!("scenario-{}-{}", scenario_name, scenario.bot.seed);
         golden_set
             .scenarios
             .push((entry_name.clone(), scenario.clone()));
@@ -242,16 +250,31 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
 }
 
 /// Check scenarios against their stored golden trajectories.
+///
+/// Replay stored inputs instead of re-running the seed's chaos.
+/// Rewrites diverged goldens when BEVY_SWARM_UPDATE=golden/all (U1).
 pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
     app_factory: F,
     golden_set: &GoldenSet,
     tolerance: &Tolerance,
 ) -> Result<GoldenReport, Box<dyn std::error::Error>> {
+    check_golden_opts(app_factory, golden_set, tolerance, false)
+}
+
+/// Like [`check_golden`] but with an explicit update override (test
+/// seam — avoids racing process env vars between parallel tests).
+pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
+    app_factory: F,
+    golden_set: &GoldenSet,
+    tolerance: &Tolerance,
+    force_update: bool,
+) -> Result<GoldenReport, Box<dyn std::error::Error>> {
+    let update_enabled = force_update || update_golden_enabled();
     let start = Instant::now();
     let mut per_scenario = Vec::new();
     let mut all_same = true;
 
-    for (name, scenario) in &golden_set.scenarios {
+    for (name, _scenario) in &golden_set.scenarios {
         let golden_path = golden_set.dir.join(format!("{}.golden.json", name));
         if !golden_path.exists() {
             per_scenario.push((name.clone(), GoldenOutcome::Missing));
@@ -262,26 +285,72 @@ pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
         let json = fs::read_to_string(&golden_path)?;
         let golden: GoldenFile = serde_json::from_str(&json)?;
 
-        // Run the scenario
-        let mut app = app_factory();
-        app.insert_resource(StateTrace {
-            with_snapshots: false,
-            stop_after: None,
-            digests: vec![],
-        });
+        // Determinism pre-check: the golden replay runs TWICE and the
+        // two runs must agree before comparing to the golden — a
+        // run-vs-run mismatch is nondeterminism in the GAME (reported
+        // as "nondeterministic"), not golden divergence.
+        //
+        // The replay bot is fed from the stored inputs so a changed
+        // IntentSurface cannot make the comparison drift.
+        let replay_scenario = golden_to_replay_scenario(&golden);
+        let run_once = |factory: &F| -> Result<
+            Vec<crate::determinism::FrameDigest>,
+            Box<dyn std::error::Error>,
+        > {
+            let mut app = factory();
+            app.insert_resource(StateTrace {
+                with_snapshots: true,
+                stop_after: None,
+                digests: vec![],
+            });
+            let report = crate::driver::run_scenario(&mut app, &replay_scenario)?;
+            Ok(report.state_trace.unwrap_or_default())
+        };
+        let trace_a = run_once(&app_factory)?;
+        let trace_b = run_once(&app_factory)?;
+        let run_outcomes_match = trace_a.len() == trace_b.len()
+            && trace_a
+                .iter()
+                .zip(trace_b.iter())
+                .all(|(a, b)| a.hash == b.hash);
+        if !run_outcomes_match {
+            per_scenario.push((
+                name.clone(),
+                GoldenOutcome::Diverged {
+                    first_frame: trace_a
+                        .iter()
+                        .zip(trace_b.iter())
+                        .position(|(a, b)| a.hash != b.hash)
+                        .map(|i| trace_a[i].frame)
+                        .unwrap_or(trace_a.len().min(trace_b.len()) as u64),
+                    changed: vec![],
+                    summary: "nondeterministic".to_string(),
+                },
+            ));
+            all_same = false;
+            continue;
+        }
 
-        let report = crate::driver::run_scenario(&mut app, scenario)?;
-
-        // run_scenario consumes StateTrace into report.state_trace.
-        let current_digests: Vec<String> = report
-            .state_trace
+        let report_digests = trace_a;
+        let current_snapshots: Vec<SnapshotEntry> = report_digests
             .iter()
-            .flat_map(|d| d.iter())
+            .filter_map(|fd| {
+                fd.snapshot.as_ref().map(|snap| SnapshotEntry {
+                    frame: fd.frame,
+                    time_s: (fd.frame as f32) / (replay_scenario.tps.max(1) as f32),
+                    state: snap.clone(),
+                })
+            })
+            .collect();
+        let current_digests: Vec<String> = report_digests
+            .iter()
             .map(|d| format!("{:016x}", d.hash))
             .collect();
 
         let outcome = if current_digests.len() != golden.digests.len() {
-            all_same = false; // FX9: digest-count mismatch sets all_same=false
+            // digest-count mismatch sets all_same=false (e.g. a game
+            // that now crashes early must not pass the report).
+            all_same = false;
             GoldenOutcome::Diverged {
                 first_frame: 0,
                 changed: vec![(
@@ -312,22 +381,50 @@ pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
                     // divergence with tolerance. Digest-only divergence (no
                     // snapshots or no reflected state) reports as-is.
                     let nearest = golden.snapshots.iter().rev().find(|s| s.frame <= frame);
-                    let changed = nearest
-                        .map(|snap| {
-                            snap.state
-                                .iter()
-                                .filter(|(k, _)| {
-                                    !tolerance.ignore_patterns.iter().any(|p| k.contains(p))
-                                })
-                                .map(|(k, v)| (k.clone(), v.clone(), String::new()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    GoldenOutcome::Diverged {
+                    let current_nearest = current_snapshots.iter().rev().find(|s| s.frame <= frame);
+                    // Both old and new values, tolerances applied.
+                    let changed = match (nearest, current_nearest) {
+                        (Some(old_snap), Some(new_snap)) => {
+                            diff_states(&old_snap.state, &new_snap.state, tolerance)
+                        }
+                        (Some(old_snap), None) => old_snap
+                            .state
+                            .iter()
+                            .filter(|(k, _)| {
+                                !tolerance.ignore_patterns.iter().any(|p| k.contains(p))
+                            })
+                            .map(|(k, v)| {
+                                (k.clone(), v.clone(), "<missing in current run>".to_string())
+                            })
+                            .collect(),
+                        _ => vec![],
+                    };
+
+                    let outcome = GoldenOutcome::Diverged {
                         first_frame: frame,
                         changed,
                         summary: format!("diverged at frame {}", frame),
+                    };
+
+                    // BEVY_SWARM_UPDATE=golden (via conventions::
+                    // can_update, U1) rewrites the stored golden with
+                    // the current behaviour — an explicit opt-in, not a
+                    // silent accept-regression.
+                    if update_enabled {
+                        let updated = GoldenFile {
+                            bevy_swarm_version: golden.bevy_swarm_version.clone(),
+                            platform: golden.platform.clone(),
+                            scenario: replay_scenario.clone(),
+                            inputs: golden.inputs.clone(),
+                            digests: current_digests.clone(),
+                            snapshots: current_snapshots.clone(),
+                        };
+                        let path = golden_set.dir.join(format!("{}.golden.json", name));
+                        fs::create_dir_all(&golden_set.dir)?;
+                        fs::write(&path, serde_json::to_string_pretty(&updated)?)?;
                     }
+
+                    outcome
                 }
                 None => GoldenOutcome::Same,
             }
@@ -347,6 +444,68 @@ pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
 /// BEVY_SWARM_UPDATE=golden or BEVY_SWARM_UPDATE=all).
 pub fn update_golden_enabled() -> bool {
     crate::conventions::can_update("golden")
+}
+
+/// Decode a run's action log into frame-indexed replay inputs. Only
+/// intents that survive the decode (structured audit entries) are
+/// kept; Wait is included because a replay of nothing must not make
+/// the bot re-sample.
+fn recorded_replay_inputs(
+    report: &crate::driver::PlaytestReport,
+) -> Vec<crate::scenario::ReplayInput> {
+    let timed = crate::scenario::action_log_to_timed_actions(&report.action_log);
+    timed
+        .iter()
+        .filter_map(|ta| {
+            crate::minimize::action_to_replay_intent(ta).map(|intent| {
+                crate::scenario::ReplayInput {
+                    frame: ta.frame,
+                    intent,
+                }
+            })
+        })
+        .collect()
+}
+
+/// Build a replay scenario from a golden file: same scenario shape,
+/// bot switched to Replay fed with the RECORDED inputs, so the golden
+/// comparison replays exactly what was recorded instead of re-running
+/// the chaos bot (which drifts when the IntentSurface changes).
+pub fn golden_to_replay_scenario(golden: &GoldenFile) -> Scenario {
+    let mut scenario = golden.scenario.clone();
+    scenario.bot.bot_type = crate::enums::BotType::Replay;
+    scenario.bot.inputs = golden.inputs.clone();
+    scenario
+}
+
+/// Compare two canonical states with tolerance. Numeric values that
+/// differ by at most max(abs_tol, rel_tol * max(|old|,|new|)) are
+/// treated as equal; non-numeric values compare stringwise. Only
+/// genuinely differing keys are reported, with BOTH old and new values.
+pub fn diff_states(
+    old: &BTreeMap<String, String>,
+    new: &BTreeMap<String, String>,
+    tolerance: &Tolerance,
+) -> Vec<(String, String, String)> {
+    let keys: std::collections::BTreeSet<_> = old.keys().chain(new.keys()).collect();
+    keys.into_iter()
+        .filter(|k| !tolerance.ignore_patterns.iter().any(|p| k.contains(p)))
+        .map(|k| {
+            let va = old.get(k).cloned().unwrap_or_default();
+            let vb = new.get(k).cloned().unwrap_or_default();
+            (k.clone(), va, vb)
+        })
+        .filter(|(_, va, vb)| {
+            if let (Ok(a), Ok(b)) = (va.parse::<f64>(), vb.parse::<f64>()) {
+                let abs_diff = (a - b).abs();
+                let scale = a.abs().max(b.abs());
+                !(abs_diff <= tolerance.abs_tol
+                    || (scale > 0.0 && abs_diff <= tolerance.rel_tol * scale))
+            } else {
+                va != vb
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
