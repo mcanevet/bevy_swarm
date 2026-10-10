@@ -104,6 +104,11 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
       - name: 'Run all tests with nextest (FX11: workspace + all-features)'
         run: cargo nextest run --workspace --all-features
         env:
