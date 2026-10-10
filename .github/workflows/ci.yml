@@ -103,14 +103,7 @@ jobs:
       
       - name: Cache
         uses: Swatinem/rust-cache@v2
-      
-      - name: 'Build (FX11: whole workspace, all features)'
-        run: cargo build --workspace --all-targets --all-features
-        env:
-          CARGO_INCREMENTAL: "0"
-      
-      - name: Install nextest
-        run: cargo install cargo-nextest --locked
+
       - name: 'Run all tests with nextest (FX11: workspace + all-features)'
         run: cargo nextest run --workspace --all-features
         env:
