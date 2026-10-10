@@ -94,6 +94,10 @@ pub struct InProcess<F> {
 
 impl<F: Fn() -> App + Sync> ScenarioRunner for InProcess<F> {
     fn run(&self, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
+        // Z14: enter deterministic run BEFORE the factory so plugin-build
+        // draws are seeded (not unattributed fallback).
+        #[cfg(feature = "deterministic-entropy")]
+        crate::entropy::enter_run(scenario.bot.seed);
         let mut app = (self.factory)();
         run_scenario(&mut app, scenario)
     }
