@@ -23,6 +23,10 @@ jobs:
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: 'Check the whole workspace (FX11: was root-package build only)'
         run: cargo check --workspace --all-targets
 
@@ -41,6 +45,10 @@ jobs:
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: 'Assert default features pull no render/winit/audio (H2)'
         run: |
           cargo tree -e features -i bevy
@@ -56,6 +64,10 @@ jobs:
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build + test (agent feature)
         run: cargo test --features agent
       - name: Clippy (agent feature)
@@ -97,8 +109,15 @@ jobs:
         env:
           CARGO_INCREMENTAL: "0"
       
-      - name: 'Run all tests (FX11: workspace + all-features)'
-        run: cargo test --workspace --all-features
+      - name: Install nextest
+        run: cargo install cargo-nextest --locked
+      - name: 'Run all tests with nextest (FX11: workspace + all-features)'
+        run: cargo nextest run --workspace --all-features
+        env:
+          CARGO_INCREMENTAL: "0"
+      
+      - name: 'Doc-tests (c5t: nextest does not run doc-tests)'
+        run: cargo test --workspace --all-features --doc
         env:
           CARGO_INCREMENTAL: "0"
       
