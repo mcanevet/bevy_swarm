@@ -262,7 +262,6 @@ fn fx3_rand_rng_acceptance_matrix() {
     use bevy_swarm::scenario::Scenario;
     use rand::RngExt;
 
-
     #[derive(Resource, Default)]
     struct RandValue(Option<u64>);
 

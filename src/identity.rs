@@ -62,6 +62,11 @@ impl IdentityIndex {
         self.by_stable.is_empty()
     }
 
+    /// Peek the next StableId that will be assigned (for tests).
+    pub fn peek_next_stable(&self) -> u64 {
+        self.next_stable
+    }
+
     /// Remove an entity from the index (despawn/remove cleanup).
     pub(crate) fn unindex(&mut self, id: StableId, entity: Entity) {
         self.by_stable.remove(&id);
@@ -77,10 +82,18 @@ impl IdentityIndex {
         self.by_name.clear();
     }
 
-    /// FX6 I1: re-insert an existing (StableId, Entity) pair after a
-    /// reset (entities that survived from App build / previous run).
-    pub fn reinsert(&mut self, id: StableId, entity: Entity) {
+    /// Re-insert an existing (StableId, Entity) pair after a reset
+    /// (entities that survived from App build / a previous run).
+    /// Restores the name index and advances next_stable past the max
+    /// surviving id so new spawns cannot collide.
+    pub fn reinsert(&mut self, id: StableId, entity: Entity, name: Option<&Name>) {
         self.by_stable.insert(id, entity);
+        if let Some(n) = name {
+            self.index_name(id, entity, n.as_ref());
+        }
+        if id.0 >= self.next_stable {
+            self.next_stable = id.0 + 1;
+        }
     }
 
     /// Index an entity under a name (observer helper).
