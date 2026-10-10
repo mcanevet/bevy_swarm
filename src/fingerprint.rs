@@ -65,9 +65,14 @@ impl Normalizer {
         location: &[String],
         message: &str,
     ) -> Fingerprint {
-        let normalized = self.normalize(message);
-        // FX7: reject_keys split (key presence appends its value);
-        // merge_keys collapse (message suppressed entirely).
+        // FX7: merge_keys redact the key's (textual) value BEFORE
+        // normalization — only messages CONTAINING the key are merged;
+        // others are fingerprinted normally (no blanket "[merged]"
+        // collapse). reject_keys split on the key's VALUE extracted
+        // from the RAW message (pre-normalization), so two failures
+        // with different values for a reject key stay distinct.
+        let redacted = self.redact_merge_keys(message);
+        let normalized = self.normalize(&redacted);
         fn fnv1a(bytes: &[u8]) -> u64 {
             let mut h: u64 = 0xcbf29ce484222325;
             for b in bytes {
@@ -85,19 +90,54 @@ impl Normalizer {
             buf.push_str(loc);
         }
         buf.push('\u{1}');
-        if self.merge_keys.is_empty() {
-            buf.push_str(&normalized);
-        } else {
-            buf.push_str("[merged]");
-        }
+        buf.push_str(&normalized);
         for key in &self.reject_keys {
-            if normalized.contains(key.as_str()) {
+            if let Some(value) = extract_key_value(message, key) {
+                // Split on the raw value (pre-normalization): numeric
+                // values would otherwise be wildcarded to "*" and never
+                // split anything.
                 buf.push('\u{1}');
-                buf.push_str(key);
+                buf.push_str(&value);
             }
         }
         Fingerprint(format!("{:016x}", fnv1a(buf.as_bytes())))
     }
+
+    /// FX7: replace each merge key's VALUE with a marker. Only keys
+    /// PRESENT in the message are redacted — a message without any
+    /// merge key keeps its full normalized body.
+    fn redact_merge_keys(&self, raw: &str) -> String {
+        let mut out = raw.to_string();
+        for key in &self.merge_keys {
+            let Some(pos) = out.find(key.as_str()) else {
+                continue;
+            };
+            let after = pos + key.len();
+            let rest = &out[after..];
+            let sep_len = usize::from(rest.starts_with('=') || rest.starts_with(':'));
+            let val_end = rest[sep_len..]
+                .find(char::is_whitespace)
+                .map(|i| sep_len + i)
+                .unwrap_or(rest.len());
+            out = format!("{}[merged:{}]{}", &out[..pos], key, &rest[val_end..]);
+        }
+        out
+    }
+}
+
+/// Extract a reject key's VALUE from the RAW message (pre-
+/// normalization): find the key, skip one separator ('=' / ':' /
+/// whitespace) and take the value up to the next whitespace.
+/// Returns None when the key is absent.
+fn extract_key_value(raw: &str, key: &str) -> Option<String> {
+    let pos = raw.find(key)?;
+    let rest = &raw[pos + key.len()..];
+    let sep_len = usize::from(rest.starts_with('=') || rest.starts_with(':'));
+    let value: String = rest[sep_len..]
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    Some(value)
 }
 
 /// Default normalizer for v0.2 (no special reject/merge keys yet).

@@ -214,14 +214,42 @@ mod tests {
 
     #[test]
     fn test_output_root_defaults_to_target() {
+        // FX7: hermetic — unset CARGO_TARGET_DIR for the duration so
+        // an externally-set var (CI, nextest) can't leak in.
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved = std::env::var("CARGO_TARGET_DIR").ok();
+        std::env::remove_var("CARGO_TARGET_DIR");
         let root = output_root();
         assert!(root.ends_with("target/bevy_swarm"));
+        if let Some(s) = saved {
+            std::env::set_var("CARGO_TARGET_DIR", s);
+        }
+    }
+
+    #[test]
+    fn test_output_root_respects_target_dir() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved = std::env::var("CARGO_TARGET_DIR").ok();
+        std::env::set_var("CARGO_TARGET_DIR", "/custom/out");
+        let root = output_root();
+        assert_eq!(root, std::path::PathBuf::from("/custom/out/bevy_swarm"));
+        match saved {
+            Some(s) => std::env::set_var("CARGO_TARGET_DIR", s),
+            None => std::env::remove_var("CARGO_TARGET_DIR"),
+        }
     }
 
     #[test]
     fn test_special_build_root() {
+        // FX7: hermetic (see test_output_root_defaults_to_target).
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved = std::env::var("CARGO_TARGET_DIR").ok();
+        std::env::remove_var("CARGO_TARGET_DIR");
         let root = special_build_root();
         assert!(root.ends_with("target/bevy_swarm-build"));
+        if let Some(s) = saved {
+            std::env::set_var("CARGO_TARGET_DIR", s);
+        }
     }
 
     #[test]
