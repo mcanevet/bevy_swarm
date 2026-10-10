@@ -727,7 +727,22 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .unwrap_or_default();
     for k in &kinds {
         if let Some(hook) = hooks.0.get(k) {
-            hook(app.world_mut());
+            // FX6: reset hooks run inside a panic boundary — a panicking
+            // hook is reported (reset_hook_panicked) instead of escaping
+            // run_scenario entirely.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                hook(app.world_mut());
+            }))
+            .unwrap_or_else(|_| {
+                if let Some(mut violations) = app.world_mut().get_resource_mut::<Violations>() {
+                    violations.report(
+                        "reset_hook_panicked",
+                        k,
+                        format!("reset hook '{}' panicked", k),
+                        0,
+                    );
+                }
+            });
         }
     }
     app.insert_resource(hooks);

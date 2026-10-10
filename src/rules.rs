@@ -148,6 +148,7 @@ pub const TRANSFORM_DESYNC: &str = "transform_desync";
 pub const PERF_BUDGET_EXCEEDED: &str = "perf_budget_exceeded";
 pub const STUCK_AFTER_INTENT: &str = "stuck_after_intent";
 pub const PLANNER_SELECT_TARGET_MISSING: &str = "planner_select_target_missing";
+pub const RESET_HOOK_PANICKED: &str = "reset_hook_panicked";
 pub const NODES_ROTATION_UNNORMALIZED: &str = "nodes_rotation_unnormalized";
 pub const READINESS_TIMEOUT: &str = "readiness_timeout";
 pub const PLANNER_POSTCONDITION: &str = "planner_postcondition";
@@ -189,6 +190,7 @@ pub const ALL_RULES: &[&str] = &[
     PERF_BUDGET_EXCEEDED,
     STUCK_AFTER_INTENT,
     PLANNER_SELECT_TARGET_MISSING,
+    RESET_HOOK_PANICKED,
     NODES_ROTATION_UNNORMALIZED,
     READINESS_TIMEOUT,
     PLANNER_POSTCONDITION,

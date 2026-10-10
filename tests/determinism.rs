@@ -163,3 +163,34 @@ fn fx6_a4_late_divergence_reported_with_fields() {
         div.differing
     );
 }
+
+/// FX6: a panicking reset hook must NOT escape run_scenario — reported
+/// as reset_hook_panicked, run continues.
+#[test]
+fn fx6_reset_hook_panick_is_caught_and_reported() {
+    use bevy_swarm::contract::ResetHooks;
+    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"tps":60,"setup":{"resets":[{"kind":"boom"}]}}"#,
+    )
+    .unwrap();
+    let mut app = bevy::prelude::App::new();
+    app.add_plugins((
+        bevy::prelude::MinimalPlugins,
+        bevy::transform::TransformPlugin,
+        bevy_swarm::driver::PlaytestPlugin,
+    ));
+    let mut hooks = ResetHooks::default();
+    hooks.register("boom", |_world: &mut bevy::prelude::World| {
+        panic!("reset hook exploded");
+    });
+    app.insert_resource(hooks);
+    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario).unwrap();
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|v| v.rule == "reset_hook_panicked"),
+        "must report reset_hook_panicked, got: {:?}",
+        report.violations
+    );
+}
