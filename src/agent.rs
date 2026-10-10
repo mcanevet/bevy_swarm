@@ -87,11 +87,12 @@ pub struct AgentConfig {
     /// Bind port (BRP default 15702).
     pub port: u16,
     /// Shared-secret token. When set (config or
-    /// `BEVY_SWARM_AGENT_TOKEN` env), every `playtest/*` method
+    /// `BEVY_SWARM_AGENT_TOKEN` env), EVERY remotely reachable method
     /// requires `params.token` to match; mismatches return
-    /// INVALID_REQUEST. Built-in `world.*` BRP methods are NOT covered
-    /// by this (RemoteHttpPlugin has no request middleware) — keep the
-    /// endpoint on loopback.
+    /// INVALID_REQUEST. `playtest/*` guards inside `brp_params`;
+    /// read-only `world.*` and discovery methods are wrapped with the
+    /// same check; mutating `world.*` builtins are replaced with
+    /// disabling stubs; the render sub-app's method table is emptied.
     pub token: Option<String>,
     /// Explicitly allow binding a non-loopback address.
     pub allow_remote: bool,
@@ -104,7 +105,9 @@ impl Default for AgentConfig {
         Self {
             addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             port: 15702,
-            token: std::env::var("BEVY_SWARM_AGENT_TOKEN").ok(),
+            token: std::env::var("BEVY_SWARM_AGENT_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty()),
             allow_remote: false,
             deny_in_release: false,
         }
@@ -125,17 +128,25 @@ impl AgentConfig {
     pub fn validate(&self) -> Result<(), String> {
         let is_release = cfg!(not(debug_assertions));
         if is_release {
-            let msg = "bevy_swarm agent feature is active in a RELEASE build —                        BRP exposes arbitrary world reads and mutation.                        Never ship builds with the agent enabled.";
-            if self.deny_in_release {
-                return Err(msg.to_string());
-            }
-            bevy::log::warn!("{msg}");
+            release_guard_decision(self.effective_deny_in_release())?;
+            // Not denying: warn via eprintln (the LogPlugin may not be
+            // up yet during Plugin::build, so bevy::log::warn! would
+            // be lost).
+            eprintln!(
+                "WARNING: bevy_swarm agent feature is active in a RELEASE build —                  BRP exposes arbitrary world reads and mutation."
+            );
         }
         if !self.addr.is_loopback() && !self.allow_remote {
             return Err(format!(
                 "refusing to bind agent BRP endpoint to non-loopback {}                  without allow_remote: true",
                 self.addr
             ));
+        }
+        if self.allow_remote && self.token.as_deref().unwrap_or("").is_empty() {
+            return Err(
+                "allow_remote: true requires a non-empty token (config or BEVY_SWARM_AGENT_TOKEN)"
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -162,14 +173,16 @@ pub const PLAYTEST_METHODS: &[&str] = &[
 /// mismatch does not reveal which byte differed.
 pub(crate) fn token_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
+    // Length contributes to the accumulator instead of an early
+    // return, so total comparison time depends only on the max length,
+    // not on WHERE the first difference occurs.
+    let (longer, shorter) = if a.len() >= b.len() { (a, b) } else { (b, a) };
     let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
+    for (i, x) in longer.iter().enumerate() {
+        let y = shorter.get(i).copied().unwrap_or(0);
         diff |= x ^ y;
     }
-    diff == 0
+    diff == 0 && a.len() == b.len()
 }
 
 /// FX10: token-guarded wrapper around a built-in world.* handler.
@@ -233,7 +246,7 @@ fn world_method_disabled(In(_params): In<Option<Value>>) -> BrpResult {
 /// ALL mutating builtins overridden to reject. Drive mutations
 /// through playtest/* instead (token-guarded via brp_params).
 fn guarded_remote_plugin() -> RemotePlugin {
-    RemotePlugin::default()
+    let plugin = RemotePlugin::default()
         // Read-only getters: token-guarded versions override builtins.
         .with_method_main(
             builtin_methods::BRP_GET_COMPONENTS_METHOD,
@@ -309,7 +322,66 @@ fn guarded_remote_plugin() -> RemotePlugin {
             builtin_methods::BRP_LIST_RESOURCES_METHOD,
             world_method_disabled,
         )
+        // FX10: discovery/introspection methods — token-guarded so a
+        // caller cannot even enumerate methods or schedules unauthenticated.
+        .with_method_main(
+            builtin_methods::RPC_DISCOVER_METHOD,
+            with_token_guard_mut(builtin_methods::process_remote_list_methods_request),
+        )
+        .with_method_main(
+            builtin_methods::BRP_REGISTRY_SCHEMA_METHOD,
+            with_token_guard(builtin_methods::export_registry_types),
+        )
+        .with_method_main(
+            builtin_methods::BRP_SCHEDULE_LIST,
+            with_token_guard(builtin_methods::schedule_list),
+        )
+        .with_method_main(
+            builtin_methods::BRP_SCHEDULE_GRAPH,
+            with_token_guard_mut(builtin_methods::schedule_graph),
+        );
+    // FX10 render-world bypass: bevy_remote's bevy_render feature
+    // (forced on via bevy's bevy_remote+bevy_render feature
+    // unification) serves the RENDER sub-app on a second port with
+    // the full default method table, unguarded. The harness has no
+    // legitimate remote use for the render world — replace every
+    // default render method with a rejection (later registrations
+    // replace earlier same-name entries).
+    let plugin = ALL_DEFAULT_METHODS.iter().fold(plugin, |p, name| {
+        p.with_method_render(*name, world_method_disabled)
+    });
+    plugin
 }
+
+/// FX10: every built-in method name RemotePlugin::default() registers
+/// (main AND render apps). Used to override the entire render-app
+/// method table with rejections — the render sub-app shares nothing
+/// with playtesting and must not be remotely callable.
+const ALL_DEFAULT_METHODS: &[&str] = &[
+    builtin_methods::BRP_GET_COMPONENTS_METHOD,
+    builtin_methods::BRP_QUERY_METHOD,
+    builtin_methods::BRP_SPAWN_ENTITY_METHOD,
+    builtin_methods::BRP_INSERT_COMPONENTS_METHOD,
+    builtin_methods::BRP_REMOVE_COMPONENTS_METHOD,
+    builtin_methods::BRP_DESPAWN_COMPONENTS_METHOD,
+    builtin_methods::BRP_REPARENT_ENTITIES_METHOD,
+    builtin_methods::BRP_LIST_COMPONENTS_METHOD,
+    builtin_methods::BRP_MUTATE_COMPONENTS_METHOD,
+    builtin_methods::RPC_DISCOVER_METHOD,
+    builtin_methods::BRP_GET_COMPONENTS_AND_WATCH_METHOD,
+    builtin_methods::BRP_LIST_COMPONENTS_AND_WATCH_METHOD,
+    builtin_methods::BRP_GET_RESOURCE_METHOD,
+    builtin_methods::BRP_INSERT_RESOURCE_METHOD,
+    builtin_methods::BRP_REMOVE_RESOURCE_METHOD,
+    builtin_methods::BRP_MUTATE_RESOURCE_METHOD,
+    builtin_methods::BRP_LIST_RESOURCES_METHOD,
+    builtin_methods::BRP_TRIGGER_EVENT_METHOD,
+    builtin_methods::BRP_WRITE_MESSAGE_METHOD,
+    builtin_methods::BRP_OBSERVE_METHOD,
+    builtin_methods::BRP_REGISTRY_SCHEMA_METHOD,
+    builtin_methods::BRP_SCHEDULE_LIST,
+    builtin_methods::BRP_SCHEDULE_GRAPH,
+];
 
 /// Adds the BRP transport with custom `playtest/*` methods.
 /// Uses [`AgentConfig::default`] (loopback, token from env).
@@ -349,6 +421,11 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentFrameCounter>()
             // Gestures pending for THIS frame (releases, presses).
             .add_systems(PreUpdate, (agent_flush_system, agent_input_system).chain())
+            // FX10: after ALL plugins build, sweep the method tables and
+            // remove anything outside the allow-list. Covers methods
+            // registered LATER than guarded_remote_plugin() (other
+            // plugins' RemotePlugin extensions).
+            .add_systems(Startup, agent_method_allowlist_sweep)
             .add_plugins(
                 guarded_remote_plugin()
                     .with_method_main("playtest/schema", playtest_schema)
@@ -368,6 +445,27 @@ impl Plugin for AgentPlugin {
                     .with_address(self.config.addr)
                     .with_port(self.config.port),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        // FX10: run AFTER all plugins built (including any that
+        // extended the remote method tables). Main table: drop
+        // everything outside the allow-list. Render table: emptied
+        // entirely — no remote access to the render world at all.
+        agent_method_allowlist_sweep(app.world_mut());
+        // NOTE: no cfg gate — the agent feature always enables
+        // bevy/bevy_render (needed for playtest/screenshot), and
+        // get_sub_app_mut is a no-op when no render sub-app exists.
+        if let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) {
+            use bevy::remote::RemoteMethods;
+            if render_app
+                .world_mut()
+                .remove_resource::<RemoteMethods>()
+                .is_some()
+            {
+                render_app.world_mut().insert_resource(RemoteMethods::new());
+            }
+        }
     }
 }
 
@@ -995,7 +1093,80 @@ pub fn __test_token_eq(a: &str, b: &str) -> bool {
     token_eq(a, b)
 }
 
+/// Release-path decision, testable regardless of build profile: when
+/// `deny` is the EFFECTIVE flag, building with the agent feature in
+/// release must error out.
 #[doc(hidden)]
-pub fn __test_world_get(world: &World, params: Option<Value>) -> Result<Value, BrpError> {
-    with_token_guard(builtin_methods::process_remote_get_components_request)(In(params), world)
+pub fn release_guard_decision(deny: bool) -> Result<(), String> {
+    let msg = "bevy_swarm agent feature is active in a RELEASE build —                        BRP exposes arbitrary world reads and mutation.                        Never ship builds with the agent enabled.";
+    if deny {
+        Err(msg.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// FX10: enforce the method allow-list at Startup (after all plugins
+/// finished building their RemotePlugin method tables). Anything not in
+/// PLAYTEST_METHODS, the guarded world.* read-only trio, or the
+/// token-guarded discovery set is removed from the MAIN table; the
+/// render table is emptied entirely (render-world BRP is disabled).
+fn agent_method_allowlist_sweep(world: &mut World) {
+    use bevy::remote::RemoteMethods;
+    const ALLOWED: &[&str] = &[
+        // playtest/* (token-guarded via brp_params)
+        "playtest/schema",
+        "playtest/observe",
+        "playtest/intent",
+        "playtest/key",
+        "playtest/pointer",
+        "playtest/reset",
+        "playtest/cheat",
+        "playtest/actions",
+        "playtest/state",
+        "playtest/screenshot",
+        "playtest/diagnostics",
+        // token-guarded read-only world introspection
+        "world.get_components",
+        "world.query",
+        "world.list_components",
+        "world.get_resources",
+        // token-guarded discovery
+        "rpc.discover",
+        "registry.schema",
+        "schedule.list",
+        "schedule.graph",
+    ];
+    // Disabling stubs stay REGISTERED (they return METHOD_NOT_FOUND +
+    // a clear message); sweeping them out entirely would leak less
+    // info but also hides the error contract. The stubs are the
+    // enforcement; unknown methods (added by other plugins) are dropped.
+    const MUTATION_STUBS: &[&str] = &[
+        "world.spawn_entity",
+        "world.insert_components",
+        "world.remove_components",
+        "world.despawn_entity",
+        "world.reparent_entities",
+        "world.mutate_components",
+        "world.insert_resources",
+        "world.remove_resources",
+        "world.mutate_resources",
+        "world.list_resources",
+        "world.trigger_event",
+        "world.write_message",
+        "world.observe+watch",
+        "world.get_components+watch",
+        "world.list_components+watch",
+    ];
+    if let Some(methods) = world.remove_resource::<RemoteMethods>() {
+        let mut kept = RemoteMethods::new();
+        for name in methods.methods() {
+            if ALLOWED.contains(&name.as_str()) || MUTATION_STUBS.contains(&name.as_str()) {
+                if let Some(handler) = methods.get(&name) {
+                    kept.insert(name.clone(), *handler);
+                }
+            }
+        }
+        world.insert_resource(kept);
+    }
 }
