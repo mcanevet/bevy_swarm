@@ -168,6 +168,14 @@ from a deterministic stream seeded from the scenario seed. Calls outside
 `enter_run()` draw from a process-global fallback stream and increment the
 `entropy_unattributed_draws` informational rule counter.
 
+**Important**: `rand::rng()` uses `ThreadRng`, which is cached per thread.
+To guarantee determinism across runs, **each scenario must run on a fresh
+thread**. The matrix runner (`run_scenarios_parallel`) does this
+automatically. Direct callers of `run_scenario` must either: (a) spawn a
+fresh thread per call, or (b) document that they accept the risk of
+cross-run ThreadRng state leakage. The `InProcess` runner now calls
+`enter_run` before the factory so plugin-build draws are seeded.
+
 **Important**: The hook signature must match exactly:
 ```rust
 #[unsafe(no_mangle)]

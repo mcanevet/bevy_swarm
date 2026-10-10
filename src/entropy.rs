@@ -118,17 +118,30 @@ pub fn in_deterministic_run() -> bool {
     STREAM.with(|s| s.borrow().is_some())
 }
 
-/// Count of fallback entropy draws (unattributed).
-static FALLBACK_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// Get the fallback draw count for diagnostics.
-pub fn fallback_draw_count() -> usize {
-    FALLBACK_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+// Count of fallback entropy draws for the CURRENT run (thread-local,
+// so parallel matrix runs don't cross-contaminate).
+thread_local! {
+    static RUN_FALLBACK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Reset the fallback counter (call at start of each run).
+/// Process-global count of ALL unattributed draws (never reset).
+static UNATTRIBUTED_TOTAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Fallback draws attributed to the current run (thread-local).
+pub fn fallback_draw_count() -> usize {
+    RUN_FALLBACK_COUNT.with(|c| c.get())
+}
+
+/// Total unattributed draws across the process (diagnostics; monotonic).
+pub fn unattributed_total() -> usize {
+    UNATTRIBUTED_TOTAL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Reset the PER-RUN counter (call at start of each run). The global
+/// unattributed total is never reset — build-time and cross-run draws
+/// remain visible in diagnostics.
 pub fn reset_fallback_counter() {
-    FALLBACK_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+    RUN_FALLBACK_COUNT.with(|c| c.set(0));
 }
 
 // The getrandom v0.4 custom backend hook (also works for v0.3 due to
@@ -136,6 +149,13 @@ pub fn reset_fallback_counter() {
 // FX3: Changed from extern "C" to extern "Rust" with proper Error return
 // (getrandom 0.3/0.4 declare this as extern "Rust" — using "C" was UB).
 #[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+/// getrandom v0.4 custom-backend hook (also satisfies v0.3 due to the
+/// identical symbol name and ABI). Replaces the OS entropy source with
+/// the deterministic per-run stream, or the process-global fallback.
+///
+/// # Safety
+///
+/// Caller (getrandom) guarantees `dest` points to `len` writable bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn __getrandom_v03_custom(
     dest: *mut u8,
@@ -153,7 +173,8 @@ pub unsafe extern "Rust" fn __getrandom_v03_custom(
             None => {
                 // Fallback: process-global deterministic stream (seeded constant).
                 // No panics — we're in an FFI context.
-                FALLBACK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                RUN_FALLBACK_COUNT.with(|c| c.set(c.get() + 1));
+                UNATTRIBUTED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut g = global_fallback().lock().unwrap_or_else(|e| e.into_inner());
                 g.fill_bytes(buf);
                 Ok(())
@@ -173,7 +194,22 @@ fn global_fallback() -> &'static std::sync::Mutex<Xoshiro256StarStar> {
     GLOBAL_FALLBACK.get_or_init(|| std::sync::Mutex::new(Xoshiro256StarStar::seed(0xDEADBEEF)))
 }
 
-/// Layout assertions for getrandom Error types (v0.3 and v0.4).
+/// Compile-time layout assertions for the getrandom Error type.
+///
+/// The hook returns `Result<(), getrandom04::Error>`; getrandom 0.3
+/// declares the same symbol with the same ABI. getrandom 0.3 is not a
+/// direct dependency, so its layout is asserted transitively: both
+/// 0.3.x and 0.4.x define `Error` as a `NonZeroU32` error code
+/// (size 4, align 4). If this ever drifts, this assertion fails the
+/// build instead of silently breaking the FFI contract.
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+const _: () = {
+    assert!(
+        std::mem::size_of::<getrandom04::Error>() == 4
+            && std::mem::align_of::<getrandom04::Error>() == 4
+    );
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
