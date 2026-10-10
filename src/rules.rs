@@ -38,7 +38,7 @@ pub enum Rule {
     RawGamepadButtonInvalid,
     RawGamepadAxisInvalid,
     RawGamepadDisabled,
-    RawClickEntityUnimplemented,
+    RawClickTargetOffscreen,
     PointerNotActionable,
     ChaosSelectUnnamed,
     EntropyUnattributedDraws,
@@ -80,7 +80,7 @@ impl Rule {
         Rule::RawGamepadButtonInvalid,
         Rule::RawGamepadAxisInvalid,
         Rule::RawGamepadDisabled,
-        Rule::RawClickEntityUnimplemented,
+        Rule::RawClickTargetOffscreen,
         Rule::PointerNotActionable,
         Rule::ChaosSelectUnnamed,
         Rule::EntropyUnattributedDraws,
@@ -122,7 +122,7 @@ impl Rule {
             Rule::RawGamepadButtonInvalid => "raw_gamepad_button_invalid",
             Rule::RawGamepadAxisInvalid => "raw_gamepad_axis_invalid",
             Rule::RawGamepadDisabled => "raw_gamepad_disabled",
-            Rule::RawClickEntityUnimplemented => "raw_click_entity_unimplemented",
+            Rule::RawClickTargetOffscreen => "raw_click_target_offscreen",
             Rule::PointerNotActionable => "pointer_not_actionable",
             Rule::ChaosSelectUnnamed => "chaos_select_unnamed",
             Rule::EntropyUnattributedDraws => "entropy_unattributed_draws",
@@ -165,7 +165,7 @@ pub const RAW_KEY_INVALID: &str = "raw_key_invalid";
 pub const RAW_GAMEPAD_BUTTON_INVALID: &str = "raw_gamepad_button_invalid";
 pub const RAW_GAMEPAD_AXIS_INVALID: &str = "raw_gamepad_axis_invalid";
 pub const RAW_GAMEPAD_DISABLED: &str = "raw_gamepad_disabled";
-pub const RAW_CLICK_ENTITY_UNIMPLEMENTED: &str = "raw_click_entity_unimplemented";
+pub const RAW_CLICK_TARGET_OFFSCREEN: &str = "raw_click_target_offscreen";
 pub const POINTER_NOT_ACTIONABLE: &str = "pointer_not_actionable";
 pub const CHAOS_SELECT_UNNAMED: &str = "chaos_select_unnamed";
 pub const ENTROPY_UNATTRIBUTED_DRAWS: &str = "entropy_unattributed_draws";
@@ -206,7 +206,7 @@ pub const ALL_RULES: &[&str] = &[
     RAW_GAMEPAD_BUTTON_INVALID,
     RAW_GAMEPAD_AXIS_INVALID,
     RAW_GAMEPAD_DISABLED,
-    RAW_CLICK_ENTITY_UNIMPLEMENTED,
+    RAW_CLICK_TARGET_OFFSCREEN,
     POINTER_NOT_ACTIONABLE,
     CHAOS_SELECT_UNNAMED,
 ];

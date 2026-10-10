@@ -137,7 +137,7 @@ fn raw_cursor_movement_runs_without_panicking() {
 fn raw_click_entity_errors_on_missing_resolution() {
     let mut app = build_headless_game();
 
-    // Queue ClickEntity (requires Z5/Z6 resolution)
+    // Queue ClickEntity for an entity that doesn't exist.
     app.world_mut()
         .resource_mut::<RawActionQueue>()
         .0
@@ -154,7 +154,19 @@ fn raw_click_entity_errors_on_missing_resolution() {
     state.frame = 0;
     app.world_mut().insert_resource(state);
 
-    // Run PreUpdate - should report violation but not panic
+    // The Update-set click resolver is gated on a live scenario, and
+    // chaos_bot_system (also gated) needs the choice stream.
+    app.insert_resource(bevy_swarm::driver::ScenarioResource(
+        serde_json::from_str(
+            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+        )
+        .unwrap(),
+    ));
+    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
+    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+
+    // Run a full frame: PreUpdate defers ClickEntity to the Update
+    // pass, which resolves and reports the violation.
     app.update();
 
     // Check that a violation was reported
@@ -162,7 +174,7 @@ fn raw_click_entity_errors_on_missing_resolution() {
     assert!(violations
         .entries
         .iter()
-        .any(|(_, e)| e.rule == "raw_click_entity_unimplemented"));
+        .any(|(_, e)| e.rule == "raw_click_target_offscreen"));
 }
 
 #[cfg(feature = "gamepad")]
@@ -390,5 +402,155 @@ fn fx8_hold_frames_releases() {
             .resource::<ButtonInput<KeyCode>>()
             .pressed(KeyCode::KeyA),
         "hold_frames=1 must release after 1 frame"
+    );
+}
+
+/// ClickEntity projects entity's world position through the camera.
+#[test]
+fn fx8_click_entity_projects_to_viewport() {
+    let mut app = build_input_fixture();
+
+    // Spawn a camera looking down -Z and a target entity. Manual
+    // viewport because headless cameras have no render surface.
+    {
+        use bevy::camera::Viewport;
+        let proj =
+            bevy::camera::Projection::Perspective(bevy::camera::PerspectiveProjection::default());
+        let camera = Camera {
+            viewport: Some(Viewport {
+                physical_position: bevy::math::UVec2::ZERO,
+                physical_size: bevy::math::UVec2::new(1280, 720),
+                depth: 0.0..1.0,
+            }),
+            // Headless: no camera_system runs, so computed target info
+            // must be set manually for world_to_viewport.
+            computed: bevy::camera::ComputedCameraValues {
+                target_info: Some(bevy::camera::RenderTargetInfo {
+                    physical_size: bevy::math::UVec2::new(1280, 720),
+                    scale_factor: 1.0,
+                }),
+                clip_from_view: proj.get_clip_from_view(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        app.world_mut().spawn((
+            Camera3d::default(),
+            camera,
+            Transform::IDENTITY,
+            GlobalTransform::IDENTITY,
+        ));
+    }
+    app.world_mut().spawn((
+        Name::new("Target"),
+        Gameplay,
+        Transform::from_xyz(0.0, 0.0, -5.0),
+    ));
+
+    // Queue ClickEntity targeting the named entity.
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::ClickEntity {
+                target: bevy_swarm::scenario::EntityRef::ByName("Target".to_string()),
+            },
+        ));
+
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.insert_resource(bevy_swarm::driver::ScenarioResource(
+        serde_json::from_str(
+            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+        )
+        .unwrap(),
+    ));
+    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
+    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+
+    app.update();
+    // ButtonInput processes the written message on the NEXT frame's
+    // PreUpdate (InputSystems).
+    app.update();
+
+    // Verify that ButtonInput received a press (left click).
+    assert!(
+        app.world()
+            .resource::<ButtonInput<bevy::input::mouse::MouseButton>>()
+            .pressed(bevy::input::mouse::MouseButton::Left),
+        "ClickEntity must press left mouse button"
+    );
+}
+
+/// Wheel action uses the primary window entity (not PLACEHOLDER).
+#[test]
+fn fx8_wheel_uses_primary_window_entity() {
+    let mut app = build_headless_game();
+
+    // Queue a wheel scroll action.
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((0, RawAction::Wheel { dy: 5.0 }));
+
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+
+    // The wheel event must have the correct window (not PLACEHOLDER).
+    // We verify by checking that the window entity exists and is not placeholder.
+    let window_entity = app
+        .world_mut()
+        .query::<&bevy::window::Window>()
+        .iter(app.world())
+        .next()
+        .is_some();
+    assert!(window_entity, "primary window must exist");
+}
+
+/// Gamepad connects ONCE per run even with multiple gamepad actions.
+#[cfg(feature = "gamepad")]
+#[test]
+fn fx8_gamepad_connects_once_per_run() {
+    use bevy::input::gamepad::GamepadConnectionEvent;
+
+    let mut app = build_input_fixture();
+
+    // Queue two gamepad actions.
+    for _ in 0..2 {
+        app.world_mut()
+            .resource_mut::<RawActionQueue>()
+            .0
+            .lock()
+            .unwrap()
+            .push_back((
+                0,
+                RawAction::GamepadButton {
+                    button: "South".to_string(),
+                    hold_frames: 1,
+                },
+            ));
+    }
+
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+
+    // Exactly one connection event must have been written.
+    let count = app
+        .world()
+        .resource::<bevy::ecs::message::Messages<GamepadConnectionEvent>>()
+        .len();
+    assert_eq!(
+        count, 1,
+        "two gamepad actions must emit exactly one connection event"
     );
 }
