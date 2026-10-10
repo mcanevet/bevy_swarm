@@ -625,6 +625,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
                     "planner bot requires a non-empty goals tree".into(),
                 ));
             }
+            // Walk the goal tree: primitives with string values and
+            // numeric checks (lt/gt/le/ge) can never fire — reject at
+            // load instead of passing vacuously at runtime.
+            if let Some(goals) = &scenario.bot.goals {
+                let mut bad = Vec::new();
+                walk_goal_checks(goals, &mut bad);
+                if !bad.is_empty() {
+                    return Err(ScenarioError::Rejected(format!(
+                        "planner goal(s) use numeric checks on string values: {}",
+                        bad.join(", ")
+                    )));
+                }
+            }
         }
         BotType::Pursuit => {
             if scenario.bot.agent_target.is_none() && scenario.bot.target.is_none() {
@@ -747,3 +760,26 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
 }
 
 // ---------------------------------------------------------------------------
+
+/// Recursively collect planner goal primitives that use numeric checks
+/// (lt/gt/le/ge) against string values — these can never be satisfied
+/// and must be rejected at load time (C6).
+fn walk_goal_checks(goal: &crate::planner::GoalNode, bad: &mut Vec<String>) {
+    use crate::planner::GoalNode;
+    match goal {
+        GoalNode::Seq { children } | GoalNode::Any { children, .. } => {
+            for c in children {
+                walk_goal_checks(c, bad);
+            }
+        }
+        GoalNode::Repeat { child, .. } => walk_goal_checks(child, bad),
+        GoalNode::Predicate { .. } => {}
+        GoalNode::Primitive {
+            path, check, value, ..
+        } => {
+            if !value.is_number() && check.holds_text("", "").is_none() {
+                bad.push(format!("{path} check='{}' value={value}", check.symbol()));
+            }
+        }
+    }
+}

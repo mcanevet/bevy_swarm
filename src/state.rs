@@ -2,6 +2,7 @@
 
 use bevy::ecs::resource::Resource;
 use bevy::ecs::world::World;
+use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ pub struct ViolationEntry {
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Violations {
-    pub entries: HashMap<(String, String), ViolationEntry>,
+    pub entries: BTreeMap<(String, String), ViolationEntry>,
     /// Latest bot intent in flight (set by bot systems each fire, read
     /// when reporting) — a violation carries the input that produced it.
     context: String,

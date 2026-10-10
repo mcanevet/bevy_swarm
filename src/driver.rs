@@ -451,6 +451,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
     let run_id = crate::sinks::RunId::new();
+    // Log capture: ensure the global subscriber (with our capture
+    // layer) exists before the run emits any events.
+    crate::sinks::ensure_global_subscriber();
     crate::sinks::set_current_run(run_id);
     // FX5 Z7: drop guard clears the thread-local CURRENT_RUN even on
     // early return Err paths (reset/cheat/component rejections below).
@@ -461,35 +464,36 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }
     let _run_guard = RunGuard;
-    // Install the swarm error handler once per App (App::set_error_handler
-    // panics on a second call). A marker resource tracks ownership; the
-    // handler reads the thread-local CURRENT_RUN so parallel runs stay
-    // separated. For Error-severity BevyErrors, chain to Bevy's panic
-    // handler so panics propagate as crashes.
-    // FX5 Z7: read existing FallbackErrorHandler (if any), wrap it so we
-    // record our errors THEN chain to the game's handler. set_error_handler
-    // takes a plain fn pointer, so the previous handler is parked in a
-    // process-global static (fn pointers are Copy + thread-safe).
-    use bevy::ecs::error::{ErrorContext, Severity};
-    static CHAINED_PREV: std::sync::OnceLock<Option<bevy::ecs::error::ErrorHandler>> =
-        std::sync::OnceLock::new();
+    // Install the swarm error handler by REPLACING the
+    // FallbackErrorHandler resource directly (never via
+    // App::set_error_handler, which panics if the game already called
+    // it and would be skipped if the game inserted the resource
+    // itself). The previous handler is remembered per-run so the
+    // wrapper can record the error and then chain to the game's
+    // handler. Parallel runs keep separate chains via thread-local
+    // CURRENT_RUN routing in sinks.
+    use bevy::ecs::error::ErrorContext;
     if let Some(prev_resource) = app
         .world()
         .get_resource::<bevy::ecs::error::FallbackErrorHandler>()
     {
-        // Chain to whatever the game installed (even if it's the default).
-        let _ = CHAINED_PREV.set(Some(prev_resource.0));
+        crate::sinks::set_previous_handler(run_id, prev_resource.0);
+    } else {
+        // No game handler: chain to Bevy's severity-matched default so
+        // panic-severity errors still unwind and warnings still log.
+        crate::sinks::set_previous_handler(run_id, bevy::ecs::error::match_severity);
     }
 
     #[derive(bevy::ecs::resource::Resource)]
-    struct SwarmErrorHandlerInstalled;
-    if app
-        .world()
-        .get_resource::<SwarmErrorHandlerInstalled>()
-        .is_none()
-    {
+    struct SwarmHandlerRestore {
+        prev: Option<bevy::ecs::error::FallbackErrorHandler>,
+    }
+    let prev_resource = app
+        .world_mut()
+        .remove_resource::<bevy::ecs::error::FallbackErrorHandler>();
+    if app.world().get_resource::<SwarmHandlerRestore>().is_none() {
         fn swarm_error_handler(mut err: bevy::ecs::error::BevyError, ctx: ErrorContext) {
-            let is_panic = matches!(err.severity(), Severity::Panic);
+            let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
             // Capture first (severity/context/message), then chain.
             crate::sinks::capture_bevy_error(&err, &ctx);
             if is_panic {
@@ -498,12 +502,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 }
             }
             // Chain to the game's handler last: it consumes err.
-            if let Some(Some(prev_fn)) = CHAINED_PREV.get() {
+            if let Some(prev_fn) = crate::sinks::chained_previous_public() {
                 prev_fn(err, ctx);
             }
         }
-        app.set_error_handler(swarm_error_handler);
-        app.insert_resource(SwarmErrorHandlerInstalled);
+        app.insert_resource(bevy::ecs::error::FallbackErrorHandler(swarm_error_handler));
+        app.insert_resource(SwarmHandlerRestore {
+            prev: prev_resource,
+        });
     }
 
     // Finish plugin building exactly like App::run (Plugin::finish
@@ -817,7 +823,15 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                         .unwrap_or(0);
                     if let Some(mut violations) = app.world_mut().get_resource_mut::<Violations>() {
                         for name in &scenario_frame_rules {
-                            violations.report(name, "", note.clone(), frame);
+                            // Report under the dedicated informational rule
+                            // (excluded from fingerprints/digests); the
+                            // user's invariant name rides in the target.
+                            violations.report(
+                                crate::rules::FRAME_TIME_ANOMALY,
+                                name,
+                                note.clone(),
+                                frame,
+                            );
                         }
                     }
                 }
@@ -870,75 +884,39 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // bevy_error / log_error / panic violations. Dedupe by
     // (rule, context) via Violations semantics.
     crate::sinks::clear_current_run();
-    // FX5 Z7: dedupe sink events by (rule, normalized message) — an
-    // error firing every frame must count up, not flood the report.
-    let mut sink_dedup: std::collections::HashMap<(String, String), usize> =
-        std::collections::HashMap::new();
-    let mut captured_list = crate::sinks::drain_run(run_id);
-    captured_list.retain(|c| {
-        let key = match c {
-            crate::sinks::Captured::BevyError {
-                severity, message, ..
-            } => {
-                if *severity < crate::sinks::Severity::Warning {
-                    return false;
-                }
-                let rule = if *severity >= crate::sinks::Severity::Error {
-                    "bevy_error"
-                } else {
-                    "bevy_warning"
-                };
-                (rule.to_string(), normalize_sink_message(message))
-            }
-            crate::sinks::Captured::Log { level, message, .. } => {
-                if *level != bevy::log::Level::ERROR {
-                    return false;
-                }
-                // Allow-list: expected in multi-App processes.
-                if message.contains("Could not set global logger")
-                    || message.contains("already set")
-                {
-                    return false;
-                }
-                ("log_error".to_string(), normalize_sink_message(message))
-            }
-            crate::sinks::Captured::Panic { message, .. } => {
-                ("panic".to_string(), normalize_sink_message(message))
-            }
-        };
-        *sink_dedup.entry(key).or_insert(0) += 1;
-        true
-    });
-    for captured in captured_list {
-        match captured {
+    // Restore the game's original FallbackErrorHandler so a subsequent
+    // run on the same App (with a possibly different scenario) doesn't
+    // inherit the swarm wrapper.
+    if let Some(restore) = app
+        .world_mut()
+        .remove_resource::<SwarmHandlerRestore>()
+        .map(|r| r.prev)
+    {
+        app.insert_resource(restore.unwrap_or_default());
+    }
+    crate::sinks::clear_previous_handler(run_id);
+    // Z7: group sink events by (rule, target, normalized message) —
+    // an error firing every frame must yield ONE entry with a count
+    // and first/last frame span, not one entry per occurrence.
+    type SinkGroups = std::collections::BTreeMap<(String, String, String), (String, u64, u64, u64)>;
+    let mut sink_groups: SinkGroups = std::collections::BTreeMap::new();
+    for captured in crate::sinks::drain_run(run_id) {
+        let (rule, target, message, frame) = match captured {
             crate::sinks::Captured::BevyError {
                 severity,
                 context,
                 message,
                 frame,
             } => {
+                if severity < crate::sinks::Severity::Warning {
+                    continue;
+                }
                 let rule = if severity >= crate::sinks::Severity::Error {
                     "bevy_error"
                 } else {
                     "bevy_warning"
                 };
-                if severity >= crate::sinks::Severity::Warning {
-                    let count = *sink_dedup
-                        .get(&(rule.to_string(), normalize_sink_message(&message)))
-                        .unwrap_or(&1);
-                    let entry = crate::state::ViolationEntry {
-                        rule: rule.to_string(),
-                        target: context.clone(),
-                        first_frame: frame,
-                        last_frame: frame,
-                        count: count as u64,
-                        detail: format!("{message} (x{count})"),
-                        last_detail: message.clone(),
-                        fingerprint: None,
-                        fingerprint_scheme: 1,
-                    };
-                    snap.push(entry);
-                }
+                (rule.to_string(), context, message, frame)
             }
             crate::sinks::Captured::Log {
                 level,
@@ -946,46 +924,67 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 message,
                 frame,
             } => {
-                if level == bevy::log::Level::ERROR {
-                    // Allow-list: the second-App LogPlugin message is expected
-                    // in multi-App processes and not a game defect.
-                    let count = *sink_dedup
-                        .get(&("log_error".to_string(), normalize_sink_message(&message)))
-                        .unwrap_or(&1);
-                    let entry = crate::state::ViolationEntry {
-                        rule: "log_error".to_string(),
-                        target: target.clone(),
-                        first_frame: frame,
-                        last_frame: frame,
-                        count: count as u64,
-                        detail: format!("{message} (x{count})"),
-                        last_detail: message.clone(),
-                        fingerprint: None,
-                        fingerprint_scheme: 1,
-                    };
-                    snap.push(entry);
+                if !matches!(level, bevy::log::Level::ERROR | bevy::log::Level::WARN) {
+                    continue;
                 }
+                // Allow-list: expected harness noise in multi-App processes.
+                if message.contains("Could not set global logger")
+                    || message.contains("already set")
+                {
+                    continue;
+                }
+                let rule = if level == bevy::log::Level::ERROR {
+                    "log_error"
+                } else {
+                    "log_warn"
+                };
+                (rule.to_string(), target, message, frame)
             }
             crate::sinks::Captured::Panic {
-                message, location, ..
+                message,
+                location,
+                backtrace: _,
+                system,
             } => {
-                let entry = crate::state::ViolationEntry {
-                    rule: "panic".to_string(),
-                    target: "world".to_string(),
-                    first_frame: 0,
-                    last_frame: 0,
-                    count: 1,
-                    detail: match location {
-                        Some(loc) => format!("{message} at {loc}"),
-                        None => message.clone(),
-                    },
-                    last_detail: message.clone(),
-                    fingerprint: None,
-                    fingerprint_scheme: 1,
+                let panic_frame = message
+                    .rfind("@frame ")
+                    .and_then(|i| {
+                        message[i + 7..]
+                            .split(|c: char| !c.is_ascii_digit())
+                            .next()
+                            .and_then(|d| d.parse::<u64>().ok())
+                    })
+                    .unwrap_or(0);
+                let target = system.unwrap_or_else(|| "world".to_string());
+                let detail = match location {
+                    Some(loc) => format!("{message} at {loc}"),
+                    None => message.clone(),
                 };
-                snap.push(entry);
+                (String::from("panic"), target, detail, panic_frame)
             }
-        }
+        };
+        let key = (
+            rule.clone(),
+            target.clone(),
+            normalize_sink_message(&message),
+        );
+        let entry = sink_groups.entry(key).or_insert((message, frame, frame, 0));
+        entry.1 = entry.1.min(frame);
+        entry.2 = entry.2.max(frame);
+        entry.3 += 1;
+    }
+    for ((rule, target, _norm), (message, first, last, count)) in sink_groups {
+        snap.push(crate::state::ViolationEntry {
+            rule,
+            target,
+            first_frame: first,
+            last_frame: last,
+            count,
+            detail: format!("{message} (x{count})"),
+            last_detail: message,
+            fingerprint: None,
+            fingerprint_scheme: 1,
+        });
     }
     if let Some(v) = crate::planner::planner_unfinished_check(&state.planner, &state) {
         snap.push(v);
@@ -1029,6 +1028,65 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         final_metrics.frame_ms_p99 = p99;
     }
     final_metrics.crash_detected = crash_detected;
+    // Informational frame-budget checks: fps_floor and
+    // frame_time_p99_below invariants evaluate POST-RUN against the
+    // measured wall-clock metrics. They never gate the run outcome —
+    // reported under their dedicated informational rules (excluded
+    // from fingerprints/digests, per U1 rule 9).
+    if !crash_detected {
+        let measured_fps = state.frame as f64 / scenario.duration_s.max(f32::EPSILON) as f64;
+        for inv in &scenario.invariants {
+            match inv.rule {
+                crate::enums::InvariantRule::FpsFloor => {
+                    let floor = inv.value.as_ref().and_then(|v| v.as_f64());
+                    if let Some(floor) = floor.filter(|f| *f > 0.0) {
+                        if measured_fps < floor {
+                            snap.push(crate::state::ViolationEntry {
+                                rule: crate::rules::FPS_FLOOR.to_string(),
+                                target: inv.name.clone(),
+                                first_frame: 0,
+                                last_frame: state.frame,
+                                count: 1,
+                                detail: format!(
+                                    "measured {measured_fps:.1} fps < floor {floor:.1}"
+                                ),
+                                last_detail: format!(
+                                    "measured {measured_fps:.1} fps < floor {floor:.1}"
+                                ),
+                                fingerprint: None,
+                                fingerprint_scheme: 1,
+                            });
+                        }
+                    }
+                }
+                crate::enums::InvariantRule::FrameTimeP99Below => {
+                    let ceiling_ms = inv.value.as_ref().and_then(|v| v.as_f64());
+                    if let Some(ceil) = ceiling_ms.filter(|c| *c > 0.0) {
+                        if final_metrics.frame_ms_p99 > ceil {
+                            snap.push(crate::state::ViolationEntry {
+                                rule: crate::rules::FRAME_TIME_P99_BELOW.to_string(),
+                                target: inv.name.clone(),
+                                first_frame: 0,
+                                last_frame: state.frame,
+                                count: 1,
+                                detail: format!(
+                                    "p99 {:.2}ms > ceiling {:.2}ms",
+                                    final_metrics.frame_ms_p99, ceil
+                                ),
+                                last_detail: format!(
+                                    "p99 {:.2}ms > ceiling {:.2}ms",
+                                    final_metrics.frame_ms_p99, ceil
+                                ),
+                                fingerprint: None,
+                                fingerprint_scheme: 1,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     let status = if crash_detected {
         crate::enums::PlaytestStatus::Crash
     } else if snap.is_empty() {

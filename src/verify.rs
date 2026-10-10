@@ -1214,8 +1214,10 @@ fn frame_time_anomaly_fires_when_armed() {
     });
     let rep = run_scenario(&mut app, &scen).unwrap();
     assert!(
-        rep.violations.iter().any(|v| v.rule == "fast_frames"),
-        "expected frame_time_anomaly violation, got: {:?}",
+        rep.violations
+            .iter()
+            .any(|v| v.rule == "frame_time_anomaly" && v.target == "fast_frames"),
+        "expected frame_time_anomaly violation reported under its dedicated rule, got: {:?}",
         rep.violations
     );
 }
