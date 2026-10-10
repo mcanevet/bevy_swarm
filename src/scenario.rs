@@ -13,6 +13,12 @@ use std::collections::HashSet;
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
+    /// Stable scenario name. Used for golden-trajectory file naming
+    /// (`scenario-NAME-SEED`): scenarios recorded into a golden set
+    /// must have unique names so reordering the list cannot rename or
+    /// overwrite files. Optional for plain playtests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub bot: BotConfig,
     /// Simulation ticks per second. Each `app.update()` advances simulated
     /// time by exactly 1/tps when `simulated_time` is true.
