@@ -186,6 +186,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 synthetic_pointer_bot_system,
                 synthetic_pointer_actionability_check_system,
                 synthetic_keyboard_bot_system,
+                crate::raw_input::raw_input_click_entity_system,
                 crate::raw_input::raw_input_update_system,
             )
                 .chain()

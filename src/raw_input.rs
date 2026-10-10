@@ -16,6 +16,7 @@
 //! action and driven with `GamepadConnectionEvent` /
 //! `RawGamepadButtonChangedEvent` / `RawGamepadAxisChangedEvent`.
 
+use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::system::ResMut;
 #[cfg(feature = "gamepad")]
@@ -28,10 +29,11 @@ use bevy::input::mouse::{
     MouseButton as WindowMouseButton, MouseButtonInput, MouseMotion, MouseWheel,
 };
 use bevy::input::ButtonState;
+use bevy::prelude::{Camera, GlobalTransform, Name};
 use bevy::window::{CursorMoved, WindowEvent};
 use std::collections::{HashMap, VecDeque};
 
-use crate::scenario::{MouseBtn, RawAction};
+use crate::scenario::{EntityRef, MouseBtn, RawAction};
 use crate::state::{PlaytestState, Violations};
 
 /// Queue of raw actions to inject (populated by chaos bot or replay).
@@ -50,7 +52,10 @@ pub struct ActiveMouseHolds(pub HashMap<(u64, WindowMouseButton), u64>);
 
 /// Virtual gamepad entity, spawned lazily on the first gamepad action (Z3).
 #[derive(bevy::ecs::prelude::Resource, Default)]
-pub struct VirtualGamepad(pub Option<bevy::ecs::entity::Entity>);
+pub struct VirtualGamepad {
+    pub pad: Option<bevy::ecs::entity::Entity>,
+    pub connected: bool,
+}
 
 /// Active gamepad button holds: (frame when pressed, button) -> release frame.
 #[cfg(feature = "gamepad")]
@@ -62,7 +67,7 @@ fn ensure_virtual_gamepad(
     virtual_gamepad: &mut VirtualGamepad,
     commands: &mut bevy::ecs::system::Commands,
 ) -> bevy::ecs::entity::Entity {
-    *virtual_gamepad.0.get_or_insert_with(|| {
+    *virtual_gamepad.pad.get_or_insert_with(|| {
         commands
             .spawn(bevy::input::gamepad::Gamepad::default())
             .id()
@@ -85,11 +90,12 @@ pub fn raw_input_preupdate_system(
     mut keyboard_events: MessageWriter<KeyboardInput>,
     mut mouse_button_events: MessageWriter<MouseButtonInput>,
     mut window_events: MessageWriter<WindowEvent>,
+    mut cursor_events: Option<MessageWriter<CursorMoved>>,
     mut violations: ResMut<Violations>,
     playtest_state: Option<ResMut<PlaytestState>>,
     mut action_effects: ResMut<crate::effects::ActionEffects>,
-    primary_window: bevy::ecs::system::Query<
-        bevy::ecs::entity::Entity,
+    mut windows: bevy::ecs::system::Query<
+        (bevy::ecs::entity::Entity, &mut bevy::window::Window),
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
     >,
     mut commands: bevy::ecs::system::Commands,
@@ -102,9 +108,10 @@ pub fn raw_input_preupdate_system(
     >,
 ) {
     let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
-    let window_entity = primary_window
-        .single()
-        .ok()
+    let window_entity = windows
+        .iter()
+        .next()
+        .map(|(e, _)| e)
         .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
     #[cfg(not(feature = "gamepad"))]
     {
@@ -160,7 +167,7 @@ pub fn raw_input_preupdate_system(
             .map(|(k, v)| (*k, *v))
             .collect();
         for ((press_frame, btn), _) in &expired_pads {
-            if let Some(pad) = virtual_gamepad.0 {
+            if let Some(pad) = virtual_gamepad.pad {
                 raw_gamepad_events.write(bevy::input::gamepad::RawGamepadEvent::Button(
                     RawGamepadButtonChangedEvent {
                         gamepad: pad,
@@ -232,11 +239,14 @@ pub fn raw_input_preupdate_system(
                 // Gesture: move cursor FIRST (same PreUpdate, before the
                 // press — picking/Interaction readers see the press at the
                 // clicked position), then press/hold/release.
-                window_events.write(WindowEvent::CursorMoved(CursorMoved {
-                    window: window_entity,
-                    position: bevy::math::Vec2::new(pos.0, pos.1),
-                    delta: None,
-                }));
+                if let Some(ref mut ce) = cursor_events {
+                    move_cursor(
+                        ce,
+                        &mut window_events,
+                        &mut windows,
+                        bevy::math::Vec2::new(pos.0, pos.1),
+                    );
+                }
                 let btn = parse_mouse_btn(button);
                 write_mouse_button_input(
                     &mut mouse_button_events,
@@ -293,20 +303,86 @@ pub fn raw_input_preupdate_system(
                 // Handled in the Update pass.
                 deferred.push_back((frame, action));
             }
-            RawAction::ClickEntity { target } => {
-                violations.report(
-                    "raw_click_entity_unimplemented",
-                    &format!("{target:?}"),
-                    "ClickEntity resolution requires Z5/Z6 (UI monkey / entity inference)"
-                        .to_string(),
-                    frame,
-                );
+            RawAction::ClickEntity { .. } => {
+                // Resolved in the Update pass where camera and transform
+                // queries are available (raw_input_click_entity_system).
+                deferred.push_back((frame, action));
             }
             RawAction::Wait { frames: _ } => {}
         }
     }
     queue.0.lock().unwrap().extend(still_pending);
     queue.0.lock().unwrap().extend(deferred);
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Handle ClickEntity actions in Update (after cursor moves, before mouse press).
+pub fn raw_input_click_entity_system(
+    queue: ResMut<RawActionQueue>,
+    mut mouse_button_events: MessageWriter<MouseButtonInput>,
+    mut window_events: MessageWriter<WindowEvent>,
+    mut cursor_events: Option<MessageWriter<CursorMoved>>,
+    mut violations: ResMut<Violations>,
+    playtest_state: Option<ResMut<PlaytestState>>,
+    mut action_effects: ResMut<crate::effects::ActionEffects>,
+    mut windows: bevy::ecs::system::Query<
+        (bevy::ecs::entity::Entity, &mut bevy::window::Window),
+        bevy::ecs::query::With<bevy::window::PrimaryWindow>,
+    >,
+    entities: bevy::ecs::system::Query<(
+        Entity,
+        &GlobalTransform,
+        Option<&Name>,
+        Option<&crate::identity::StableId>,
+    )>,
+    cameras: bevy::ecs::system::Query<(&Camera, &GlobalTransform)>,
+) {
+    let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
+    let window_entity = windows
+        .iter()
+        .next()
+        .map(|(e, _)| e)
+        .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
+
+    let mut still_pending = VecDeque::new();
+    while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
+        if target_frame > frame {
+            still_pending.push_back((target_frame, action));
+            continue;
+        }
+        match action {
+            RawAction::ClickEntity { target } => {
+                match resolve_click_position(&entities, &cameras, &target) {
+                    Ok(pos) => {
+                        if let Some(ref mut ce) = cursor_events {
+                            move_cursor(ce, &mut window_events, &mut windows, pos);
+                        }
+                        let btn = bevy::input::mouse::MouseButton::Left;
+                        write_mouse_button_input(
+                            &mut mouse_button_events,
+                            &mut window_events,
+                            btn,
+                            true,
+                            window_entity,
+                        );
+                        action_effects.record(&format!("raw:click_entity:{target:?}"), frame);
+                    }
+                    Err(reason) => {
+                        violations.report(
+                            "raw_click_target_offscreen",
+                            &format!("{target:?}"),
+                            reason,
+                            frame,
+                        );
+                    }
+                }
+            }
+            _ => {
+                still_pending.push_back((target_frame, action));
+            }
+        }
+    }
+    queue.0.lock().unwrap().extend(still_pending);
 }
 
 /// Inject mouse motion / cursor / wheel messages in `Update`
@@ -316,15 +392,18 @@ pub fn raw_input_update_system(
     mut mouse_motion_events: MessageWriter<MouseMotion>,
     mut mouse_wheel_events: MessageWriter<MouseWheel>,
     mut window_events: MessageWriter<WindowEvent>,
+    mut cursor_events: Option<MessageWriter<CursorMoved>>,
     playtest_state: Option<ResMut<PlaytestState>>,
-    primary_window: bevy::ecs::system::Query<
-        bevy::ecs::entity::Entity,
+    mut windows: bevy::ecs::system::Query<
+        (bevy::ecs::entity::Entity, &mut bevy::window::Window),
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
     >,
 ) {
     let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
-    let window_entity = primary_window
-        .single()
+    let window_entity = windows
+        .iter()
+        .next()
+        .map(|(e, _)| e)
         .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
     let mut still_pending = VecDeque::new();
     while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
@@ -342,11 +421,14 @@ pub fn raw_input_update_system(
                 }));
             }
             RawAction::Cursor { pos } => {
-                window_events.write(WindowEvent::CursorMoved(CursorMoved {
-                    window: window_entity,
-                    position: bevy::math::Vec2::new(pos.0, pos.1),
-                    delta: None,
-                }));
+                if let Some(ref mut ce) = cursor_events {
+                    move_cursor(
+                        ce,
+                        &mut window_events,
+                        &mut windows,
+                        bevy::math::Vec2::new(pos.0, pos.1),
+                    );
+                }
             }
             RawAction::Wheel { dy } => {
                 mouse_wheel_events.write(MouseWheel {
@@ -354,7 +436,7 @@ pub fn raw_input_update_system(
                     x: 0.0,
                     y: dy,
                     phase: bevy::input::touch::TouchPhase::Started,
-                    window: bevy::ecs::entity::Entity::PLACEHOLDER,
+                    window: window_entity,
                 });
                 window_events.write(WindowEvent::MouseWheel(MouseWheel {
                     unit: bevy::input::mouse::MouseScrollUnit::Line,
@@ -396,7 +478,11 @@ fn inject_gamepad_button(
         return;
     };
     let pad = ensure_virtual_gamepad(virtual_gamepad, commands);
-    connect_virtual_gamepad(pad, raw_gamepad_connection_events);
+    connect_virtual_gamepad(
+        pad,
+        &mut virtual_gamepad.connected,
+        raw_gamepad_connection_events,
+    );
     raw_gamepad_events.write(bevy::input::gamepad::RawGamepadEvent::Button(
         RawGamepadButtonChangedEvent {
             gamepad: pad,
@@ -450,7 +536,11 @@ fn inject_gamepad_axis(
         return;
     };
     let pad = ensure_virtual_gamepad(virtual_gamepad, commands);
-    connect_virtual_gamepad(pad, raw_gamepad_connection_events);
+    connect_virtual_gamepad(
+        pad,
+        &mut virtual_gamepad.connected,
+        raw_gamepad_connection_events,
+    );
     raw_gamepad_events.write(bevy::input::gamepad::RawGamepadEvent::Axis(
         RawGamepadAxisChangedEvent {
             gamepad: pad,
@@ -481,8 +571,13 @@ fn inject_gamepad_axis(
 #[cfg(feature = "gamepad")]
 fn connect_virtual_gamepad(
     pad: bevy::ecs::entity::Entity,
+    already_connected: &mut bool,
     events: &mut MessageWriter<GamepadConnectionEvent>,
 ) {
+    if *already_connected {
+        return;
+    }
+    *already_connected = true;
     events.write(GamepadConnectionEvent {
         gamepad: pad,
         connection: GamepadConnection::Connected {
@@ -495,6 +590,75 @@ fn connect_virtual_gamepad(
 
 /// Write a key press/release in both forms: standalone `KeyboardInput`
 /// and `WindowEvent::KeyboardInput` (see module docs).
+/// Resolve a ClickEntity target to a viewport (logical) position.
+/// Returns the screen position if the entity is visible through an
+/// active camera; otherwise an error describing why not.
+fn resolve_click_position(
+    entities: &bevy::ecs::system::Query<(
+        Entity,
+        &GlobalTransform,
+        Option<&Name>,
+        Option<&crate::identity::StableId>,
+    )>,
+    cameras: &bevy::ecs::system::Query<(&Camera, &GlobalTransform)>,
+    target: &EntityRef,
+) -> Result<bevy::math::Vec2, String> {
+    let (_, target_transform, _, _) = match target {
+        EntityRef::ByName(name) => entities
+            .iter()
+            .find(|(_, _, n, _)| n.is_some_and(|n| n.as_ref() == name))
+            .ok_or_else(|| format!("no entity with Name {name:?}"))?,
+        EntityRef::ByStableId(sid) => entities
+            .iter()
+            .find(|(_, _, _, s)| s.is_some_and(|s| s.0 == *sid))
+            .ok_or_else(|| format!("no entity with StableId {sid:?}"))?,
+    };
+    let world_pos = target_transform.translation();
+    let (camera, cam_transform) = cameras
+        .iter()
+        .next()
+        .ok_or_else(|| "no active camera found".to_string())?;
+    camera
+        .world_to_viewport(cam_transform, world_pos)
+        .map_err(|e| format!("projection failed: {e:?}"))
+}
+
+/// Move the cursor to a logical position (viewport coordinates).
+/// Writes standalone CursorMoved, WindowEvent::CursorMoved, and sets
+/// the window's physical_cursor_position (scaled by scale_factor).
+fn move_cursor(
+    cursor_events: &mut MessageWriter<CursorMoved>,
+    window_events: &mut MessageWriter<WindowEvent>,
+    windows: &mut bevy::ecs::system::Query<
+        (bevy::ecs::entity::Entity, &mut bevy::window::Window),
+        bevy::ecs::query::With<bevy::window::PrimaryWindow>,
+    >,
+    pos: bevy::math::Vec2,
+) {
+    let window_entity = windows
+        .iter()
+        .next()
+        .map(|(e, _)| e)
+        .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
+    cursor_events.write(CursorMoved {
+        window: window_entity,
+        position: pos,
+        delta: None,
+    });
+    window_events.write(WindowEvent::CursorMoved(CursorMoved {
+        window: window_entity,
+        position: pos,
+        delta: None,
+    }));
+    if let Some((_e, mut win)) = windows.iter_mut().next() {
+        let scale = win.scale_factor();
+        win.set_physical_cursor_position(Some(bevy::math::DVec2::new(
+            (pos.x * scale) as f64,
+            (pos.y * scale) as f64,
+        )));
+    }
+}
+
 fn write_keyboard_input(
     keyboard_events: &mut MessageWriter<KeyboardInput>,
     window_events: &mut MessageWriter<WindowEvent>,
