@@ -111,17 +111,11 @@ pub(crate) fn check_finite_transforms_system(
     names: Query<&Name>,
 ) {
     for (entity, transform) in q.iter() {
-        // FX7 T1: stable target label — Name when present, else
+        // FX7: stable target label — Name when present, else
         // "entity:<component>" (no raw entity ids in violation targets:
         // the same bug on another entity must produce ONE fingerprint).
         let label = match names.get(entity) {
-            Ok(n) => {
-                // Strip trailing digits: "Enemy 01"/"Enemy 02" — same
-                // bug signature across spawned instances.
-                let base = n.as_str();
-                let trimmed = base.trim_end_matches(|c: char| c.is_ascii_digit() || c == ' ');
-                format!("name:{}", if trimmed.is_empty() { base } else { trimmed })
-            }
+            Ok(n) => format!("name:{}", strip_generated_suffix(n.as_str())),
             Err(_) => "entity:transform".to_string(),
         };
         let t = transform.translation;
@@ -1301,4 +1295,52 @@ pub(crate) fn synthetic_pointer_actionability_check_system(
         }
     }
     state.pending_actionability_checks = still_pending;
+}
+
+/// FX7: strip ONLY generated index suffixes from entity Names — a
+/// final whitespace-separated token consisting solely of ASCII digits
+/// ("Enemy 01", "Enemy 02" from `format!("Enemy {i}")` naming) is
+/// removed so spawned instances share one violation target label.
+/// Rule (documented): digits are stripped ONLY when they form the
+/// entire last space-delimited token. Semantic digits ("Area51",
+/// "Level2 boss", "Enemy") are preserved verbatim — "Enemy" and
+/// "Enemy 1" both map to "Enemy" (a bare name matches its indexed
+/// family), but "Enemy" is never conflated with "Enemy2boss".
+pub(crate) fn strip_generated_suffix(name: &str) -> &str {
+    match name.rfind(' ') {
+        Some(sp)
+            if !name[sp + 1..].is_empty() && name[sp + 1..].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            &name[..sp]
+        }
+        _ => name,
+    }
+}
+
+#[cfg(test)]
+mod fx7_label_tests {
+    use super::strip_generated_suffix;
+
+    #[test]
+    fn generated_index_suffixes_stripped() {
+        assert_eq!(strip_generated_suffix("Enemy 01"), "Enemy");
+        assert_eq!(strip_generated_suffix("Enemy 02"), "Enemy");
+        assert_eq!(strip_generated_suffix("Patrol Point 3"), "Patrol Point");
+    }
+
+    #[test]
+    fn semantic_digits_preserved() {
+        assert_eq!(strip_generated_suffix("Enemy"), "Enemy");
+        assert_eq!(strip_generated_suffix("Area51"), "Area51");
+        assert_eq!(strip_generated_suffix("Level2 boss"), "Level2 boss");
+        assert_eq!(strip_generated_suffix("Boss v2"), "Boss v2");
+    }
+
+    #[test]
+    fn enemy_bare_and_indexed_share_label() {
+        assert_eq!(
+            strip_generated_suffix("Enemy"),
+            strip_generated_suffix("Enemy 1")
+        );
+    }
 }

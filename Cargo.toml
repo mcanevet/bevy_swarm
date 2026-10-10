@@ -72,6 +72,8 @@ rand = "0.10"
 jsonschema = { version = "0.30", default-features = false }
 fixture-turn-based = { package = "fixture_turn_based", path = "fixtures/turn_based" }
 fixture-walker = { package = "fixture_walker", path = "fixtures/walker" }
+# FX7: e2e spawner-leak fingerprint test
+fixture-spawner = { package = "fixture_spawner", path = "fixtures/spawner" }
 
 [badges]
 maintenance = { status = "actively-developed" }

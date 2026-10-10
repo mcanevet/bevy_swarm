@@ -23,6 +23,7 @@ fn spawn_buggy_system(mut commands: Commands) {
     commands.spawn((LeakyEntity, Transform::default()));
 }
 
+#[derive(Clone)]
 pub struct SpawnerGamePlugin;
 
 impl Plugin for SpawnerGamePlugin {

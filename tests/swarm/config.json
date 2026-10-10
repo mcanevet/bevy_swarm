@@ -10,6 +10,10 @@
     "nodes_in_bounds",
     "finite_transforms"
   ],
+  "fingerprints": {
+    "reject_keys": ["channel"],
+    "merge_keys": ["volatile"]
+  },
   "defaults": {
     "persona": "uniform",
     "update_mode": null
