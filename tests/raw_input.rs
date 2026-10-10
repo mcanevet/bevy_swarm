@@ -156,12 +156,12 @@ fn raw_click_entity_errors_on_missing_resolution() {
 
     // The Update-set click resolver is gated on a live scenario, and
     // chaos_bot_system (also gated) needs the choice stream.
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(
+    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
         serde_json::from_str(
             r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
         )
         .unwrap(),
-    ));
+    )));
     app.init_resource::<bevy_swarm::choice::ChoiceStream>();
     app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
 
@@ -463,12 +463,12 @@ fn fx8_click_entity_projects_to_viewport() {
     let mut state = PlaytestState::new(60, 42);
     state.frame = 0;
     app.world_mut().insert_resource(state);
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(
+    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
         serde_json::from_str(
             r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
         )
         .unwrap(),
-    ));
+    )));
     app.init_resource::<bevy_swarm::choice::ChoiceStream>();
     app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
 

@@ -107,3 +107,49 @@ fn zero_choices_are_simplest() {
         assert_eq!(c.value, 0, "zeros continuation draws zero");
     }
 }
+
+/// unit_f32: draw 0 maps to lo (not 0.0), so shrinking toward 0 means "simplest".
+#[test]
+fn fx6_j0_unit_f32_draw_zero_maps_to_lo() {
+    use bevy_swarm::choice::{ChoiceStream, Continuation};
+    // Use Continuation::Zeros via with_replay(empty, Zeros) to guarantee draw=0.
+    let mut cs_zeros = ChoiceStream::from_seed(0).with_replay(vec![], Continuation::Zeros);
+    let val = cs_zeros.unit_f32(0, 10.0, 20.0);
+    assert_eq!(val, 10.0, "draw 0 must map to lo");
+}
+
+/// Mid-stream bound-1: after several draws, a bound-1 draw must still
+/// record/pop symmetrically (no replay desync).
+#[test]
+fn fx6_j0_midstream_bound_one_no_desync() {
+    use bevy_swarm::choice::{Choice, ChoiceStream};
+    let mut cs = ChoiceStream::from_seed(42);
+    // Several normal draws first.
+    cs.below(0, 10);
+    cs.below(1, 5);
+    cs.below(2, 100);
+    // Bound-1 draw (records 0, pops).
+    let v = cs.below(3, 1);
+    assert_eq!(v, 0);
+    // Replay the recorded sequence — must reproduce exactly.
+    let recorded: Vec<_> = cs.recorded.clone().into_iter().map(|c| c.value).collect();
+    let replay_choices: Vec<Choice> = recorded
+        .iter()
+        .map(|&v| Choice {
+            frame: 0,
+            value: v,
+            bound: 0,
+        })
+        .collect();
+    let mut replay_cs = ChoiceStream::from_seed(42)
+        .with_replay(replay_choices, bevy_swarm::choice::Continuation::Prng);
+    // Re-draw the same frames (bounds don't matter for replay).
+    let r0 = replay_cs.below(0, 10);
+    let r1 = replay_cs.below(1, 5);
+    let r2 = replay_cs.below(2, 100);
+    let r3 = replay_cs.below(3, 1);
+    assert_eq!(r0, recorded[0]);
+    assert_eq!(r1, recorded[1]);
+    assert_eq!(r2, recorded[2]);
+    assert_eq!(r3, recorded[3]);
+}
