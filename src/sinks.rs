@@ -107,14 +107,79 @@ impl From<&bevy::ecs::error::Severity> for Severity {
 static SINK: std::sync::LazyLock<Mutex<HashMap<RunId, Vec<Captured>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Ensure a global tracing subscriber is installed exactly once.
+/// Ensure a global tracing subscriber is installed exactly once per
+/// process, with our capture layer first in the stack.
 ///
-/// Must be called **before** any App is built. For now, this is a no-op
-/// placeholder; full log capture requires adding `tracing-subscriber`
-/// as a dependency and installing a custom Layer.
+/// The layer routes WARN/ERROR events to the run active on the
+/// emitting thread (thread-local `CURRENT_RUN`). If no run is active,
+/// the event is dropped (ordinary game logging, not under test).
+///
+/// Safe to call repeatedly; installs once. If another subscriber was
+/// already set (e.g. the game's own LogPlugin beat us to it), this is a
+/// no-op — the allow-list in the driver tolerates that message.
 pub fn ensure_global_subscriber() {
-    // Placeholder: full implementation requires tracing-subscriber
-    // dependency and a custom Layer that pushes Captured::Log events.
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        use tracing_subscriber::layer::SubscriberExt;
+        let capture = CaptureLayer;
+        let subscriber = tracing_subscriber::registry()
+            .with(capture)
+            .with(tracing_subscriber::fmt::layer());
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    });
+}
+
+/// Tracing layer capturing WARN/ERROR events into the current run.
+struct CaptureLayer;
+
+impl<S> tracing_subscriber::Layer<S> for CaptureLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let level = *event.metadata().level();
+        let is_warn_or_error = matches!(level, tracing::Level::WARN | tracing::Level::ERROR);
+        if !is_warn_or_error {
+            return;
+        }
+        let mut visitor = MessageVisitor(String::new());
+        event.record(&mut visitor);
+        let message = visitor.0;
+        // Allow-list: expected harness noise in multi-App processes.
+        if message.contains("Could not set global logger") || message.contains("already set") {
+            return;
+        }
+        let target = event.metadata().target().to_string();
+        let frame = current_frame();
+        if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
+            let mut map = SINK.lock().unwrap();
+            map.entry(run_id).or_default().push(Captured::Log {
+                level: if level == tracing::Level::ERROR {
+                    Level::ERROR
+                } else {
+                    Level::WARN
+                },
+                target,
+                message,
+                frame,
+            });
+        }
+    }
+}
+
+/// Records the `message` field of a tracing event.
+struct MessageVisitor(String);
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{:?}", value);
+        }
+    }
 }
 
 /// Panic hook body: captures and then chains to `previous`.
@@ -171,17 +236,11 @@ fn thread_local_system_name() -> Option<String> {
     None
 }
 
-/// Swarm error handler: captures Bevy errors into the current run's sink.
-pub fn swarm_error_handler(err: BevyError, ctx: ErrorContext) {
-    capture_bevy_error(&err, &ctx);
-}
-
 /// Capture a borrowed BevyError + context into the current run's sink.
+///
+/// Severity mapping: Ignore = not recorded; Trace/Debug/Info/Warning ->
+/// Warning; Error/Panic -> Error.
 pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
-    // FX5 Z7: map by severity. Ignore = NOT recorded (errors the game
-    // explicitly marked uninteresting must not fail the run as
-    // bevy_warning). Trace/Debug/Info map to Warning (recorded), Error
-    // and Panic map to Error.
     let sev = err.severity();
     let severity = match sev {
         bevy::ecs::error::Severity::Ignore => return, // not recorded
@@ -203,6 +262,34 @@ pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
             frame,
         });
     }
+}
+
+/// Per-run chain of the previous (game-installed) error handler, so our
+/// wrapper can record and then call the game's handler. Keyed by RunId
+/// (parallel runs keep separate chains; sequential apps overwrite).
+static HANDLER_CHAIN: std::sync::LazyLock<Mutex<HashMap<RunId, bevy::ecs::error::ErrorHandler>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Register the previous error handler for a run; called by run_scenario
+/// before installing the swarm handler.
+pub fn set_previous_handler(run_id: RunId, prev: bevy::ecs::error::ErrorHandler) {
+    HANDLER_CHAIN.lock().unwrap().insert(run_id, prev);
+}
+
+/// Remove a run's handler-chain entry (drop guard / run exit).
+pub fn clear_previous_handler(run_id: RunId) {
+    HANDLER_CHAIN.lock().unwrap().remove(&run_id);
+}
+
+/// Look up the chained previous handler for the run active on this thread.
+fn chained_previous() -> Option<bevy::ecs::error::ErrorHandler> {
+    let run_id = CURRENT_RUN.with(Cell::get)?;
+    HANDLER_CHAIN.lock().unwrap().get(&run_id).copied()
+}
+
+/// Public wrapper for the driver's error-handler chain lookup.
+pub fn chained_previous_public() -> Option<bevy::ecs::error::ErrorHandler> {
+    chained_previous()
 }
 
 thread_local! {
