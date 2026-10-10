@@ -268,7 +268,9 @@ pub fn check_determinism(
         });
         let report = run_scenario(&mut app, scenario)?;
         let digests = report.state_trace.unwrap_or_default();
-        if let Some(fd) = digests.iter().find(|d| d.snapshot.is_some()) {
+        // The snapshot at the STOP frame (the divergence frame), not
+        // frame 0 — comparing frame-0 states yields no differences.
+        if let Some(fd) = digests.iter().rev().find(|d| d.snapshot.is_some()) {
             if let Some(s) = &fd.snapshot {
                 snapshots.push(s.clone());
             }

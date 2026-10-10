@@ -124,3 +124,42 @@ fn no_overhead_without_state_trace() {
     let rep = bevy_swarm::driver::run_scenario(&mut app, &scenario(9)).unwrap();
     assert!(rep.state_trace.is_none());
 }
+
+#[test]
+fn fx6_a4_late_divergence_reported_with_fields() {
+    // Divergence INTRODUCED at frame 30 must report frame 30 (not a
+    // frame-0 comparison producing no differing fields).
+    use bevy_swarm::harness::PlaytestState;
+    let builder = || {
+        let mut app = build_game();
+        app.add_systems(
+            Update,
+            |mut q: Query<&mut Transform, With<Gameplay>>, frame: Res<PlaytestState>| {
+                if let Ok(mut t) = q.single_mut() {
+                    if frame.frame == 30 {
+                        // True divergence at frame 30.
+                        t.translation.x += std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .subsec_nanos() as f32;
+                    }
+                }
+            },
+        );
+        app
+    };
+    let long: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":3},"duration_s":1.0,"invariants":[]}"#,
+    )
+    .unwrap();
+    let report = check_determinism(builder, &long, 2).unwrap();
+    assert!(!report.is_deterministic(), "must diverge after frame 30");
+    let div = report.first_divergence.expect("divergence");
+    assert!(
+        div.differing
+            .iter()
+            .any(|(k, _, _)| k.contains("translation.x")),
+        "differing must name the diverged field at the divergence frame, got {:?}",
+        div.differing
+    );
+}

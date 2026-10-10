@@ -694,19 +694,24 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     {
         // resource_scope lets us borrow world immutably for the query
         // and mutably for the index simultaneously.
-        app.world_mut().resource_scope(|world, mut idx: bevy::ecs::change_detection::Mut<crate::identity::IdentityIndex>| {
-            let entities: Vec<(bevy::ecs::entity::Entity, crate::identity::StableId)> = world
-                .query_filtered::<(bevy::ecs::entity::Entity, &crate::identity::StableId), With<crate::contract::Gameplay>>()
-                .iter(world)
-                .map(|(e, id)| (e, *id))
-                .collect();
-            let mut entities: Vec<_> = entities;
-            entities.sort_by_key(|(e, _)| *e);
-            idx.reset();
-            for (entity, id) in entities {
-                idx.reinsert(id, entity);
-            }
-        });
+        app.world_mut().resource_scope(
+            |world, mut idx: bevy::ecs::change_detection::Mut<crate::identity::IdentityIndex>| {
+                let mut q = world.query_filtered::<(
+                    bevy::ecs::entity::Entity,
+                    &crate::identity::StableId,
+                    Option<&bevy::prelude::Name>,
+                ), With<crate::contract::Gameplay>>();
+                let mut entities: Vec<_> = q
+                    .iter(world)
+                    .map(|(e, id, n)| (e, *id, n.cloned()))
+                    .collect();
+                entities.sort_by_key(|(e, _, _)| *e);
+                idx.reset();
+                for (entity, id, name) in entities {
+                    idx.reinsert(id, entity, name.as_ref());
+                }
+            },
+        );
     }
     let hooks = app
         .world_mut()

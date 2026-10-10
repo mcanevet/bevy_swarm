@@ -202,3 +202,99 @@ fn index_lookup_matches_scan() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// FX6 I1 re-review: re-index bug (next_stable collision, by_name lost).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fx6_i1_second_run_no_stable_id_collision() {
+    // Second run on the same App: entities existing at reset (from the
+    // first run) plus entities spawned mid-second-run must all carry
+    // DISTINCT StableIds, and by_name lookups must survive the reset.
+    use bevy_swarm::identity::{IdentityIndex, StableId};
+
+    let mut app = build_app();
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn((Gameplay, Name::new("Hero"), Transform::default()));
+        commands.spawn((Gameplay, Transform::default()));
+    });
+    // Mid-run spawner (active in BOTH runs).
+    app.add_systems(
+        Update,
+        |mut commands: Commands, frame: Res<bevy_swarm::harness::PlaytestState>| {
+            if frame.frame == 3 {
+                commands.spawn((Gameplay, Name::new("MidRun"), Transform::default()));
+            }
+        },
+    );
+    let sc: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":7},"duration_s":0.15}"#).unwrap();
+    let _ = run_scenario(&mut app, &sc).unwrap();
+    let _ = run_scenario(&mut app, &sc).unwrap();
+
+    let world = app.world();
+    let idx = world.resource::<IdentityIndex>();
+    // 1) All StableIds distinct.
+    let ids: Vec<StableId> = idx.stable_ids().map(|(id, _)| id).collect();
+    let uniq: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(
+        ids.len(),
+        uniq.len(),
+        "duplicate StableIds after second run: {:?}",
+        ids
+    );
+    // 2) by_name lookups still work (Hero existed before the reset).
+    let hero = idx.by_name("Hero");
+    assert!(
+        hero.is_some(),
+        "by_name(Hero) lost after second run's reset — replay by name will fail"
+    );
+    // 3) The MidRun entity spawned in the SECOND run is indexed by name.
+    let midrun = idx.by_name("MidRun");
+    assert!(midrun.is_some(), "by_name(MidRun) missing after second run");
+    // 4) Hero keeps the SAME StableId across runs (ids are stable).
+    let hero_sid = world.get::<StableId>(hero.unwrap()).copied();
+    assert!(
+        hero_sid.is_some_and(|s| s.0 == 0),
+        "Hero spawned first should keep StableId(0), got {:?}",
+        hero_sid
+    );
+}
+
+#[test]
+fn fx6_i1_reinsert_restores_by_name_and_advances_next_stable() {
+    // Demonstrates the bug: reset() clears by_name, so replay by name fails.
+    use bevy_swarm::identity::IdentityIndex;
+
+    let mut app = build_app();
+    app.add_systems(Startup, |mut commands: Commands| {
+        commands.spawn((Gameplay, Name::new("Hero"), Transform::default()));
+    });
+    let sc: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":3},"duration_s":0.1}"#).unwrap();
+    let _ = run_scenario(&mut app, &sc);
+
+    let idx = app.world().resource::<IdentityIndex>();
+    let hero_before = idx.by_name("Hero");
+    assert!(hero_before.is_some(), "Hero indexed before reset");
+
+    // Reset + reinsert with names (the fixed driver.rs pattern).
+    app.world_mut()
+        .resource_scope(|world, mut idx: Mut<IdentityIndex>| {
+            let mut q = world.query::<(Entity, &StableId, Option<&Name>)>();
+            let mut entities: Vec<_> = q.iter(world).collect();
+            entities.sort_by_key(|(e, _, _)| *e);
+            idx.reset();
+            for (entity, id, name) in entities {
+                idx.reinsert(*id, entity, name);
+            }
+        });
+
+    let idx = app.world().resource::<IdentityIndex>();
+    let hero_after = idx.by_name("Hero");
+    assert!(
+        hero_after.is_some(),
+        "reinsert with a name must restore by_name"
+    );
+}
