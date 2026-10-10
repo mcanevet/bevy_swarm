@@ -99,3 +99,55 @@ fn lazy_registered_component_count_works() {
         rep.violations
     );
 }
+
+/// I2: Custom query-count invariant without a numeric value must reject at LOAD.
+#[test]
+fn custom_query_count_requires_numeric_value() {
+    // Missing value field — should reject with ScenarioError::InvalidInvariant.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"cnt","rule":"custom","query":{"with":["Name"],"without":[]},
+             "check":"ge"}
+        ]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let err = run_scenario(&mut app, &scenario).unwrap_err();
+    match &err {
+        ScenarioError::Rejected(reason) => {
+            assert!(reason.contains("numeric value"), "{}", reason);
+        }
+        other => panic!("expected Rejected, got: {:?}", other),
+    }
+}
+
+/// I2: a registered-but-never-spawned component counts as 0 — NOT an
+/// "unresolved component type" violation (load-time checks already
+/// rejected true typos).
+#[test]
+fn never_spawned_component_counts_as_zero() {
+    #[derive(bevy::reflect::Reflect, bevy::prelude::Component)]
+    #[reflect(Component)]
+    struct NeverSpawned;
+
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"zero","rule":"custom","query":{"with":["NeverSpawned"],"without":[]},
+             "check":"equals","value":0}
+        ]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    app.register_type::<NeverSpawned>();
+    let result = run_scenario(&mut app, &scenario);
+    match result {
+        Ok(report) => {
+            assert!(
+                !report.violations.iter().any(|v| v.rule == "zero"),
+                "never-spawned component must count as 0, got violations: {:?}",
+                report.violations
+            );
+        }
+        Err(e) => panic!("scenario must run, got: {e:?}"),
+    }
+}

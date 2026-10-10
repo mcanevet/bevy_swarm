@@ -70,7 +70,14 @@ pub enum PlaytestSet {
 }
 
 #[derive(Resource)]
-pub struct ScenarioResource(pub Scenario);
+pub struct ScenarioResource(pub std::sync::Arc<Scenario>);
+
+impl std::ops::Deref for ScenarioResource {
+    type Target = Scenario;
+    fn deref(&self) -> &Scenario {
+        &self.0
+    }
+}
 
 pub struct PlaytestPlugin;
 
@@ -653,7 +660,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             std::time::Duration::from_secs_f64(1.0 / tps as f64),
         ));
     }
-    app.insert_resource(ScenarioResource(scenario.clone()));
+    app.insert_resource(ScenarioResource(std::sync::Arc::new(scenario.clone())));
 
     // Seed propagation: games with randomness read this resource to seed
     // their generators, making chaos runs reproducible.

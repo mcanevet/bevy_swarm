@@ -323,7 +323,7 @@ pub fn calibrate_world_opts(
         opts.seed, opts.tps, opts.simulated_time
     ))
     .map_err(|e| ScenarioError::Rejected(format!("internal: bad calibration scenario: {e}")))?;
-    app.insert_resource(ScenarioResource(scenario));
+    app.insert_resource(ScenarioResource(std::sync::Arc::new(scenario)));
     app.insert_resource(Violations::default());
 
     // Robustness: insert PlaytestState if missing (the App may have been

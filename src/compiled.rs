@@ -245,9 +245,28 @@ fn compile_accessor(world: &mut World, inv: &Invariant) -> Result<Option<Accesso
 
 fn compile_kind(inv: &Invariant) -> Result<CompiledKind, ScenarioError> {
     debug_assert_eq!(inv.rule, crate::enums::InvariantRule::Custom);
-    // Q1: query count.
+    // Q1: query count. A query-count invariant with a missing or
+    // non-numeric value silently defaulted to `Ge 0` (always true —
+    // vacuous). Reject at load. Path-based / differential invariants
+    // interpret `value` elsewhere and may legitimately omit it.
     let op = inv.check.unwrap_or(CheckOp::Ge);
-    let threshold = inv.value.as_ref().and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let threshold = if inv.query.is_some() {
+        let t = inv.value.as_ref().and_then(|v| v.as_f64()).ok_or_else(|| {
+            ScenarioError::Rejected(format!(
+                "custom invariant \"{}\" requires a numeric value",
+                inv.name
+            ))
+        })?;
+        if !t.is_finite() {
+            return Err(ScenarioError::Rejected(format!(
+                "custom invariant \"{}\" threshold must be finite",
+                inv.name
+            )));
+        }
+        t
+    } else {
+        0.0
+    };
     Ok(CompiledKind::QueryCount { op, threshold })
 }
 
@@ -402,9 +421,22 @@ impl Accessor {
                     }
                     *state = Some(builder.build());
                 } else {
-                    // Still unresolved (unknown component in this world —
-                    // distinct from a typo rejected at load). Return None;
-                    // the caller reports "unresolved" like the old path.
+                    // FX6 I2: a registered-but-never-spawned component
+                    // has a valid component id but no storage yet —
+                    // `get_valid_id` returns None until first spawn
+                    // triggers registration. Since load-time checks
+                    // rejected true typos, treat fully-registered
+                    // TYPES with unresolved storage as a valid count
+                    // of 0 (nothing matches).
+                    let registry = world.resource::<AppTypeRegistry>().0.read();
+                    let types_known = with_names
+                        .iter()
+                        .chain(without_names.iter())
+                        .all(|n| registry.get_with_short_type_path(n).is_some());
+                    if types_known {
+                        return Some(0);
+                    }
+                    // Unknown type after all — genuinely unresolved.
                     return None;
                 }
             }
