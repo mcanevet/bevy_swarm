@@ -7,8 +7,6 @@
 
 use bevy::ecs::component::{ComponentId, Components};
 use bevy::ecs::entity::Entity;
-use bevy::ecs::query::QueryState;
-use bevy::ecs::reflect::AppTypeRegistry;
 use bevy::ecs::world::World;
 use bevy::prelude::*;
 use bevy::reflect::ParsedPath;
@@ -18,10 +16,6 @@ use crate::scenario::{Invariant, ScenarioError};
 
 /// Compiled accessor for invariant evaluation.
 pub(crate) enum Accessor {
-    /// Game TestApi resolver (opaque path; runtime-checked). The
-    /// path is retained for diagnostics; resolution stays dynamic
-    /// (opaque resolver, D1).
-    TestApi(#[allow(dead_code)] String),
     /// Resource field via reflection.
     ResourceField {
         component_id: ComponentId,
@@ -38,18 +32,6 @@ pub(crate) enum Accessor {
         without_names: Vec<String>,
         state: Option<QueryState<Entity>>,
     },
-    /// Field of one entity, addressed stably. Reserved for full runtime
-    /// wiring (selectors resolve per-frame today); the resolved
-    /// component id / reflect handle / parsed path live here for the
-    /// fast path once wired.
-    EntityField {
-        #[allow(dead_code)]
-        component_id: ComponentId,
-        #[allow(dead_code)]
-        reflect: bevy::ecs::reflect::ReflectComponent,
-        #[allow(dead_code)]
-        parsed_path: ParsedPath,
-    },
 }
 
 /// Compiled invariant (ready for fast per-frame evaluation). `window`
@@ -60,10 +42,6 @@ pub(crate) struct CompiledInvariant {
     pub name: String,
     pub kind: CompiledKind,
     pub accessor: Option<Accessor>,
-    #[allow(dead_code)]
-    pub window: Window,
-    #[allow(dead_code)]
-    pub state: InvariantState,
 }
 
 /// Invariant kind (after parsing). Kinds beyond QueryCount are
@@ -71,23 +49,6 @@ pub(crate) struct CompiledInvariant {
 /// resource; only count invariants gain a compiled fast path today.
 pub(crate) enum CompiledKind {
     QueryCount { op: CheckOp, threshold: f64 },
-}
-
-/// Time windows for eventual/delta checks.
-#[allow(dead_code)]
-pub(crate) struct Window {
-    pub after_ticks: u64,
-    pub before_ticks: Option<u64>,
-    pub deadline_ticks: Option<u64>,
-}
-
-/// Runtime state for an invariant.
-#[derive(Clone, Default)]
-#[allow(dead_code)]
-pub(crate) struct InvariantState {
-    pub eventually_satisfied: Option<u64>,
-    pub delta_ring: std::collections::VecDeque<(u64, f64)>,
-    pub last_value: Option<f64>,
 }
 
 /// Compiled scenario (invariants compiled once at load).
@@ -112,17 +73,10 @@ pub(crate) fn compile(
         }
         let accessor = compile_accessor(world, inv)?;
         let kind = compile_kind(inv)?;
-        let window = Window {
-            after_ticks: ticks(inv.after_s, scenario.tps as u64).unwrap_or(0),
-            before_ticks: ticks(inv.before_s, scenario.tps as u64),
-            deadline_ticks: ticks(inv.eventually_s, scenario.tps as u64),
-        };
         invariants.push(CompiledInvariant {
             name: inv.name.clone(),
             kind,
             accessor,
-            window,
-            state: InvariantState::default(),
         });
     }
 
@@ -169,11 +123,6 @@ fn compile_accessor(world: &mut World, inv: &Invariant) -> Result<Option<Accesso
         return Ok(None);
     };
 
-    // TestApi resolver (opaque; runtime-checked).
-    if path.starts_with("TestApi.") {
-        return Ok(Some(Accessor::TestApi(path.clone())));
-    }
-
     // Resource field.
     if let Some(rest) = path.strip_prefix("Resource:") {
         let (type_path, field) =
@@ -203,37 +152,6 @@ fn compile_accessor(world: &mut World, inv: &Invariant) -> Result<Option<Accesso
             reason: format!("invalid field path: {:?}", e),
         })?;
         return Ok(Some(Accessor::ResourceField {
-            component_id: comp_id,
-            reflect,
-            parsed_path: parsed,
-        }));
-    }
-
-    // Entity field (Component:T{<Name>}.<field>, @<stable_id>, [idx]).
-    if let Some(rest) = path.strip_prefix("Component:") {
-        // Parse selector and field.
-        let (type_path, _selector, field) = parse_component_selector(rest)?;
-        let (comp_id, reflect) = {
-            let registry = world.resource::<AppTypeRegistry>().0.read();
-            let components = world.components();
-            let Some(comp_id) = resolve_type_id(type_path, &registry, components)? else {
-                return Ok(None);
-            };
-            let reflect = registry
-                .get_with_short_type_path(type_path)
-                .and_then(|r| r.data::<bevy::ecs::reflect::ReflectComponent>())
-                .ok_or_else(|| ScenarioError::InvalidComponent {
-                    name: type_path.into(),
-                    reason: "type not registered or lacks ReflectComponent".into(),
-                })?
-                .clone();
-            (comp_id, reflect)
-        };
-        let parsed = ParsedPath::parse(field).map_err(|e| ScenarioError::InvalidComponent {
-            name: path.to_string(),
-            reason: format!("invalid field path: {:?}", e),
-        })?;
-        return Ok(Some(Accessor::EntityField {
             component_id: comp_id,
             reflect,
             parsed_path: parsed,
@@ -303,85 +221,12 @@ fn resolve_type_id(
     Ok(components.get_valid_id(reg.type_id()))
 }
 
-fn parse_component_selector(rest: &str) -> Result<(&str, Selector, &str), ScenarioError> {
-    // Forms: "Type{<Name>}.<field>", "Type@<stable_id>.<field>", "Type[<i>].<field>", "Type.<field>"
-    if let Some(brace) = rest.find('{') {
-        let close = rest[brace..]
-            .find('}')
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing '}'".into(),
-            })?
-            + brace;
-        let name = &rest[brace + 1..close];
-        let field = rest
-            .get(close + 1..)
-            .and_then(|s| s.strip_prefix('.'))
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing '.' after {Name}".into(),
-            })?;
-        Ok((&rest[..brace], Selector::Name(name.to_string()), field))
-    } else if let Some(at) = rest.find('@') {
-        let dot = rest[at + 1..]
-            .find('.')
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing '.' after @<stable_id>".into(),
-            })?;
-        let sid: u64 =
-            rest[at + 1..at + 1 + dot]
-                .parse()
-                .map_err(|_| ScenarioError::InvalidComponent {
-                    name: rest.into(),
-                    reason: "invalid stable_id".into(),
-                })?;
-        let field = &rest[at + 1 + dot + 1..];
-        Ok((&rest[..at], Selector::StableId(sid), field))
-    } else if let Some(bracket) = rest.find('[') {
-        let close = rest[bracket..]
-            .find(']')
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing ']'".into(),
-            })?
-            + bracket;
-        let idx: usize =
-            rest[bracket + 1..close]
-                .parse()
-                .map_err(|_| ScenarioError::InvalidComponent {
-                    name: rest.into(),
-                    reason: "invalid index".into(),
-                })?;
-        let field = rest
-            .get(close + 1..)
-            .and_then(|s| s.strip_prefix('.'))
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing '.' after [idx]".into(),
-            })?;
-        Ok((&rest[..bracket], Selector::Index(idx), field))
-    } else {
-        let dot = rest
-            .find('.')
-            .ok_or_else(|| ScenarioError::InvalidComponent {
-                name: rest.into(),
-                reason: "missing '.<field>'".into(),
-            })?;
-        Ok((&rest[..dot], Selector::Index(0), &rest[dot + 1..]))
-    }
-}
-
 #[derive(Clone)]
 #[allow(dead_code)]
 enum Selector {
     Name(String),
     StableId(u64),
     Index(usize),
-}
-
-fn ticks(seconds: Option<f32>, tps: u64) -> Option<u64> {
-    seconds.map(|s| (s * tps as f32) as u64)
 }
 
 impl Accessor {
@@ -458,33 +303,5 @@ impl Accessor {
         } else {
             None
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_selector_works() {
-        let (tp, sel, fld) = parse_component_selector("Hero{Player}.health").unwrap();
-        assert_eq!(tp, "Hero");
-        assert!(matches!(sel, Selector::Name(s) if s == "Player"));
-        assert_eq!(fld, "health");
-
-        let (tp, sel, fld) = parse_component_selector("Health@42.current").unwrap();
-        assert_eq!(tp, "Health");
-        assert!(matches!(sel, Selector::StableId(42)));
-        assert_eq!(fld, "current");
-
-        let (tp, sel, fld) = parse_component_selector("Pos[2].x").unwrap();
-        assert_eq!(tp, "Pos");
-        assert!(matches!(sel, Selector::Index(2)));
-        assert_eq!(fld, "x");
-
-        let (tp, sel, fld) = parse_component_selector("Speed.velocity").unwrap();
-        assert_eq!(tp, "Speed");
-        assert!(matches!(sel, Selector::Index(0)));
-        assert_eq!(fld, "velocity");
     }
 }

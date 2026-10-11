@@ -349,23 +349,6 @@ fn replay_variant(ri: &ReplayIntent) -> &'static str {
     }
 }
 
-/// Detailed per-intent string (kept for violation CONTEXT only —
-/// coverage keys stay variant-level, comparable across bots).
-#[allow(dead_code)]
-fn replay_ctx(ri: &ReplayIntent) -> String {
-    match ri {
-        ReplayIntent::Move { dir } => format!("move:x={:.2},y={:.2}", dir.0, dir.1),
-        ReplayIntent::Choice { index } => format!("choice:idx={}", index),
-        ReplayIntent::Axis { name, value } => format!("axis:{}={:.2}", name, value),
-        ReplayIntent::Select { target } => match target {
-            SelectTarget::Name(n) => format!("select:name={}", n),
-            SelectTarget::Stable { stable_id } => format!("select:stable={}", stable_id),
-        },
-        ReplayIntent::Wait => "wait".into(),
-        ReplayIntent::Raw { raw } => format!("raw:{:?}", raw),
-    }
-}
-
 /// Check whether a primitive goal's TestApi path satisfies its check.
 fn primitive_achieved(
     resolve: &dyn Fn(&str) -> Option<TestFieldValue>,
