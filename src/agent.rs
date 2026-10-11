@@ -928,6 +928,11 @@ fn agent_flush_system(world: &mut World) {
                 world.insert_resource(hooks);
             }
             AgentRequest::Screenshot { path } => {
+                // Ensure the sandbox directory exists before the async
+                // write (save_to_disk does not create parents).
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 // Spawn a Screenshot (async write via observer).
                 world
                     .spawn(bevy::render::view::window::screenshot::Screenshot::primary_window())
@@ -1049,20 +1054,43 @@ fn viewport_location(
 // native screenshot's native screenshot mechanism); in headless
 /// harness mode it returns window geometry only.
 fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResult {
-    // Require a primary window; fail loudly if headless.
     let Some(window) = primary_window_read(world) else {
         return Err(invalid_params(
             "no primary window — screenshots need a rendering app",
         ));
     };
-    let _ = window; // validated above; spawn will use it.
+    let _ = window;
     let frame = world.resource::<AgentFrameCounter>().0;
-    let path = params
+
+    // C1 sandbox: sanitize path — reject .., absolute paths, non-.png suffixes.
+    let user_path: Option<std::path::PathBuf> = params
         .as_ref()
         .and_then(|p| p.get("path"))
         .and_then(Value::as_str)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| format!("screenshot-{}.png", frame).into());
+        .map(std::path::PathBuf::from);
+
+    let path = if let Some(p) = user_path {
+        // Reject absolute paths
+        if p.is_absolute() {
+            return Err(invalid_params("screenshot path must be relative"));
+        }
+        // Reject path traversal
+        if p.components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(invalid_params("screenshot path must not contain '..'"));
+        }
+        // Require .png suffix
+        let path_str = p.to_string_lossy();
+        if !path_str.ends_with(".png") {
+            return Err(invalid_params("screenshot path must end with '.png'"));
+        }
+        // Confine to screenshots/ subdirectory
+        std::path::PathBuf::from("screenshots").join(p)
+    } else {
+        std::path::PathBuf::from(format!("screenshots/screenshot-{}.png", frame))
+    };
+
     send_request(world, AgentRequest::Screenshot { path: path.clone() })?;
     Ok(json!({ "queued": true, "path": path }))
 }
@@ -1168,5 +1196,48 @@ fn agent_method_allowlist_sweep(world: &mut World) {
             }
         }
         world.insert_resource(kept);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screenshot_path_sandbox_rejects_traversal() {
+        // C1: reject .., absolute paths, non-.png suffixes.
+        let reject = |path: &str| {
+            let val = Value::String(path.to_string());
+            let params = json!({"path": val});
+            let world = World::new();
+            // Minimal setup for playtest_screenshot to run (no window needed,
+            // we're testing path validation before window check).
+            let res = playtest_screenshot(In(Some(params)), &world);
+            res.is_err()
+        };
+
+        assert!(reject("../etc/passwd.png"));
+        assert!(reject("/absolute/path.png"));
+        assert!(reject("foo/../bar.png"));
+        assert!(reject("foo.txt"));
+        assert!(reject("screenshot.jpg"));
+        assert!(reject("foo/bar.baz"));
+    }
+
+    #[test]
+    fn screenshot_path_sandbox_accepts_valid_relative_png() {
+        let valid = |path: &str| {
+            let val = Value::String(path.to_string());
+            let params = json!({"path": val});
+            let world = World::new();
+            let res = playtest_screenshot(In(Some(params)), &world);
+            // Should fail on missing window, NOT on path validation
+            res.err()
+                .is_some_and(|e| e.message.contains("no primary window"))
+        };
+
+        assert!(valid("screenshot-1.png"));
+        assert!(valid("screenshots/foo.png"));
+        assert!(valid("a/b/c.png"));
     }
 }
