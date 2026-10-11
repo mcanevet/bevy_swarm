@@ -867,6 +867,32 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         }
     }));
 
+    // Unwind-safety net: an exclusive system that panicked mid-flight
+    // (planner, cheat scheduler) may have removed a resource it was
+    // about to re-insert. Restore missing harness-critical resources
+    // so report extraction below and subsequent frames keep working;
+    // violations recorded before the panic are lost (reported via
+    // cheat_hook_panicked / reset_hook_panicked rules when detectable).
+    if app.world().get_resource::<Violations>().is_none() {
+        app.world_mut().insert_resource(Violations::default());
+    }
+    if app
+        .world()
+        .get_resource::<crate::contract::CheatHooks>()
+        .is_none()
+    {
+        app.world_mut()
+            .insert_resource(crate::contract::CheatHooks::default());
+    }
+    if app
+        .world()
+        .get_resource::<crate::typed::TypedRegistry>()
+        .is_none()
+    {
+        app.world_mut()
+            .insert_resource(crate::typed::TypedRegistry::default());
+    }
+
     let state = app
         .world_mut()
         .remove_resource::<PlaytestState>()
@@ -1243,12 +1269,26 @@ pub(crate) fn cheat_scheduler_system(world: &mut World) {
             None,
         );
         // Execute: hooks aren't Clone — remove resource, extract, run,
-        // restore.
+        // restore. The hook runs inside a panic boundary — a panicking
+        // cheat hook is reported (cheat_hook_panicked) instead of
+        // unwinding through the scheduler and LOSING the remaining
+        // hooks for later frames.
         let Some(mut hooks) = world.remove_resource::<crate::contract::CheatHooks>() else {
             continue;
         };
         if let Some(hook) = hooks.0.remove(&kind) {
-            hook(world);
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                hook(world);
+            }))
+            .is_err();
+            if panicked {
+                world.resource_mut::<Violations>().report(
+                    "cheat_hook_panicked",
+                    &kind,
+                    format!("cheat hook '{}' panicked", kind),
+                    frame,
+                );
+            }
         }
         world.insert_resource(hooks);
     }
