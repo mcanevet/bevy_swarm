@@ -25,7 +25,8 @@
 //! - A `TestApi` resource that implements `TestApiResolve` (provided by your game)
 //! - `ResetHooks` and `IntentSurface` resources (provided by this crate's defaults)
 //!
-// Z14: getrandom_backend cfg is set via RUSTFLAGS by cargo swarm run.
+// Z14: getrandom_backend cfg is set via RUSTFLAGS (a planned
+// `cargo swarm run` wrapper will set it automatically).
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 #[cfg(feature = "agent")]

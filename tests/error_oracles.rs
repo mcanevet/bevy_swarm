@@ -50,6 +50,36 @@ fn panic_yields_crash_with_meaningful_message() {
     assert!(!err.contains("Any { .. }"), "error was: {err}");
 }
 
+/// Item 7: panic mid-run yields a violation with frame > 0 (not 0).
+#[test]
+fn panic_violation_has_frame_gt_zero() {
+    let mut app = App::new();
+    app.add_plugins(PlaytestPlugin);
+    // Panic at frame 5.
+    app.add_systems(
+        Update,
+        |frame: Option<Res<bevy_swarm::state::PlaytestState>>| {
+            let f = frame.map(|s| s.frame).unwrap_or(0);
+            if f == 5 {
+                panic!("mid-run panic");
+            }
+        },
+    );
+    let rep = run_scenario(&mut app, &scenario_json()).unwrap();
+    assert_eq!(rep.status, PlaytestStatus::Crash);
+    // The panic violation must have frame > 0.
+    let panic_v = rep
+        .violations
+        .iter()
+        .find(|v| v.rule == "panic")
+        .expect("panic violation must be present");
+    assert!(
+        panic_v.first_frame > 0,
+        "panic violation frame must be > 0, got {}",
+        panic_v.first_frame
+    );
+}
+
 #[test]
 fn parallel_runs_route_errors_independently() {
     // Two runs on separate threads: only the erroring run's report has

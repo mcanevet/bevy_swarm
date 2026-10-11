@@ -10,7 +10,7 @@
 //! ```bash
 //! RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_swarm/deterministic-entropy
 //! ```
-//! Or use `cargo swarm run` which sets both automatically.
+//! (planned: a `cargo swarm run` wrapper that sets both automatically).
 
 use std::cell::RefCell;
 
@@ -98,7 +98,7 @@ pub fn enter_run(seed: u64) {
     eprintln!(
         "bevy_swarm: deterministic-entropy feature is enabled but the getrandom \
          custom-backend cfg is NOT set. Rebuild with RUSTFLAGS='--cfg getrandom_backend=\"custom\"' \
-         or `cargo swarm run`; entropy interception is inactive and runs are NOT \
+         (a planned `cargo swarm run` wrapper sets it automatically); entropy interception is inactive and runs are NOT \
          deterministic."
     );
     STREAM.with(|s| {
@@ -200,13 +200,24 @@ fn global_fallback() -> &'static std::sync::Mutex<Xoshiro256StarStar> {
 /// declares the same symbol with the same ABI. getrandom 0.3 is not a
 /// direct dependency, so its layout is asserted transitively: both
 /// 0.3.x and 0.4.x define `Error` as a `NonZeroU32` error code
-/// (size 4, align 4). If this ever drifts, this assertion fails the
-/// build instead of silently breaking the FFI contract.
+/// (size 4, align 4) — the second assert below checks that the actual
+/// `getrandom04::Error` layout still matches a `NonZeroU32`, so a
+/// layout drift in EITHER version fails the build instead of silently
+/// breaking the FFI contract.
 #[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
 const _: () = {
     assert!(
         std::mem::size_of::<getrandom04::Error>() == 4
             && std::mem::align_of::<getrandom04::Error>() == 4
+    );
+    // Equivalent-abi check against a NonZeroU32, the layout getrandom
+    // 0.3 also documents for its Error. Both crates repr(Rust)-wrap a
+    // NonZeroU32 error code; if either drifts away from that layout the
+    // FFI contract with the shared __getrandom_v03_custom symbol breaks.
+    assert!(
+        std::mem::size_of::<std::num::NonZeroU32>() == std::mem::size_of::<getrandom04::Error>()
+            && std::mem::align_of::<std::num::NonZeroU32>()
+                == std::mem::align_of::<getrandom04::Error>()
     );
 };
 

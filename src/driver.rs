@@ -1006,7 +1006,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                             .next()
                             .and_then(|d| d.parse::<u64>().ok())
                     })
-                    .unwrap_or(0);
+                    // Fall back to the frame the driver had advanced to
+                    // when the panic fired (the sink's thread-local
+                    // CURRENT_FRAME) instead of a hardcoded 0.
+                    .unwrap_or_else(crate::sinks::current_frame);
                 let target = system.unwrap_or_else(|| "world".to_string());
                 let detail = match location {
                     Some(loc) => format!("{message} at {loc}"),
