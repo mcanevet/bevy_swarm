@@ -144,6 +144,15 @@ pub(crate) fn chaos_bot_system(
         };
         raw_queue.0.lock().unwrap().push_back((state.frame, action));
         state.metrics.input_count += 1;
+        // Coverage: track which raw-action KIND was sampled (tier-0
+        // equivalent of chaos_surface_indices, so autotest reports
+        // non-empty coverage for games without testable-conventions).
+        state
+            .coverage
+            .intents_emitted
+            .entry(format!("raw_kind:{}", kind))
+            .and_modify(|c| *c += 1)
+            .or_insert(1);
         return;
     };
     if surface.0.is_empty() {
