@@ -368,6 +368,7 @@ pub(crate) struct PendingGesture {
     button: PointerButton,
     pub(crate) target_name: String,
     require_actionable: bool,
+    press_delivered: bool,
 }
 
 /// synthetic_pointer: emits RAW `PointerInput` events (Move → Press →
@@ -390,50 +391,7 @@ pub(crate) fn synthetic_pointer_bot_system(
     idx: Res<crate::identity::IdentityIndex>,
 ) {
     // Deliver pending gesture halves scheduled for this frame.
-    let frame = state.frame;
-    let mut still_pending = std::collections::VecDeque::new();
-    while let Some(mut g) = state.pending_gestures.pop_front() {
-        if g.press_at == frame {
-            pointer_inputs.write(PointerInput::new(
-                PointerId::Mouse,
-                g.location.clone(),
-                PointerAction::Press(g.button),
-            ));
-        }
-        if g.release_at == frame {
-            pointer_inputs.write(PointerInput::new(
-                PointerId::Mouse,
-                g.location.clone(),
-                PointerAction::Release(g.button),
-            ));
-            // ACTIONABILITY GATE (opt-in): after the gesture the
-            // picking backend must show the pointer over SOME entity —
-            // proof the click went through live picking wiring, not
-            // into the void. Checked one frame AFTER release (hover
-            // maps lag input by a frame).
-            if g.require_actionable {
-                state.pending_actionability_checks.push_back(g.clone());
-            }
-            state
-                .coverage
-                .intents_emitted
-                .entry(format!("pointer_click:{}", g.target_name))
-                .and_modify(|c| *c += 1)
-                .or_insert(1);
-            violations.set_context(format!(
-                "synthetic_pointer:frame={},target={}",
-                frame, g.target_name
-            ));
-            continue; // gesture complete
-        }
-        // Not yet fully delivered — keep waiting. A gesture that has
-        // already pressed but not released stays queued.
-        if g.press_at > frame {
-            g.press_at = frame; // avoid double-press on future loops
-        }
-        still_pending.push_back(g);
-    }
-    state.pending_gestures = still_pending;
+    deliver_pending_gestures(&mut state, &mut violations, &mut pointer_inputs);
     for click in &scenario.0.bot.pointer_clicks {
         if click.frame != state.frame {
             continue;
@@ -524,6 +482,7 @@ pub(crate) fn synthetic_pointer_bot_system(
             button,
             target_name: click.target.clone(),
             require_actionable: click.require_actionable,
+            press_delivered: false,
         });
     }
 }
@@ -601,3 +560,120 @@ pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
 }
 
 // ---------------------------------------------------------------------------
+
+/// Deliver pending gesture halves scheduled for this (or a past)
+/// frame. Split out of synthetic_pointer_bot_system for direct
+/// testability.
+pub(crate) fn deliver_pending_gestures(
+    state: &mut PlaytestState,
+    violations: &mut crate::state::Violations,
+    pointer_inputs: &mut MessageWriter<PointerInput>,
+) {
+    let frame = state.frame;
+    let mut still_pending = std::collections::VecDeque::new();
+    while let Some(mut g) = state.pending_gestures.pop_front() {
+        // 716.31 (m2h.21): deliver as soon as we're at or past the
+        // scheduled frame — exact equality loses the press half when
+        // frame jumps by more than 1 (pause, startup jitter, frame
+        // drop). press_delivered guarantees at-most-once delivery.
+        if !g.press_delivered && g.press_at <= frame {
+            pointer_inputs.write(PointerInput::new(
+                PointerId::Mouse,
+                g.location.clone(),
+                PointerAction::Press(g.button),
+            ));
+            g.press_delivered = true;
+        }
+        if g.release_at <= frame {
+            pointer_inputs.write(PointerInput::new(
+                PointerId::Mouse,
+                g.location.clone(),
+                PointerAction::Release(g.button),
+            ));
+            // ACTIONABILITY GATE (opt-in): after the gesture the
+            // picking backend must show the pointer over SOME entity —
+            // proof the click went through live picking wiring, not
+            // into the void. Checked one frame AFTER release (hover
+            // maps lag input by a frame).
+            if g.require_actionable {
+                state.pending_actionability_checks.push_back(g.clone());
+            }
+            state
+                .coverage
+                .intents_emitted
+                .entry(format!("pointer_click:{}", g.target_name))
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+            violations.set_context(format!(
+                "synthetic_pointer:frame={},target={}",
+                frame, g.target_name
+            ));
+            continue; // gesture complete
+        }
+        // Not yet fully delivered — keep waiting. A gesture that has
+        // already pressed but not released stays queued.
+        still_pending.push_back(g);
+    }
+    state.pending_gestures = still_pending;
+}
+
+#[cfg(test)]
+mod tests_716_m2h {
+    use super::*;
+    use bevy::picking::pointer::PointerButton;
+    use bevy::prelude::{App, ResMut};
+
+    #[test]
+    fn pointer_gesture_delivers_on_frame_skip() {
+        // 716.31 (m2h.21): if frame jumps from 0→5, press_at=1 must still
+        // deliver exactly once (not zero times, not five times).
+        let mut app = App::new();
+        app.add_message::<PointerInput>();
+        app.init_resource::<crate::state::Violations>();
+        let mut state = PlaytestState::new(60, 1);
+        let f = state.frame;
+        state.pending_gestures.push_back(PendingGesture {
+            press_at: f + 1,
+            release_at: f + 3,
+            location: bevy::picking::pointer::Location {
+                target: bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(
+                    bevy::ecs::entity::Entity::PLACEHOLDER,
+                ))
+                .normalize(None)
+                .unwrap(),
+                position: (0.0, 0.0).into(),
+            },
+            button: PointerButton::Primary,
+            target_name: "target".to_string(),
+            require_actionable: false,
+            press_delivered: false,
+        });
+        // Jump to frame 5 (simulate pause/jitter/frame-drop).
+        state.frame = 5;
+        app.insert_resource(state);
+
+        // Register delivery as a one-off system so MessageWriter works.
+        let sid = app.world_mut().register_system(
+            |mut state: ResMut<PlaytestState>,
+             mut violations: ResMut<crate::state::Violations>,
+             mut writer: MessageWriter<PointerInput>| {
+                deliver_pending_gestures(&mut state, &mut violations, &mut writer);
+            },
+        );
+        app.world_mut().run_system(sid).unwrap();
+
+        // The gesture must have completed (left the queue) and been
+        // counted in coverage.intents_emitted — proof of delivery
+        // despite the frame jump.
+        let st = app.world().resource::<PlaytestState>();
+        assert!(
+            st.pending_gestures.is_empty(),
+            "gesture must complete on frame skip"
+        );
+        assert_eq!(
+            st.coverage.intents_emitted.get("pointer_click:target"),
+            Some(&1),
+            "exactly one delivery must be counted"
+        );
+    }
+}
