@@ -37,6 +37,17 @@ documentation = "https://docs.rs/bevy_swarm"
 readme = "README.md"
 keywords = ["bevy", "gamedev", "testing", "playtesting", "ecs"]
 categories = ["game-development", "development-tools::testing"]
+# Keep the published crate lean: repo-only tooling must not ship to
+# crates.io.
+exclude = [
+    ".beads/",
+    ".github/",
+    ".cursor/",
+    ".claude/",
+    ".codex/",
+    ".agents/",
+    ".beads.gate.lock",
+]
 
 [dependencies]
 # Deterministic entropy backend (optional, enabled by CLI)
