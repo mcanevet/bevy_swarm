@@ -970,6 +970,9 @@ fn agent_flush_system(world: &mut World) {
                 };
                 if let Some(hook) = hooks.0.remove(&kind) {
                     hook(world);
+                    // 716.34: take-run-put — a BRP cheat deletes its
+                    // own hook; re-insert so repeat cheats work.
+                    hooks.0.insert(kind.clone(), hook);
                 }
                 world.insert_resource(hooks);
             }
@@ -981,6 +984,10 @@ fn agent_flush_system(world: &mut World) {
                 };
                 if let Some(hook) = hooks.0.remove(&kind) {
                     hook(world);
+                    // 716.34: take-run-put — after one reset of kind K,
+                    // K was permanently gone. Re-insert so repeated
+                    // resets work.
+                    hooks.0.insert(kind.clone(), hook);
                 }
                 world.insert_resource(hooks);
             }
@@ -1296,5 +1303,49 @@ mod tests {
         assert!(valid("screenshot-1.png"));
         assert!(valid("screenshots/foo.png"));
         assert!(valid("a/b/c.png"));
+    }
+}
+
+#[cfg(test)]
+mod tests_716_34_agent {
+    use super::*;
+    use crate::contract::{ActionLog, ResetHooks};
+    use std::collections::HashMap;
+
+    #[test]
+    fn brp_reset_twice_works() {
+        // 716.34: after one reset of kind K, K was permanently gone.
+        // Repeated resets must work — drive agent_flush_system twice.
+        use crate::agent::AgentRequest;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActionLog>();
+        app.insert_resource(crate::agent::AgentFrameCounter(0));
+        app.init_resource::<crate::agent::PendingAgentInput>();
+
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = counter.clone();
+        let hook: Box<dyn Fn(&mut World) + Send + Sync> = Box::new(move |_: &mut World| {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        app.insert_resource(ResetHooks(HashMap::from([("my_reset".to_string(), hook)])));
+
+        // Wire the request channel.
+        let (tx, rx) = std::sync::mpsc::channel::<AgentRequest>();
+        tx.send(AgentRequest::Reset("my_reset".to_string()))
+            .unwrap();
+        tx.send(AgentRequest::Reset("my_reset".to_string()))
+            .unwrap();
+        app.insert_resource(crate::agent::AgentRequestQueue(std::sync::Mutex::new(rx)));
+        app.insert_resource(crate::agent::AgentRequestSender(tx));
+
+        // Flush once — processes both queued resets.
+        crate::agent::agent_flush_system(app.world_mut());
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "two resets, hook survives first use"
+        );
     }
 }

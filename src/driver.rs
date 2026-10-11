@@ -1339,6 +1339,10 @@ pub(crate) fn cheat_scheduler_system(world: &mut World) {
                 hook(world);
             }))
             .is_err();
+            // 716.34: take-run-put — re-insert the hook so a cheat
+            // scheduled at frames 60 AND 120 executes BOTH times. The
+            // old code logged both but executed once (audit log lied).
+            hooks.0.insert(kind.clone(), hook);
             if panicked {
                 world.resource_mut::<Violations>().report(
                     crate::rules::Rule::CheatHookPanicked,
@@ -1426,5 +1430,64 @@ pub(crate) fn synthetic_keyboard_bot_system(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_716_34 {
+    use super::*;
+    use crate::contract::{ActionLog, CheatHooks};
+    use bevy::prelude::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn cheat_scheduled_twice_executes_both_times() {
+        // 716.34: a cheat scheduled at frames 1 AND 2 must execute BOTH
+        // times and the log must match executions (no lying audit log).
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActionLog>();
+        app.init_resource::<Violations>();
+
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = counter.clone();
+        let hook: Box<dyn Fn(&mut World) + Send + Sync> = Box::new(move |_: &mut World| {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        app.insert_resource(CheatHooks(HashMap::from([("my_cheat".to_string(), hook)])));
+
+        let scenario: Scenario = serde_json::from_str(
+            r#"{"bot":{"type":"replay","inputs":[]},"setup":{"cheats":[{"kind":"my_cheat","frame":1},{"kind":"my_cheat","frame":2}]}}"#,
+        )
+        .unwrap();
+        app.insert_resource(ScenarioResource(std::sync::Arc::new(scenario)));
+        app.insert_resource(PlaytestState::new(60, 1));
+
+        // Frame 1.
+        app.world_mut().resource_mut::<PlaytestState>().frame = 1;
+        cheat_scheduler_system(app.world_mut());
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "first execution"
+        );
+
+        // Frame 2 — the hook must STILL be registered (716.34).
+        app.world_mut().resource_mut::<PlaytestState>().frame = 2;
+        cheat_scheduler_system(app.world_mut());
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "second execution — hook must survive first use"
+        );
+
+        // Audit log matches executions.
+        let log = app.world().resource::<ActionLog>();
+        let n = log
+            .entries
+            .iter()
+            .filter(|e| e.action.contains("cheat:my_cheat"))
+            .count();
+        assert_eq!(n, 2, "audit log must record BOTH executions");
     }
 }
