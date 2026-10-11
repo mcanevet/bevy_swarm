@@ -395,16 +395,6 @@ fn bot_is(want: crate::enums::BotType) -> impl Fn(Option<Res<ScenarioResource>>)
     }
 }
 
-/// Run condition: the live scenario arms this invariant rule.
-#[allow(dead_code)]
-fn has_rule(
-    want: crate::enums::InvariantRule,
-) -> impl Fn(Option<Res<ScenarioResource>>) -> bool + Clone {
-    move |scenario: Option<Res<ScenarioResource>>| {
-        scenario.is_some_and(|s| s.0.invariants.iter().any(|i| i.rule == want))
-    }
-}
-
 /// Finish plugin building exactly like App::run would: App::update()
 /// does NOT call finish()/cleanup(), so plugins doing work in
 /// Plugin::finish never complete in test Apps. Idempotent: skips when

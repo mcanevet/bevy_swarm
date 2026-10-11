@@ -627,24 +627,6 @@ fn inject_gamepad_button(
     gamepad_holds.insert((frame, btn), frame + hold_frames as u64);
 }
 
-#[cfg(not(feature = "gamepad"))]
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
-fn inject_gamepad_button(
-    button: &str,
-    violations: &mut Violations,
-    _commands: &mut bevy::ecs::system::Commands,
-    _virtual_gamepad: &mut VirtualGamepad,
-    frame: u64,
-) {
-    violations.report(
-        crate::rules::Rule::RawGamepadDisabled,
-        button,
-        "gamepad feature not enabled".to_string(),
-        frame,
-    );
-}
-
 #[cfg(feature = "gamepad")]
 #[allow(clippy::too_many_arguments)]
 fn inject_gamepad_axis(
