@@ -62,14 +62,14 @@ impl PlaytestAppExt for App {
         name: &str,
         system: impl IntoSystem<(), OracleResult, M> + 'static,
     ) -> &mut Self {
-        let (mut registry, id) = {
-            let world = self.world_mut();
-            let id = world.register_system(system);
-            let registry: TypedRegistry = world.resource::<TypedRegistry>().clone();
-            (registry, id)
-        };
-        registry.oracles.push((name.to_string(), id));
-        self.insert_resource(registry);
+        let world = self.world_mut();
+        let id = world.register_system(system);
+        // 716.30: never panic on a normal app — insert the registry
+        // on first use instead of requiring init_resource upfront.
+        world.get_resource_or_insert_with::<TypedRegistry>(Default::default);
+        world.resource_scope(|_world, mut registry: Mut<TypedRegistry>| {
+            registry.oracles.push((name.to_string(), id));
+        });
         self
     }
 
@@ -78,14 +78,14 @@ impl PlaytestAppExt for App {
         name: &str,
         system: impl IntoSystem<(), bool, M> + 'static,
     ) -> &mut Self {
-        let (mut registry, id) = {
-            let world = self.world_mut();
-            let id = world.register_system(system);
-            let registry: TypedRegistry = world.resource::<TypedRegistry>().clone();
-            (registry, id)
-        };
-        registry.predicates.insert(name.to_string(), id);
-        self.insert_resource(registry);
+        let world = self.world_mut();
+        let id = world.register_system(system);
+        // 716.30: never panic on a normal app — insert the registry
+        // on first use instead of requiring init_resource upfront.
+        world.get_resource_or_insert_with::<TypedRegistry>(Default::default);
+        world.resource_scope(|_world, mut registry: Mut<TypedRegistry>| {
+            registry.predicates.insert(name.to_string(), id);
+        });
         self
     }
 
@@ -94,14 +94,14 @@ impl PlaytestAppExt for App {
         name: &str,
         system: impl IntoSystem<(), Option<crate::contract::UserIntent>, M> + 'static,
     ) -> &mut Self {
-        let (mut registry, id) = {
-            let world = self.world_mut();
-            let id = world.register_system(system);
-            let registry: TypedRegistry = world.resource::<TypedRegistry>().clone();
-            (registry, id)
-        };
-        registry.policies.insert(name.to_string(), id);
-        self.insert_resource(registry);
+        let world = self.world_mut();
+        let id = world.register_system(system);
+        // 716.30: never panic on a normal app — insert the registry
+        // on first use instead of requiring init_resource upfront.
+        world.get_resource_or_insert_with::<TypedRegistry>(Default::default);
+        world.resource_scope(|_world, mut registry: Mut<TypedRegistry>| {
+            registry.policies.insert(name.to_string(), id);
+        });
         self
     }
 }
@@ -112,29 +112,33 @@ pub(crate) fn run_typed_oracles(world: &mut World) {
     let Some(scenario) = world.get_resource::<crate::driver::ScenarioResource>() else {
         return;
     };
-    let scenario = scenario.0.clone();
-
-    let Some(registry) = world.remove_resource::<TypedRegistry>() else {
-        return;
+    // 716.30: borrow the oracle list without cloning the full
+    // Scenario (input vectors and choice streams are expensive) and
+    // without REMOVING TypedRegistry — oracle systems whose params
+    // include Res<TypedRegistry> previously failed with a masked
+    // "registry error" attributed to the game.
+    let oracle_names: Option<Vec<String>> = scenario.0.oracles.clone();
+    let to_run: Vec<(String, SystemId<(), OracleResult>)> = {
+        let Some(registry) = world.get_resource::<TypedRegistry>() else {
+            return;
+        };
+        match &oracle_names {
+            Some(names) => registry
+                .oracles
+                .iter()
+                .filter(|(name, _)| names.contains(name))
+                .cloned()
+                .collect(),
+            None => registry.oracles.clone(),
+        }
     };
 
     let mut violations = world.remove_resource::<Violations>().unwrap_or_default();
 
     let frame = world.resource::<PlaytestState>().frame;
 
-    // Determine which oracles to run: if scenario.oracles is Some(list),
-    // run only those; otherwise run all registered.
-    let to_run: Vec<(String, SystemId<(), OracleResult>)> = match &scenario.oracles {
-        Some(names) => registry
-            .oracles
-            .iter()
-            .filter(|(name, _)| names.contains(name))
-            .cloned()
-            .collect(),
-        None => registry.oracles.clone(),
-    };
-
-    // Run each oracle; collect errors into violations.
+    // Run each oracle; collect errors into violations. The registry
+    // stays in the world so oracle systems can read Res<TypedRegistry>.
     for (name, id) in to_run {
         let result = world.run_system(id);
         match result {
@@ -154,7 +158,6 @@ pub(crate) fn run_typed_oracles(world: &mut World) {
         }
     }
 
-    world.insert_resource(registry);
     world.insert_resource(violations);
 }
 
@@ -330,5 +333,76 @@ mod tests {
             }
             other => panic!("expected Rejected, got: {:?}", other),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_716_30 {
+    use super::*;
+    use bevy::prelude::App;
+    use bevy::prelude::MinimalPlugins;
+    use bevy::prelude::Res;
+
+    /// 716.30: add_oracle on an app WITHOUT init_resource::<TypedRegistry>
+    /// must not panic — the registry is auto-inserted.
+    #[test]
+    fn add_oracle_no_panic_without_init() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        // NO init_resource::<TypedRegistry>() here — previously panicked.
+        app.add_oracle("o", |_world: &World| Ok(()));
+        app.add_goal_predicate("p", |_world: &World| true);
+        app.add_bot_policy("b", |_world: &World| None);
+        let registry = app.world().resource::<TypedRegistry>();
+        assert_eq!(registry.oracles.len(), 1);
+        assert!(registry.predicates.contains_key("p"));
+        assert!(registry.policies.contains_key("b"));
+    }
+
+    /// 716.30: consecutive add_* calls accumulate (the old
+    /// clone-modify-reinsert pattern was lossy in principle).
+    #[test]
+    fn add_calls_accumulate() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_oracle("o1", |_world: &World| Ok(()));
+        app.add_oracle("o2", |_world: &World| Ok(()));
+        app.add_oracle("o3", |_world: &World| Ok(()));
+        assert_eq!(app.world().resource::<TypedRegistry>().oracles.len(), 3);
+    }
+
+    /// 716.30: oracles whose params include Res<TypedRegistry> must run
+    /// (previously the registry was REMOVED while oracles ran, failing
+    /// with a masked "registry error").
+    #[test]
+    fn oracle_reading_registry_runs() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Violations::default());
+        app.add_oracle(
+            "reads_registry",
+            |registry: Res<TypedRegistry>| -> OracleResult {
+                if registry.oracles.is_empty() {
+                    Err("empty registry".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        // ScenarioResource + PlaytestState so run_typed_oracles runs.
+        let scenario: Scenario =
+            serde_json::from_str(r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1}"#)
+                .unwrap();
+        use std::sync::Arc;
+        app.insert_resource(ScenarioResource(Arc::new(scenario)));
+        app.insert_resource(crate::state::PlaytestState::new(60, 1));
+
+        run_typed_oracles(app.world_mut());
+        let v = app.world().resource::<crate::state::Violations>();
+        assert!(
+            v.entries.is_empty(),
+            "oracle with Res<TypedRegistry> param must run cleanly, got: {:?}",
+            v.entries
+        );
     }
 }
