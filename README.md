@@ -103,6 +103,21 @@ flowchart LR
 - **Synthetic input** is opt-in: `synthetic_pointer`/`synthetic_keyboard` bots drive the real `PointerInput`/`KeyPressInput` chain when a scenario asks for it
 - The harness itself is pre/post-processing around the Bevy app — `run_scenario()` sets up, pumps the loop, then collects the report
 
+## Invariant DSL (primary API)
+
+The **JSON invariant language** in scenarios is the ONE supported way
+to express checks (`check`, `value`, `query`, `path`, windows
+`after_s`/`before_s`/`eventually_s`). It parses into one `CheckOp`
+enum everywhere: wire format `lt`, `le`, `gt`, `ge`, `equals`, `ne`
+(legacy aliases `below` = `le`, `above` = `ge`, `eq` = `equals`; all
+inclusive boundaries). Calibration output
+(`generate_invariants_from_calibration`) emits exactly this dialect —
+round-trip guaranteed by test.
+
+`bevy_swarm::typed` (Rust-native oracle/predicate/policy systems) is
+**experimental**: usable, but expect breaking changes without a major
+version bump; the JSON DSL is the stable surface for v0.1.
+
 ## Testing
 
 Two loops (see docs/conventions.md):
