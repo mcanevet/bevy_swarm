@@ -270,7 +270,12 @@ pub fn raw_input_preupdate_system(
     // Process queued actions for this frame.
     let mut still_pending = VecDeque::new();
     let mut deferred = VecDeque::new();
-    while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
+    while let Some((target_frame, action)) = queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front()
+    {
         if target_frame > frame {
             still_pending.push_back((target_frame, action));
             continue;
@@ -413,8 +418,16 @@ pub fn raw_input_preupdate_system(
             RawAction::Wait { frames: _ } => {}
         }
     }
-    queue.0.lock().unwrap().extend(still_pending);
-    queue.0.lock().unwrap().extend(deferred);
+    queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(still_pending);
+    queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(deferred);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -446,7 +459,12 @@ pub fn raw_input_click_entity_system(
     let window_entity = ensure_window(&mut windows, &mut commands, &mut headless_window);
 
     let mut still_pending = VecDeque::new();
-    while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
+    while let Some((target_frame, action)) = queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front()
+    {
         if target_frame > frame {
             still_pending.push_back((target_frame, action));
             continue;
@@ -497,7 +515,11 @@ pub fn raw_input_click_entity_system(
             }
         }
     }
-    queue.0.lock().unwrap().extend(still_pending);
+    queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(still_pending);
 }
 
 /// Inject mouse motion / cursor / wheel messages in `Update`
@@ -536,7 +558,12 @@ pub fn raw_input_update_system(
         }
     };
     let mut still_pending = VecDeque::new();
-    while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
+    while let Some((target_frame, action)) = queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .pop_front()
+    {
         if target_frame > frame {
             still_pending.push_back((target_frame, action));
             continue;
@@ -585,7 +612,11 @@ pub fn raw_input_update_system(
             }
         }
     }
-    queue.0.lock().unwrap().extend(still_pending);
+    queue
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend(still_pending);
 }
 
 #[cfg(feature = "gamepad")]
