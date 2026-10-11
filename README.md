@@ -160,7 +160,7 @@ Enable the `deterministic-entropy` feature and set the `getrandom_backend` cfg:
 RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_swarm/deterministic-entropy
 ```
 
-Or use `cargo swarm run` which sets both automatically.
+(planned: a `cargo swarm run` wrapper that sets both automatically)
 
 The custom backend hook (`__getrandom_v03_custom`) intercepts all `getrandom`
 calls (including `rand::rng()`, `uuid::Uuid::new_v4`, `bevy_rand`) and draws

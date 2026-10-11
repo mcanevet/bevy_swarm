@@ -49,8 +49,6 @@ pub struct AutotestConfig {
     pub duration_s: f32,
     /// Parallelism (threads). Default: min(4, available_parallelism).
     pub parallel: usize,
-    /// Chaos actuator share (0.0..1.0). Default: 1.0 (pure chaos).
-    pub chaos_share: f32,
     /// Whether to minimize failures (B2). Default: false.
     pub minimize_failures: bool,
     /// Maximum failures before early-stop. Default: 10.
@@ -72,7 +70,6 @@ impl Default for AutotestConfig {
             num_seeds: 16,
             duration_s: 20.0,
             parallel,
-            chaos_share: 1.0,
             minimize_failures: false,
             max_failures: Some(10),
             base_scenario: default_chaos_scenario(),
@@ -129,6 +126,10 @@ pub struct AutotestReport {
     pub runs: Vec<RunSummary>,
     /// Failure fingerprints (deduplicated).
     pub failures: Vec<FingerprintSummary>,
+    /// Minimized failures (B2), when config.minimize_failures is on.
+    pub minimized: Vec<MinimizedFailureSummary>,
+    /// True when the seed loop stopped early at max_failures.
+    pub early_stop: bool,
     /// Aggregate coverage (union across runs).
     #[serde(skip)]
     pub coverage: Option<Coverage>,
@@ -163,11 +164,23 @@ pub struct FingerprintSummary {
     pub occurrences: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimingSummary {
     pub start: String,
     pub end: String,
     pub elapsed_ms: u64,
+}
+
+/// Result of minimizing one autotest failure (B2): a shrunken input
+/// sequence that still reproduces the failure signature.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MinimizedFailureSummary {
+    pub fingerprint: Fingerprint,
+    pub rule: String,
+    pub seed: u64,
+    /// Length of the minimal replay-input subsequence (0 = failure
+    /// reproduces with no player input at all).
+    pub minimal_inputs_len: usize,
 }
 
 impl AutotestReport {
@@ -228,79 +241,160 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     let seeds: Vec<u64> = (1..=config.num_seeds).collect();
     let mut run_summaries: Vec<RunSummary> = Vec::new();
     let mut all_violations: Vec<(u64, crate::state::ViolationEntry)> = Vec::new();
-    // Run seeds in parallel via run_matrix (one scoped thread per
-    // scenario, capped by config.parallel; fresh App per run).
-    let variants: Vec<(String, Scenario)> = seeds
-        .iter()
-        .map(|seed| {
-            let mut scenario = config.base_scenario.clone();
-            scenario.bot.seed = *seed;
-            scenario.duration_s = config.duration_s;
-            (format!("seed-{seed}"), scenario)
-        })
-        .collect();
+    let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
+    let mut aggregate_coverage = Coverage::default();
+    // Number of failures (non-pass runs + unique fingerprints) seen so
+    // far, for max_failures early-stop.
+    let mut runs_failed: usize = 0;
+    let mut early_stop = false;
+    // B2 minimize candidates: (seed, base scenario, full report) of
+    // failed runs — the report's action log is the replay material.
+    let mut failed_reports: Vec<(u64, Scenario, crate::driver::PlaytestReport)> = Vec::new();
 
-    let matrix_results = crate::branch::run_matrix(&runner, variants, config.parallel);
+    // max_failures early-stop: run seeds in batches of config.parallel;
+    // check the budget BETWEEN batches (run_matrix itself is
+    // fixed-size — a mid-batch abort would needlessly complicate the
+    // parallel join).
+    let batch_size = config.parallel.max(1);
+    let mut batch_start = 0u64;
+    while (batch_start as usize) < seeds.len() {
+        if let Some(max) = config.max_failures {
+            if runs_failed >= max {
+                early_stop = true;
+                break;
+            }
+        }
+        let batch: Vec<u64> = seeds[batch_start as usize..]
+            .iter()
+            .take(batch_size)
+            .copied()
+            .collect();
+        // Run seeds in parallel via run_matrix (one scoped thread per
+        // scenario, capped by config.parallel; fresh App per run).
+        let variants: Vec<(String, Scenario)> = batch
+            .iter()
+            .map(|seed| {
+                let mut scenario = config.base_scenario.clone();
+                scenario.bot.seed = *seed;
+                scenario.duration_s = config.duration_s;
+                (format!("seed-{seed}"), scenario)
+            })
+            .collect();
+        // Keep the seeded scenarios around for B2 minimization (the
+        // matrix consumes the variants).
+        let seeded: HashMap<u64, Scenario> = batch
+            .iter()
+            .cloned()
+            .zip(variants.iter().map(|(_, s)| s.clone()))
+            .collect();
+        batch_start += batch.len() as u64;
+
+        let matrix_results = crate::branch::run_matrix(&runner, variants, config.parallel)?;
+
+        // Aggregate results from BranchMatrixReport.
+        for outcome in matrix_results.outcomes {
+            let seed: u64 = outcome
+                .variant_name
+                .strip_prefix("seed-")
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
+            let rep = outcome.report;
+            // Per-run wall clock: simulated duration as a monotonic
+            // lower bound proxy (frame_count / tps); the harness's
+            // real-time run duration isn't retained in the report.
+            let elapsed_ms = (rep.simulated_duration_s * 1000.0) as u64;
+
+            let status = match rep.status {
+                PlaytestStatus::Pass => "pass",
+                PlaytestStatus::Fail => "fail",
+                PlaytestStatus::Crash => "crash",
+            }
+            .to_string();
+            if status != "pass" {
+                runs_failed += 1;
+            }
+
+            run_summaries.push(RunSummary {
+                seed,
+                status: status.clone(),
+                violations_count: rep.violations.len(),
+                frame_count: rep.frame_count,
+                duration_ms: elapsed_ms,
+            });
+
+            // B2 candidates: keep (seed, seeded scenario, full
+            // report) for every failed run so minimize_failure can
+            // replay the action log at the SAME seed.
+            if rep.status != PlaytestStatus::Pass {
+                if let Some(scen) = seeded.get(&seed) {
+                    failed_reports.push((seed, scen.clone(), rep.clone()));
+                }
+            }
+
+            for v in &rep.violations {
+                all_violations.push((seed, v.clone()));
+                if let Some(fp) = &v.fingerprint {
+                    let entry =
+                        failures_by_fp
+                            .entry(fp.clone())
+                            .or_insert_with(|| FingerprintSummary {
+                                fingerprint: fp.clone(),
+                                rule: v.rule.clone(),
+                                first_seen_seed: seed,
+                                occurrences: 0,
+                            });
+                    entry.occurrences += 1;
+                }
+            }
+            // Union coverage across runs (intent variants, TestApi paths,
+            // reset kinds, chaos surface indices).
+            for (k, c) in rep.coverage.intents_emitted {
+                *aggregate_coverage.intents_emitted.entry(k).or_default() += c;
+            }
+            for p in rep.coverage.test_api_paths_read {
+                aggregate_coverage.test_api_paths_read.insert(p);
+            }
+            for k in rep.coverage.resets_invoked {
+                aggregate_coverage.resets_invoked.insert(k);
+            }
+            for i in rep.coverage.chaos_surface_indices {
+                aggregate_coverage.chaos_surface_indices.insert(i);
+            }
+        }
+    }
+
     let end_ts = SystemTime::now();
     let elapsed_ms_total = start.elapsed().as_millis() as u64;
 
-    // Aggregate results from BranchMatrixReport.
-    let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
-    let mut aggregate_coverage = Coverage::default();
-    let num_runs_f32 = config.num_seeds.max(1) as f64;
-    for outcome in matrix_results?.outcomes {
-        let seed: u64 = outcome
-            .variant_name
-            .strip_prefix("seed-")
-            .unwrap_or("0")
-            .parse()
-            .unwrap_or(0);
-        let rep = outcome.report;
-        let elapsed_ms = (elapsed_ms_total as f64 / num_runs_f32) as u64;
-
-        let status = match rep.status {
-            PlaytestStatus::Pass => "pass",
-            PlaytestStatus::Fail => "fail",
-            PlaytestStatus::Crash => "crash",
-        }
-        .to_string();
-
-        run_summaries.push(RunSummary {
-            seed,
-            status: status.clone(),
-            violations_count: rep.violations.len(),
-            frame_count: rep.frame_count,
-            duration_ms: elapsed_ms,
-        });
-
-        for v in &rep.violations {
-            all_violations.push((seed, v.clone()));
-            if let Some(fp) = &v.fingerprint {
-                let entry =
-                    failures_by_fp
-                        .entry(fp.clone())
-                        .or_insert_with(|| FingerprintSummary {
-                            fingerprint: fp.clone(),
-                            rule: v.rule.clone(),
-                            first_seen_seed: seed,
-                            occurrences: 0,
-                        });
-                entry.occurrences += 1;
+    // minimize_failures (B2): post-matrix, for each FAILED run with
+    // replayable inputs, shrink the failure to a minimal regression
+    // scenario. Results are folded into the report's minimized field.
+    let mut minimized: Vec<MinimizedFailureSummary> = Vec::new();
+    if config.minimize_failures {
+        for (seed, base_scen, rep) in &failed_reports {
+            // headless_app returns an opaque, non-Clone builder —
+            // construct a fresh one per minimization (it captures the
+            // plugin clone internally).
+            let build = crate::headless::headless_app(game_plugin.clone());
+            let outcome = crate::minimize::minimize_failure(build, base_scen, rep, None);
+            if let Ok(out) = outcome {
+                let fp = rep
+                    .violations
+                    .first()
+                    .and_then(|v| v.fingerprint.clone())
+                    .unwrap_or_else(|| Fingerprint(String::new()));
+                minimized.push(MinimizedFailureSummary {
+                    fingerprint: fp,
+                    rule: rep
+                        .violations
+                        .first()
+                        .map(|v| v.rule.clone())
+                        .unwrap_or_default(),
+                    seed: *seed,
+                    minimal_inputs_len: out.minimal_inputs.len(),
+                });
             }
-        }
-        // Union coverage across runs (intent variants, TestApi paths,
-        // reset kinds, chaos surface indices).
-        for (k, c) in rep.coverage.intents_emitted {
-            *aggregate_coverage.intents_emitted.entry(k).or_default() += c;
-        }
-        for p in rep.coverage.test_api_paths_read {
-            aggregate_coverage.test_api_paths_read.insert(p);
-        }
-        for k in rep.coverage.resets_invoked {
-            aggregate_coverage.resets_invoked.insert(k);
-        }
-        for i in rep.coverage.chaos_surface_indices {
-            aggregate_coverage.chaos_surface_indices.insert(i);
         }
     }
 
@@ -310,12 +404,14 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         contract_tier: "tier-0".to_string(),
         harness_mode: "autotest".to_string(),
         scope: ScopeSummary {
-            seeds_run: config.num_seeds,
-            total_duration_s: config.duration_s * config.num_seeds as f32,
+            seeds_run: run_summaries.len() as u64,
+            total_duration_s: config.duration_s * run_summaries.len() as f32,
             parallelism: config.parallel,
         },
-        runs: run_summaries,
+        runs: run_summaries.clone(),
         failures,
+        minimized,
+        early_stop,
         coverage: Some(aggregate_coverage),
         timing: TimingSummary {
             start: start_iso,
@@ -324,7 +420,7 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         },
         run_id: Some(crate::conventions::run_id(
             elapsed_ms_total,
-            config.num_seeds,
+            run_summaries.len() as u64,
         )),
     };
 
@@ -410,6 +506,8 @@ mod tests {
                 first_seen_seed: 1,
                 occurrences: 3,
             }],
+            minimized: vec![],
+            early_stop: false,
             coverage: Some(Coverage::default()),
             timing: TimingSummary {
                 start: "".to_string(),

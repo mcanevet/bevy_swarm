@@ -230,10 +230,19 @@ fn extract_panic_message(payload: &dyn std::any::Any) -> String {
 }
 
 /// Try to extract the current system name from the thread's tracing span.
+///
+/// Bevy's executor wraps system runs in a span named after the system
+/// when the game is built with the `trace` feature; a panic inside the
+/// system then unwinds with that span current on the panicking thread.
+/// Without it no span is active and we return `None`.
 fn thread_local_system_name() -> Option<String> {
-    // Placeholder: Bevy 0.20 doesn't expose system names via thread-local spans
-    // in a way we can query here. Return None for now.
-    None
+    let span = tracing::Span::current();
+    let name = span.metadata()?.name();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// Capture a borrowed BevyError + context into the current run's sink.
@@ -302,7 +311,7 @@ pub fn set_current_frame(frame: u64) {
 }
 
 /// Get the current frame number (driver-set thread-local).
-fn current_frame() -> u64 {
+pub(crate) fn current_frame() -> u64 {
     CURRENT_FRAME.with(Cell::get)
 }
 
@@ -343,5 +352,31 @@ mod tests {
         let payload = 42;
         let msg = extract_panic_message(&payload);
         assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn thread_local_system_name_reads_current_span() {
+        // Install a subscriber so Span::current() works.
+        use tracing_subscriber::layer::SubscriberExt;
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()),
+        );
+
+        // Outside any span the extractor returns None.
+        assert!(thread_local_system_name().is_none());
+
+        let span = tracing::info_span!("my_system_name");
+        let _guard = span.enter();
+        assert_eq!(
+            thread_local_system_name().as_deref(),
+            Some("my_system_name")
+        );
+    }
+
+    #[test]
+    fn current_frame_roundtrip() {
+        set_current_frame(4242);
+        assert_eq!(current_frame(), 4242);
+        set_current_frame(0);
     }
 }
