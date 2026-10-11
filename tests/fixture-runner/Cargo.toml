@@ -20,3 +20,7 @@ fixture_regression_pair = { path = "../../fixtures/regression_pair" }
 [[bin]]
 name = "fixture-runner"
 path = "src/main.rs"
+
+[lib]
+name = "fixture_runner"
+path = "src/lib.rs"
