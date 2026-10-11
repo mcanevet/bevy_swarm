@@ -13,7 +13,7 @@
 //! CLI fidelity coverage.
 //!
 //! Known gaps (seed-dependent misses tracked by follow-up beads):
-//! - walker/bug_dead_left_key: seed 5 misses dead_verb (swarm-xd5.1)
+//! - walker/bug_dead_left_key: seed 5 misses dead_verb (swarm-lgn)
 
 use serde_json::Value;
 use serial_test::serial;
@@ -287,7 +287,7 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
     for line in &summary {
         eprintln!("{}", line);
     }
-    // Known gap: walker/bug_dead_left_key seed 5 (swarm-xd5.1) —
+    // Known gap: walker/bug_dead_left_key seed 5 (swarm-lgn) —
     // the chaos bot path on seed 5 doesn't trigger the bug.
     // Remove it from errors; follow-up bead tracks the detection gap.
     total_errors.retain(|e| !e.contains("dead_verb") || !e.contains("seed 5"));
