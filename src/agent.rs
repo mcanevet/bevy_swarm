@@ -171,6 +171,19 @@ pub const PLAYTEST_METHODS: &[&str] = &[
 /// FX10: constant-time token comparison. Lengths are compared
 /// without early exit on content; content is XOR-accumulated so a
 /// mismatch does not reveal which byte differed.
+/// C2 default-deny: generate a cryptographically random token from OS
+/// entropy. Called at startup when no token is configured.
+fn generate_random_token() -> Result<String, getrandom04::Error> {
+    let mut buf = [0u8; 32];
+    getrandom04::fill(&mut buf)?;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    Ok(buf
+        .iter()
+        .flat_map(|b| [HEX[(b >> 4) as usize], HEX[(b & 0xf) as usize]])
+        .map(|c| c as char)
+        .collect())
+}
+
 pub(crate) fn token_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     // Length contributes to the accumulator instead of an early
@@ -220,14 +233,24 @@ fn auth_error() -> BrpError {
 }
 
 fn world_token_ok(world: &World, params: Option<&Value>) -> bool {
+    // C2 default-deny: a missing configured token REJECTS. The plugin
+    // generates one at startup, so None here only occurs on a
+    // hand-built App — refuse rather than open the method table.
     let Some(expected) = world
         .get_resource::<AgentAuthToken>()
         .and_then(|t| t.0.clone())
     else {
-        return true;
+        return false;
     };
-    let provided = params.and_then(|p| p.get("token")).and_then(Value::as_str);
-    provided.is_some_and(|p| token_eq(p, &expected))
+    // H3: reject over-long token params before scanning — avoids the
+    // token_eq CPU cost on multi-MB payloads.
+    let Some(provided) = params.and_then(|p| p.get("token")).and_then(Value::as_str) else {
+        return false;
+    };
+    if provided.len() > 1024 {
+        return false;
+    }
+    token_eq(provided, &expected)
 }
 
 /// FX10: rejecting stub for mutating built-in world.* methods.
@@ -410,8 +433,21 @@ impl Plugin for AgentPlugin {
         if let Err(msg) = self.config.validate() {
             panic!("AgentPlugin: {}", msg);
         }
-        let token = self.config.token.clone();
-        app.insert_resource(AgentAuthToken(token));
+        // C2 default-deny: there is ALWAYS a token. When none is
+        // configured (env/config), generate a random one at startup and
+        // log it — loopback is not an authentication boundary, so the
+        // previous None = "no auth" behavior was a full bypass.
+        let token = self.config.token.clone().unwrap_or_else(|| {
+            let generated =
+                generate_random_token().expect("agent token generation from OS randomness");
+            tracing::warn!(
+                "bevy_swarm agent: no BEVY_SWARM_AGENT_TOKEN configured; \
+                 generated a random session token. Set BEVY_SWARM_AGENT_TOKEN \
+                 to use the agent programmatically. Token: {generated}"
+            );
+            generated
+        });
+        app.insert_resource(AgentAuthToken(Some(token)));
 
         let (tx, rx) = std::sync::mpsc::channel::<AgentRequest>();
 
@@ -493,23 +529,44 @@ fn internal_error(msg: impl Into<String>) -> BrpError {
 /// configured, `params.token` must match. Applied to every playtest/*
 /// method (read ones included — a leaked endpoint is a leaked game).
 fn brp_params(world: &World, params: Option<Value>) -> BrpResult<Value> {
-    // Auth FIRST: a caller without the token learns nothing about the
-    // shape of the params (not even that params are required).
-    if let Some(expected) = world
+    // C2 default-deny: a missing configured token REJECTS. The plugin
+    // generates one at startup, so None here only occurs on a
+    // hand-built App — refuse rather than open the method table.
+    let Some(expected) = world
         .get_resource::<AgentAuthToken>()
         .and_then(|t| t.0.clone())
-    {
-        let provided = params
-            .as_ref()
-            .and_then(|p| p.get("token"))
-            .and_then(Value::as_str);
-        if !provided.is_some_and(|p| token_eq(p, &expected)) {
-            return Err(BrpError {
-                code: error_codes::INVALID_REQUEST,
-                message: "invalid or missing token".to_string(),
-                data: None,
-            });
-        }
+    else {
+        return Err(BrpError {
+            code: error_codes::INVALID_REQUEST,
+            message: "invalid or missing token".to_string(),
+            data: None,
+        });
+    };
+    // H3: reject over-long token params before scanning.
+    let Some(provided) = params
+        .as_ref()
+        .and_then(|p| p.get("token"))
+        .and_then(Value::as_str)
+    else {
+        return Err(BrpError {
+            code: error_codes::INVALID_REQUEST,
+            message: "invalid or missing token".to_string(),
+            data: None,
+        });
+    };
+    if provided.len() > 1024 {
+        return Err(BrpError {
+            code: error_codes::INVALID_REQUEST,
+            message: "token too long (max 1KiB)".to_string(),
+            data: None,
+        });
+    }
+    if !token_eq(provided, &expected) {
+        return Err(BrpError {
+            code: error_codes::INVALID_REQUEST,
+            message: "invalid or missing token".to_string(),
+            data: None,
+        });
     }
     params.ok_or_else(|| invalid_params("missing params"))
 }
