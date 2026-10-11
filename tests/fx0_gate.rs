@@ -128,6 +128,33 @@ fn build_app_for(fixture: &str) -> App {
     app
 }
 
+/// RAII guard that saves the prior value of `FIXTURE_BUG` and restores
+/// it on scope exit — including panics inside the factory/runner, which
+/// would otherwise leak a set env var into subsequent tests.
+struct FixtureBugGuard {
+    prev: Option<String>,
+}
+
+impl FixtureBugGuard {
+    fn set(env_bug: Option<&str>) -> Self {
+        let prev = std::env::var("FIXTURE_BUG").ok();
+        match env_bug {
+            Some(b) => std::env::set_var("FIXTURE_BUG", b),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+        Self { prev }
+    }
+}
+
+impl Drop for FixtureBugGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(p) => std::env::set_var("FIXTURE_BUG", p),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+    }
+}
+
 /// Run one fixture variant in-process. When `enable_bug` is true and the
 /// variant is a bug_* case, FIXTURE_BUG is set for the run.
 fn run_fixture(
@@ -148,25 +175,12 @@ fn run_fixture(
     }
     // Env-var communication with the fixture game plugin: fixtures read
     // FIXTURE_BUG at plugin-build time, so set/remove around the run.
-    let prev = std::env::var("FIXTURE_BUG").ok();
-    match (&env_bug, &prev) {
-        (Some(b), _) => std::env::set_var("FIXTURE_BUG", b),
-        (None, Some(_)) => std::env::remove_var("FIXTURE_BUG"),
-        _ => {}
-    }
+    // Drop guard ensures restoration even if the factory panics.
+    let _guard = FixtureBugGuard::set(env_bug.as_deref());
     let runner = InProcess {
         factory: move || build_app_for(&fixture),
     };
     let result = ScenarioRunner::run(&runner, &scenario);
-    // Restore prior state regardless of outcome.
-    match prev {
-        Some(p) => std::env::set_var("FIXTURE_BUG", p),
-        None => {
-            if env_bug.is_some() {
-                std::env::remove_var("FIXTURE_BUG");
-            }
-        }
-    }
     result.expect("run scenario")
 }
 
@@ -215,6 +229,42 @@ fn check_bug_signal(
         }
     }
     errors
+}
+
+#[serial]
+#[test]
+fn fx0_fixture_bug_env_restored_after_factory_panic() {
+    // Factory panic (unknown fixture) while a bug env var is set:
+    // the Drop guard must restore a clean env.
+    std::env::remove_var("FIXTURE_BUG");
+    let scenario = build_scenario_json("walker", "bug_dead_left_key", 1);
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_fixture("no_such_fixture", "bug_dead_left_key", &scenario, true)
+    }));
+    assert!(
+        caught.is_err(),
+        "factory panic must unwind through run_fixture"
+    );
+
+    assert!(
+        std::env::var("FIXTURE_BUG").is_err(),
+        "FIXTURE_BUG must be unset after a panicking run"
+    );
+
+    // Clean-variant path (bug unset going in) also ends clean.
+    let clean_scenario = build_scenario_json("walker", "clean", 1);
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_fixture("no_such_fixture", "clean", &clean_scenario, false)
+    }));
+    assert!(
+        caught.is_err(),
+        "factory panic must unwind through run_fixture"
+    );
+
+    assert!(
+        std::env::var("FIXTURE_BUG").is_err(),
+        "FIXTURE_BUG must stay unset after a panicking clean run"
+    );
 }
 
 #[serial]
