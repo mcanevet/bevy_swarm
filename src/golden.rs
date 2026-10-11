@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::determinism::StateTrace;
+use crate::determinism::{compare_two_runs_digests, FrameDigest, StateTrace};
 use crate::scenario::Scenario;
 
 /// A set of golden scenarios to record/check.
@@ -53,27 +53,6 @@ impl GoldenSet {
             scenarios,
             dir: dir.to_path_buf(),
         })
-    }
-
-    /// Save a loaded golden set back to disk, preserving each file's
-    /// digests/inputs/snapshots. Round-trip safe: load → save → load
-    /// preserves all trajectory data (previously this re-wrote files
-    /// with EMPTY digests, wiping goldens).
-    pub fn save(&self) -> Result<(), std::io::Error> {
-        for (name, _scenario) in &self.scenarios {
-            let path = self.dir.join(format!("{}.golden.json", name));
-            // Only rewrite files that don't exist; existing goldens
-            // already hold the digests/inputs/snapshots and are
-            // rewritten exclusively by check_golden's update mode or
-            // record_golden — never blind-saved.
-            if !path.exists() {
-                return Err(std::io::Error::other(format!(
-                    "cannot save golden '{name}': no golden file to preserve \
-                     (use record_golden to create goldens)"
-                )));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -196,29 +175,11 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
         });
 
         // Run the scenario (consumes StateTrace into report.state_trace)
-        let report = crate::driver::run_scenario(&mut app, scenario)?;
+        let mut report = crate::driver::run_scenario(&mut app, scenario)?;
 
-        let digests: Vec<String> = report
-            .state_trace
-            .iter()
-            .flat_map(|d| d.iter())
-            .map(|d| format!("{:016x}", d.hash))
-            .collect();
-
-        // Snapshots come from FrameDigest.snapshot (captured during
-        // the run) instead of re-canonicalizing the final world.
-        let snapshots: Vec<SnapshotEntry> = report
-            .state_trace
-            .iter()
-            .flatten()
-            .filter_map(|fd| {
-                fd.snapshot.as_ref().map(|snap| SnapshotEntry {
-                    frame: fd.frame,
-                    time_s: (fd.frame as f32) / (scenario.tps.max(1) as f32),
-                    state: snap.clone(),
-                })
-            })
-            .collect();
+        let run_digests = report.state_trace.take().unwrap_or_default();
+        let snapshots = digests_to_snapshots(&run_digests, scenario.tps);
+        let digests: Vec<String> = run_digests.iter().map(|d| format_digest(d.hash)).collect();
 
         let golden = GoldenFile {
             bevy_swarm_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -293,36 +254,13 @@ pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
         // The replay bot is fed from the stored inputs so a changed
         // IntentSurface cannot make the comparison drift.
         let replay_scenario = golden_to_replay_scenario(&golden);
-        let run_once = |factory: &F| -> Result<
-            Vec<crate::determinism::FrameDigest>,
-            Box<dyn std::error::Error>,
-        > {
-            let mut app = factory();
-            app.insert_resource(StateTrace {
-                with_snapshots: true,
-                stop_after: None,
-                digests: vec![],
-            });
-            let report = crate::driver::run_scenario(&mut app, &replay_scenario)?;
-            Ok(report.state_trace.unwrap_or_default())
-        };
-        let trace_a = run_once(&app_factory)?;
-        let trace_b = run_once(&app_factory)?;
-        let run_outcomes_match = trace_a.len() == trace_b.len()
-            && trace_a
-                .iter()
-                .zip(trace_b.iter())
-                .all(|(a, b)| a.hash == b.hash);
+        let (run_outcomes_match, divergence_frame, report_digests) =
+            compare_two_runs_digests(&app_factory, &replay_scenario).map_err(Box::new)?;
         if !run_outcomes_match {
             per_scenario.push((
                 name.clone(),
                 GoldenOutcome::Diverged {
-                    first_frame: trace_a
-                        .iter()
-                        .zip(trace_b.iter())
-                        .position(|(a, b)| a.hash != b.hash)
-                        .map(|i| trace_a[i].frame)
-                        .unwrap_or(trace_a.len().min(trace_b.len()) as u64),
+                    first_frame: divergence_frame.unwrap_or(0),
                     changed: vec![],
                     summary: "nondeterministic".to_string(),
                 },
@@ -331,20 +269,10 @@ pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
             continue;
         }
 
-        let report_digests = trace_a;
-        let current_snapshots: Vec<SnapshotEntry> = report_digests
-            .iter()
-            .filter_map(|fd| {
-                fd.snapshot.as_ref().map(|snap| SnapshotEntry {
-                    frame: fd.frame,
-                    time_s: (fd.frame as f32) / (replay_scenario.tps.max(1) as f32),
-                    state: snap.clone(),
-                })
-            })
-            .collect();
+        let current_snapshots = digests_to_snapshots(&report_digests, replay_scenario.tps);
         let current_digests: Vec<String> = report_digests
             .iter()
-            .map(|d| format!("{:016x}", d.hash))
+            .map(|d| format_digest(d.hash))
             .collect();
 
         let outcome = if current_digests.len() != golden.digests.len() {
@@ -444,6 +372,26 @@ pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
 /// BEVY_SWARM_UPDATE=golden or BEVY_SWARM_UPDATE=all).
 pub fn update_golden_enabled() -> bool {
     crate::conventions::can_update("golden")
+}
+
+/// Format a frame digest hash as a fixed-width hex string.
+fn format_digest(hash: u64) -> String {
+    format!("{:016x}", hash)
+}
+
+/// Convert per-frame digests into periodic snapshot entries (frames
+/// carrying a snapshot), with times computed from the scenario TPS.
+fn digests_to_snapshots(digests: &[FrameDigest], tps: u32) -> Vec<SnapshotEntry> {
+    digests
+        .iter()
+        .filter_map(|fd| {
+            fd.snapshot.as_ref().map(|snap| SnapshotEntry {
+                frame: fd.frame,
+                time_s: (fd.frame as f32) / (tps.max(1) as f32),
+                state: snap.clone(),
+            })
+        })
+        .collect()
 }
 
 /// Decode a run's action log into frame-indexed replay inputs. Only

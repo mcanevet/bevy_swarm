@@ -441,13 +441,14 @@ fn fx9_item5_update_mode_rewrites_golden() {
     );
 }
 
-/// ITEM 6: save/load round-trip
+/// ITEM 6: load/preserve semantics
 ///
-/// BUG: save() returns Err (was previously wiping digests).
-/// FIX: load→save→load preserves digests/inputs/snapshots.
-/// TEST: Round-trip test asserts file-content equality.
+/// save() was removed (a no-op guard that wrote nothing). What must
+/// hold instead: loading a golden set does not alter golden files,
+/// and a load → record-of-file-contents is stable — goldens are
+/// rewritten exclusively by record_golden / check_golden update mode.
 #[test]
-fn fx9_item6_save_load_roundtrip() {
+fn fx9_item6_load_preserves_golden_files() {
     let dir = temp_fx9_dir("item6_roundtrip");
     let scenario = chaos_scenario(111);
 
@@ -458,28 +459,21 @@ fn fx9_item6_save_load_roundtrip() {
     let golden_path = dir.join(format!("{name}.golden.json"));
     let before_json = fs::read_to_string(&golden_path).unwrap();
 
-    // load → save → load must preserve everything on disk.
-    let set1 = GoldenSet::load(&dir).unwrap();
-    set1.save().unwrap();
+    // load → load must not alter golden files on disk (there is no
+    // save(); recorded trajectory data is preserved by construction).
+    let _set1 = GoldenSet::load(&dir).unwrap();
     let set2 = GoldenSet::load(&dir).unwrap();
-    set2.save().unwrap();
 
     let after_json = fs::read_to_string(&golden_path).unwrap();
     assert_eq!(
         before_json, after_json,
-        "load→save must not alter golden files (digests/inputs/snapshots preserved)"
+        "loading goldens must not alter golden files (digests/inputs/snapshots preserved)"
     );
 
-    // save() must refuse to BLINDLY write goldens it cannot preserve
-    // (a set referencing a non-existent golden).
-    let bogus = GoldenSet {
-        scenarios: vec![("never-recorded".to_string(), scenario.clone())],
-        dir: dir.clone(),
-    };
-    assert!(
-        bogus.save().is_err(),
-        "save must not fabricate a golden that wipes digests"
-    );
+    // The loaded set must round-trip the scenario data it exposes.
+    assert_eq!(set2.scenarios.len(), 1);
+    assert_eq!(set2.scenarios[0].0, name);
+    assert_eq!(set2.scenarios[0].1.bot.seed, scenario.bot.seed);
 }
 
 /// ITEM 7: all_same length-mismatch test
