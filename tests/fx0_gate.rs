@@ -241,7 +241,10 @@ fn fx0_fixture_bug_env_restored_after_factory_panic() {
     let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_fixture("no_such_fixture", "bug_dead_left_key", &scenario, true)
     }));
-    assert!(caught.is_err(), "factory panic must unwind through run_fixture");
+    assert!(
+        caught.is_err(),
+        "factory panic must unwind through run_fixture"
+    );
 
     assert!(
         std::env::var("FIXTURE_BUG").is_err(),
@@ -253,7 +256,10 @@ fn fx0_fixture_bug_env_restored_after_factory_panic() {
     let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_fixture("no_such_fixture", "clean", &clean_scenario, false)
     }));
-    assert!(caught.is_err(), "factory panic must unwind through run_fixture");
+    assert!(
+        caught.is_err(),
+        "factory panic must unwind through run_fixture"
+    );
 
     assert!(
         std::env::var("FIXTURE_BUG").is_err(),
