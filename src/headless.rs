@@ -150,8 +150,6 @@ pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
         // Z6: classify game-owned types from the game plugin's crate
         // path so gameplay inference can run without annotations.
         app.insert_resource(crate::game_types::GameTypes::from_plugin::<P>());
-        app.finish();
-        app.cleanup();
         app
     }
 }
