@@ -3,10 +3,10 @@
   "comment": "Manually maintained: bead ids whose pending acceptance cases are still OPEN. Remove a bead id here the moment it closes.",
   "closed": [
     "swarm-1w8.13",
-    "swarm-qo7.13"
+    "swarm-qo7.13",
+    "swarm-kpl"
   ],
   "beads": [
-    "swarm-716.24",
-    "swarm-kpl"
+    "swarm-716.24"
   ]
 }
