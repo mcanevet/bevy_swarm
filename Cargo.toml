@@ -75,6 +75,10 @@ fixture-turn-based = { package = "fixture_turn_based", path = "fixtures/turn_bas
 fixture-walker = { package = "fixture_walker", path = "fixtures/walker" }
 # FX7: e2e spawner-leak fingerprint test
 fixture-spawner = { package = "fixture_spawner", path = "fixtures/spawner" }
+# xd5: in-process fx0_gate sweep reuses fixture-runner's adapters
+fixture-runner = { package = "fixture-runner", path = "tests/fixture-runner" }
+fixture-spinner = { package = "fixture_spinner", path = "fixtures/spinner" }
+fixture-regression-pair = { package = "fixture_regression_pair", path = "fixtures/regression_pair" }
 
 [badges]
 maintenance = { status = "actively-developed" }
