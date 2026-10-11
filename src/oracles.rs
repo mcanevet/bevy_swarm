@@ -795,11 +795,17 @@ pub(crate) fn check_custom_system(world: &mut World) {
                         ) && margin == 0.0)),
                     "J1 drift: {check:?} count={count} thr={thr} rho={margin}"
                 );
-                rho!(
-                    &inv.name,
-                    margin,
-                    inv.scale.or(Some(crate::robustness::default_scale(thr)))
-                );
+                // Eventually-mode tracks the BEST (max) margin so far;
+                // always-mode the worst (min).
+                let scale = inv
+                    .scale
+                    .unwrap_or_else(|| crate::robustness::default_scale(thr));
+                let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
+                if inv.eventually_s.is_some() {
+                    tracker.observe_max(&inv.name, frame, margin, scale);
+                } else {
+                    tracker.observe(&inv.name, frame, margin, scale);
+                }
             }
 
             match inv.eventually_s {
@@ -912,6 +918,18 @@ pub(crate) fn check_custom_system(world: &mut World) {
         if let (Some(sv), Some(serde_json::Value::String(expect))) = (&string_val, &inv.value) {
             let check = inv.check.unwrap_or(crate::enums::CheckOp::Equals);
             let holds = check.holds_text(sv, expect).unwrap_or(false);
+            // Text robustness lifts the boolean to ±1 (unit scale): a
+            // string either matches its expectation or not — there is
+            // no graded distance.
+            {
+                let rho_text = if holds { 1.0 } else { -1.0 };
+                let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
+                if inv.eventually_s.is_some() {
+                    tracker.observe_max(&inv.name, frame, rho_text, 1.0);
+                } else {
+                    tracker.observe(&inv.name, frame, rho_text, 1.0);
+                }
+            }
             // Eventually-mode: pass as soon as satisfied; report only at
             // deadline expiry if never satisfied.
             if let Some(deadline) = inv.eventually_s {
@@ -947,12 +965,16 @@ pub(crate) fn check_custom_system(world: &mut World) {
         let Some(current) = numeric else { continue };
         let check = inv.check.unwrap_or(crate::enums::CheckOp::Le);
         let threshold = inv.value.as_ref().and_then(|v| v.as_f64());
+        // Expert rule (WHEN→REQUIRE): the WHEN threshold is a guard
+        // clause, not a standalone invariant. Its margin flows into the
+        // run-level value exclusively through the implication
+        // max(-ρ_W, ρ_R) computed in the requires section below.
+        let is_expert_rule = inv.requires_path.is_some();
         if let Some(thr) = threshold {
             // Shared predicate evaluation for both modes.
             let holds_now = check.holds(current, thr);
-            // J1: per-frame margin (eventually-mode callers would track
-            // best-so-far; the tracker keeps min over run which the
-            // summary reports — the two views compose).
+            // J1: per-frame margin (eventually-mode tracks max,
+            // always-mode tracks min).
             let margin = crate::robustness::threshold_margin(check, current, thr);
             debug_assert_eq!(
                 holds_now,
@@ -965,11 +987,17 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     ) && margin == 0.0)),
                 "J1 drift: {check:?} v={current} thr={thr} rho={margin}"
             );
-            rho!(
-                &inv.name,
-                margin,
-                inv.scale.or(Some(crate::robustness::default_scale(thr)))
-            );
+            let scale = inv
+                .scale
+                .unwrap_or_else(|| crate::robustness::default_scale(thr));
+            if !is_expert_rule {
+                let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
+                if inv.eventually_s.is_some() {
+                    tracker.observe_max(&inv.name, frame, margin, scale);
+                } else {
+                    tracker.observe(&inv.name, frame, margin, scale);
+                }
+            }
             match inv.eventually_s {
                 // Eventually-mode: satisfied on first hold; report only at
                 // deadline expiry if never held. Semantics mirror
@@ -998,8 +1026,13 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     }
                 }
                 None => {
-                    // Always-mode: strict per-frame check.
-                    if !holds_now {
+                    // Always-mode: strict per-frame check. Expert rules
+                    // (WHEN→REQUIRE) are exempt here: the WHEN clause
+                    // is a guard, not an invariant — its margin enters
+                    // ONLY through the implication max(-ρ_W, ρ_R) in
+                    // the requires section below, so a false WHEN can
+                    // never masquerade as a violation.
+                    if !is_expert_rule && !holds_now {
                         world.resource_mut::<Violations>().report(
                             &inv.name,
                             path,
@@ -1091,6 +1124,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
         // REQUIRE `requires_path` to satisfy requires_check vs
         // requires_value. Checks game POLICY compliance ("low HP ⇒ must
         // heal"), complementing state invariants.
+        // J1: implication robustness ρ = max(-ρ_W, ρ_R) every frame.
         if let (Some(req_path), Some(req_check), Some(req_value)) =
             (&inv.requires_path, &inv.requires_check, &inv.requires_value)
         {
@@ -1112,59 +1146,76 @@ pub(crate) fn check_custom_system(world: &mut World) {
             } else {
                 true
             };
-            if when_holds {
-                // requires_path resolves through the SAME entry point:
-                // registered resolver first, then world percepts
-                // (previously skipped percepts entirely).
-                let (req_num, req_str) = resolve_field(world, req_path);
-                // J1: implication robustness ¬W ∨ R = max(-ρ_W, ρ_R).
-                // While WHEN holds (mask active), the reactive clause
-                // dominates: record ρ_R when both clauses are numeric.
-                // Anti-masking: WHEN false frames are NOT recorded
-                // here (the guard clause ρ_W > 0 dominates then and is
-                // tracked via the threshold branch above).
-                if let Some(r_thr) = req_value.as_f64() {
-                    if let Some(rc) = req_num {
-                        // ρ_R: the reactive clause margin while masked.
-                        let r_margin = crate::robustness::threshold_margin(*req_check, rc, r_thr);
-                        rho!(
-                            &inv.name,
-                            r_margin,
-                            inv.scale.or(Some(crate::robustness::default_scale(r_thr)))
-                        );
+            // Resolve requires_path through the SAME entry point:
+            // registered resolver first, then world percepts.
+            let (req_num, req_str) = resolve_field(world, req_path);
+            // J1: implication robustness ρ = max(-ρ_W, ρ_R).
+            // - WHEN false: ρ_W < 0 so -ρ_W > 0 dominates → positive
+            //   (vacuously satisfied, no masking).
+            // - WHEN true: ρ_W ≥ 0 so -ρ_W ≤ 0, and ρ_R dominates.
+            // Text WHEN clauses lift to ±1 (boolean, no graded distance).
+            // Computed only when REQUIRE is numeric; text REQUIRE keeps
+            // its boolean-only verdict.
+            if let (Some(rc), Some(r_thr)) = (req_num, req_value.as_f64()) {
+                let rho_w = match (inv.check, inv.value.as_ref().and_then(|v| v.as_f64())) {
+                    (Some(wc), Some(w_thr)) if numeric.is_some() => {
+                        crate::robustness::threshold_margin(wc, current, w_thr)
                     }
-                }
-                world
-                    .resource_mut::<PlaytestState>()
-                    .coverage
-                    .test_api_paths_read
-                    .insert(req_path.clone());
-                let violated = match (req_num, req_value.as_f64()) {
-                    (Some(v), Some(thr)) => !req_check.holds(v, thr),
-                    _ => match (&req_str, req_value.as_str()) {
-                        (Some(s), Some(exp)) => !req_check.holds_text(s, exp).unwrap_or(true),
-                        _ => false,
-                    },
+                    (Some(wc), _) if string_val.is_some() => {
+                        let holds_text = string_val
+                            .as_deref()
+                            .zip(inv.value.as_ref().and_then(|v| v.as_str()))
+                            .and_then(|(sv, wv)| wc.holds_text(sv, wv))
+                            .unwrap_or(false);
+                        if holds_text {
+                            1.0
+                        } else {
+                            -1.0
+                        }
+                    }
+                    _ => 0.0, // unconditional guard: vacuously true
                 };
-                if violated {
-                    let actual = req_num
-                        .map(|n| n.to_string())
-                        .or_else(|| req_str.clone())
-                        .unwrap_or_else(|| "<unresolved>".into());
-                    let when_desc = numeric
-                        .map(|n| format!("{} = {}", path, n))
-                        .or_else(|| string_val.clone().map(|s| format!("{} = {}", path, s)))
-                        .unwrap_or_else(|| path.clone());
-                    world.resource_mut::<Violations>().report(
-                        &inv.name,
-                        req_path,
-                        format!(
-                            "expert rule violated: when {}, {} = {} (required: {} {})",
-                            when_desc, req_path, actual, req_check, req_value
-                        ),
-                        frame,
-                    );
-                }
+                let rho_r = crate::robustness::threshold_margin(*req_check, rc, r_thr);
+                let rho_implication = (-rho_w).max(rho_r);
+                let scale = inv
+                    .scale
+                    .unwrap_or_else(|| crate::robustness::default_scale(r_thr));
+                world
+                    .resource_mut::<crate::robustness::RobustnessTracker>()
+                    .observe(&inv.name, frame, rho_implication, scale);
+            }
+            world
+                .resource_mut::<PlaytestState>()
+                .coverage
+                .test_api_paths_read
+                .insert(req_path.clone());
+            let violated = match (req_num, req_value.as_f64()) {
+                (Some(v), Some(thr)) => !req_check.holds(v, thr),
+                _ => match (&req_str, req_value.as_str()) {
+                    (Some(s), Some(exp)) => !req_check.holds_text(s, exp).unwrap_or(true),
+                    _ => false,
+                },
+            };
+            // Only report a violation when WHEN holds AND REQUIRE
+            // fails (standard expert-rule semantics).
+            if when_holds && violated {
+                let actual = req_num
+                    .map(|n| n.to_string())
+                    .or_else(|| req_str.clone())
+                    .unwrap_or_else(|| "<unresolved>".into());
+                let when_desc = numeric
+                    .map(|n| format!("{} = {}", path, n))
+                    .or_else(|| string_val.clone().map(|s| format!("{} = {}", path, s)))
+                    .unwrap_or_else(|| path.clone());
+                world.resource_mut::<Violations>().report(
+                    &inv.name,
+                    req_path,
+                    format!(
+                        "expert rule violated: when {}, {} = {} (required: {} {})",
+                        when_desc, req_path, actual, req_check, req_value
+                    ),
+                    frame,
+                );
             }
         }
     }
