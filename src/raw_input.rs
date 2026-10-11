@@ -391,8 +391,9 @@ pub fn raw_input_preupdate_system(
                 #[cfg(not(feature = "gamepad"))]
                 {
                     inject_gamepad_axis(
-                        &axis,
+                        axis,
                         value,
+                        hold_frames,
                         &mut violations,
                         &mut commands,
                         &mut virtual_gamepad,
