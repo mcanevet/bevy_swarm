@@ -45,6 +45,7 @@ bevy = { workspace = true, features = [
     "bevy_picking",
     "bevy_window",
     "bevy_camera",
+    "bevy_ui",
     "bevy_log",
     "debug",
     "reflect_auto_register",

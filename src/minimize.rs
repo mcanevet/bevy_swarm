@@ -85,6 +85,13 @@ pub fn ddmin_minimize<T: Clone>(actions: &[T], mut reproduce: impl FnMut(&[T]) -
 /// makes failures found by ANY bot minimizable via ddmin.
 pub fn action_to_replay_intent(entry: &TimedAction) -> Option<ReplayIntent> {
     let a = &entry.action;
+    // Raw input actions (Z3): details carry the lossless serde form of
+    // the RawAction (written by the raw actuator's audit).
+    if a.starts_with("raw:") {
+        let d = entry.details.as_deref()?;
+        let raw: RawAction = serde_json::from_str(d).ok()?;
+        return Some(ReplayIntent::Raw { raw });
+    }
     // Canonical structured form: intent:<variant> + JSON details.
     if let Some(variant) = a.strip_prefix("intent:") {
         return match variant {

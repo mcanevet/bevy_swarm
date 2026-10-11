@@ -42,13 +42,17 @@ use crate::state::{PlaytestState, Violations};
 #[derive(bevy::ecs::prelude::Resource, Default)]
 pub struct RawActionQueue(pub std::sync::Mutex<VecDeque<(u64, RawAction)>>);
 
-/// Active key holds: (frame when pressed, KeyCode) -> release frame.
+/// Combined hold-tracking for keys, mouse buttons, and gamepad buttons
+/// and axes: (frame when pressed, input) -> release frame.
 #[derive(bevy::ecs::prelude::Resource, Default)]
-pub struct ActiveKeyHolds(pub HashMap<(u64, KeyCode), u64>);
-
-/// Active mouse button holds: (frame when pressed, button) -> release frame.
-#[derive(bevy::ecs::prelude::Resource, Default)]
-pub struct ActiveMouseHolds(pub HashMap<(u64, WindowMouseButton), u64>);
+pub struct InputHolds {
+    pub keys: HashMap<(u64, KeyCode), u64>,
+    pub mouse: HashMap<(u64, WindowMouseButton), u64>,
+    #[cfg(feature = "gamepad")]
+    pub gamepad_buttons: HashMap<(u64, bevy::input::gamepad::GamepadButton), u64>,
+    #[cfg(feature = "gamepad")]
+    pub gamepad_axes: HashMap<(u64, bevy::input::gamepad::GamepadAxis), u64>,
+}
 
 /// Virtual gamepad entity, spawned lazily on the first gamepad action (Z3).
 #[derive(bevy::ecs::prelude::Resource, Default)]
@@ -56,11 +60,6 @@ pub struct VirtualGamepad {
     pub pad: Option<bevy::ecs::entity::Entity>,
     pub connected: bool,
 }
-
-/// Active gamepad button holds: (frame when pressed, button) -> release frame.
-#[cfg(feature = "gamepad")]
-#[derive(bevy::ecs::prelude::Resource, Default)]
-pub struct ActiveGamepadHolds(pub HashMap<(u64, bevy::input::gamepad::GamepadButton), u64>);
 
 #[cfg(feature = "gamepad")]
 fn ensure_virtual_gamepad(
@@ -74,6 +73,52 @@ fn ensure_virtual_gamepad(
     })
 }
 
+/// Whether the harness owns the (headless) window it spawned. Games
+/// that manage their own windows never see this flag — the fallback
+/// window only appears when the raw actuator would otherwise target
+/// `Entity::PLACEHOLDER`.
+#[derive(bevy::ecs::prelude::Resource, Default)]
+pub struct HeadlessWindow {
+    pub entity: Option<bevy::ecs::entity::Entity>,
+}
+
+/// Resolve a primary-window entity, spawning a hidden fallback window
+/// when the app has none (headless test apps that forgot a window).
+/// The spawned entity gets `PrimaryWindow` so picking/UI focus route
+/// to it; `HeadlessWindow` tracks ownership so we never duplicate.
+fn ensure_window(
+    windows: &mut bevy::ecs::system::Query<
+        (bevy::ecs::entity::Entity, &mut bevy::window::Window),
+        bevy::ecs::query::With<bevy::window::PrimaryWindow>,
+    >,
+    commands: &mut bevy::ecs::system::Commands,
+    headless: &mut HeadlessWindow,
+) -> bevy::ecs::entity::Entity {
+    if let Some((e, _)) = windows.iter().next() {
+        return e;
+    }
+    if let Some(e) = headless.entity {
+        // Spawned last frame but the query has not observed it yet.
+        if windows.get(e).is_ok() {
+            return e;
+        }
+    }
+    let e = commands
+        .spawn((
+            bevy::window::Window {
+                // Headless fallback: the entity exists purely as a
+                // routing target for input events (never opened — no
+                // winit backend runs in test apps).
+                visible: false,
+                ..Default::default()
+            },
+            bevy::window::PrimaryWindow,
+        ))
+        .id();
+    headless.entity = Some(e);
+    e
+}
+
 /// Inject pending raw actions for the current frame.
 ///
 /// Runs in `PreUpdate` after `PlaytestSet::Bots` and before Bevy's
@@ -84,9 +129,7 @@ fn ensure_virtual_gamepad(
 #[allow(clippy::too_many_arguments)]
 pub fn raw_input_preupdate_system(
     queue: ResMut<RawActionQueue>,
-    mut key_holds: ResMut<ActiveKeyHolds>,
-    mut mouse_holds: ResMut<ActiveMouseHolds>,
-    #[cfg(feature = "gamepad")] mut gamepad_holds: ResMut<ActiveGamepadHolds>,
+    mut holds: ResMut<InputHolds>,
     mut keyboard_events: MessageWriter<KeyboardInput>,
     mut mouse_button_events: MessageWriter<MouseButtonInput>,
     mut window_events: MessageWriter<WindowEvent>,
@@ -94,12 +137,14 @@ pub fn raw_input_preupdate_system(
     mut violations: ResMut<Violations>,
     playtest_state: Option<ResMut<PlaytestState>>,
     mut action_effects: ResMut<crate::effects::ActionEffects>,
+    mut action_log: Option<ResMut<crate::contract::ActionLog>>,
     mut windows: bevy::ecs::system::Query<
         (bevy::ecs::entity::Entity, &mut bevy::window::Window),
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
     >,
     mut commands: bevy::ecs::system::Commands,
     mut virtual_gamepad: ResMut<VirtualGamepad>,
+    mut headless_window: ResMut<HeadlessWindow>,
     #[cfg(feature = "gamepad")] mut raw_gamepad_connection_events: MessageWriter<
         bevy::input::gamepad::GamepadConnectionEvent,
     >,
@@ -108,11 +153,7 @@ pub fn raw_input_preupdate_system(
     >,
 ) {
     let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
-    let window_entity = windows
-        .iter()
-        .next()
-        .map(|(e, _)| e)
-        .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
+    let window_entity = ensure_window(&mut windows, &mut commands, &mut headless_window);
     #[cfg(not(feature = "gamepad"))]
     {
         // Params only exercised by the gamepad feature.
@@ -120,8 +161,8 @@ pub fn raw_input_preupdate_system(
     }
 
     // Release holds whose release frame has arrived, then drop them.
-    let expired_keys: Vec<(u64, KeyCode)> = key_holds
-        .0
+    let expired_keys: Vec<(u64, KeyCode)> = holds
+        .keys
         .iter()
         .filter(|(_, release_frame)| **release_frame <= frame)
         .map(|(k, _)| *k)
@@ -136,10 +177,10 @@ pub fn raw_input_preupdate_system(
         );
     }
     for k in expired_keys {
-        key_holds.0.remove(&k);
+        holds.keys.remove(&k);
     }
-    let expired_buttons: Vec<(u64, WindowMouseButton)> = mouse_holds
-        .0
+    let expired_buttons: Vec<(u64, WindowMouseButton)> = holds
+        .mouse
         .iter()
         .filter(|(_, release_frame)| **release_frame <= frame)
         .map(|(k, _)| *k)
@@ -154,14 +195,14 @@ pub fn raw_input_preupdate_system(
         );
     }
     for k in expired_buttons {
-        mouse_holds.0.remove(&k);
+        holds.mouse.remove(&k);
     }
 
     // Release expired gamepad button holds.
     #[cfg(feature = "gamepad")]
     {
-        let expired_pads: Vec<((u64, bevy::input::gamepad::GamepadButton), u64)> = gamepad_holds
-            .0
+        let expired_pads: Vec<((u64, bevy::input::gamepad::GamepadButton), u64)> = holds
+            .gamepad_buttons
             .iter()
             .filter(|(_, release_frame)| **release_frame <= frame)
             .map(|(k, v)| (*k, *v))
@@ -179,9 +220,52 @@ pub fn raw_input_preupdate_system(
             }
         }
         for (k, _) in expired_pads {
-            gamepad_holds.0.remove(&k);
+            holds.gamepad_buttons.remove(&k);
         }
     }
+
+    // Neutralize expired gamepad axis holds.
+    #[cfg(feature = "gamepad")]
+    {
+        let expired_axes: Vec<((u64, bevy::input::gamepad::GamepadAxis), u64)> = holds
+            .gamepad_axes
+            .iter()
+            .filter(|(_, release_frame)| **release_frame <= frame)
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        for ((_, axis), _) in &expired_axes {
+            if let Some(pad) = virtual_gamepad.pad {
+                raw_gamepad_events.write(bevy::input::gamepad::RawGamepadEvent::Axis(
+                    RawGamepadAxisChangedEvent {
+                        gamepad: pad,
+                        axis: *axis,
+                        value: 0.0,
+                    },
+                ));
+            }
+        }
+        for (k, _) in expired_axes {
+            holds.gamepad_axes.remove(&k);
+        }
+    }
+
+    // Record every injected raw action to the audit log (replayable via
+    // ReplayIntent::Raw; details carry the lossless JSON form).
+    let elapsed_ms = playtest_state
+        .as_ref()
+        .map(|s| s.elapsed_s() as f64 * 1000.0)
+        .unwrap_or(0.0);
+    let mut audit = |action: &str, raw: &RawAction| {
+        if let Some(log) = action_log.as_mut() {
+            log.entries.push(crate::contract::ActionEntry {
+                frame,
+                elapsed_ms,
+                source: crate::contract::ActionSource::BotScenario("raw-input".into()),
+                action: action.to_string(),
+                details: Some(serde_json::to_string(raw).unwrap_or_default()),
+            });
+        }
+    };
 
     // Process queued actions for this frame.
     let mut still_pending = VecDeque::new();
@@ -192,11 +276,14 @@ pub fn raw_input_preupdate_system(
             continue;
         }
         match action {
-            RawAction::Key { key, hold_frames } => {
-                let Some(key_code) = parse_raw_key(&key) else {
+            RawAction::Key {
+                ref key,
+                hold_frames,
+            } => {
+                let Some(key_code) = parse_raw_key(key) else {
                     violations.report(
                         "raw_key_invalid",
-                        &key,
+                        key,
                         "unknown key name".to_string(),
                         frame,
                     );
@@ -209,10 +296,11 @@ pub fn raw_input_preupdate_system(
                     true,
                     window_entity,
                 );
-                key_holds
-                    .0
+                holds
+                    .keys
                     .insert((frame, key_code), frame + hold_frames as u64);
                 action_effects.record(&format!("raw:key:{:?}", key_code), frame);
+                audit(&format!("raw:key:{:?}", key_code), &action);
             }
             RawAction::MouseButton {
                 button,
@@ -226,10 +314,9 @@ pub fn raw_input_preupdate_system(
                     true,
                     window_entity,
                 );
-                mouse_holds
-                    .0
-                    .insert((frame, btn), frame + hold_frames as u64);
+                holds.mouse.insert((frame, btn), frame + hold_frames as u64);
                 action_effects.record(&format!("raw:mouse:{:?}", btn), frame);
+                audit(&format!("raw:mouse:{:?}", btn), &action);
             }
             RawAction::Click {
                 pos,
@@ -255,10 +342,9 @@ pub fn raw_input_preupdate_system(
                     true,
                     window_entity,
                 );
-                mouse_holds
-                    .0
-                    .insert((frame, btn), frame + hold_frames as u64);
+                holds.mouse.insert((frame, btn), frame + hold_frames as u64);
                 action_effects.record(&format!("raw:mouse:{:?}", btn), frame);
+                audit(&format!("raw:mouse:{:?}", btn), &action);
             }
             #[cfg_attr(not(feature = "gamepad"), allow(unused_variables))]
             RawAction::GamepadButton {
@@ -276,28 +362,43 @@ pub fn raw_input_preupdate_system(
                         frame,
                         &mut raw_gamepad_connection_events,
                         &mut raw_gamepad_events,
-                        &mut gamepad_holds,
+                        &mut holds.gamepad_buttons,
                     );
                     action_effects.record(&format!("raw:gamepad:{}", button), frame);
                 }
             }
             RawAction::GamepadAxis {
-                axis,
+                ref axis,
                 value,
-                hold_frames: _,
+                hold_frames,
             } => {
-                inject_gamepad_axis(
-                    &axis,
-                    value,
-                    &mut violations,
-                    &mut commands,
-                    &mut virtual_gamepad,
-                    frame,
-                    #[cfg(feature = "gamepad")]
-                    &mut raw_gamepad_connection_events,
-                    #[cfg(feature = "gamepad")]
-                    &mut raw_gamepad_events,
-                );
+                #[cfg(feature = "gamepad")]
+                {
+                    inject_gamepad_axis(
+                        axis,
+                        value,
+                        hold_frames,
+                        &mut violations,
+                        &mut commands,
+                        &mut virtual_gamepad,
+                        frame,
+                        &mut raw_gamepad_connection_events,
+                        &mut raw_gamepad_events,
+                        &mut holds.gamepad_axes,
+                    );
+                    audit(&format!("raw:gamepad_axis:{}", axis), &action);
+                }
+                #[cfg(not(feature = "gamepad"))]
+                {
+                    inject_gamepad_axis(
+                        &axis,
+                        value,
+                        &mut violations,
+                        &mut commands,
+                        &mut virtual_gamepad,
+                        frame,
+                    );
+                }
             }
             RawAction::MouseMove { .. } | RawAction::Cursor { .. } | RawAction::Wheel { .. } => {
                 // Handled in the Update pass.
@@ -325,10 +426,13 @@ pub fn raw_input_click_entity_system(
     mut violations: ResMut<Violations>,
     playtest_state: Option<ResMut<PlaytestState>>,
     mut action_effects: ResMut<crate::effects::ActionEffects>,
+    mut action_log: Option<ResMut<crate::contract::ActionLog>>,
     mut windows: bevy::ecs::system::Query<
         (bevy::ecs::entity::Entity, &mut bevy::window::Window),
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
     >,
+    mut headless_window: ResMut<HeadlessWindow>,
+    mut commands: bevy::ecs::system::Commands,
     entities: bevy::ecs::system::Query<(
         Entity,
         &GlobalTransform,
@@ -338,11 +442,7 @@ pub fn raw_input_click_entity_system(
     cameras: bevy::ecs::system::Query<(&Camera, &GlobalTransform)>,
 ) {
     let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
-    let window_entity = windows
-        .iter()
-        .next()
-        .map(|(e, _)| e)
-        .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
+    let window_entity = ensure_window(&mut windows, &mut commands, &mut headless_window);
 
     let mut still_pending = VecDeque::new();
     while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
@@ -351,8 +451,8 @@ pub fn raw_input_click_entity_system(
             continue;
         }
         match action {
-            RawAction::ClickEntity { target } => {
-                match resolve_click_position(&entities, &cameras, &target) {
+            RawAction::ClickEntity { ref target } => {
+                match resolve_click_position(&entities, &cameras, target) {
                     Ok(pos) => {
                         if let Some(ref mut ce) = cursor_events {
                             move_cursor(ce, &mut window_events, &mut windows, pos);
@@ -366,6 +466,20 @@ pub fn raw_input_click_entity_system(
                             window_entity,
                         );
                         action_effects.record(&format!("raw:click_entity:{target:?}"), frame);
+                        if let Some(log) = action_log.as_mut() {
+                            log.entries.push(crate::contract::ActionEntry {
+                                frame,
+                                elapsed_ms: playtest_state
+                                    .as_ref()
+                                    .map(|s| s.elapsed_s() as f64 * 1000.0)
+                                    .unwrap_or(0.0),
+                                source: crate::contract::ActionSource::BotScenario(
+                                    "raw-input".into(),
+                                ),
+                                action: format!("raw:click_entity:{target:?}"),
+                                details: Some(serde_json::to_string(&action).unwrap_or_default()),
+                            });
+                        }
                     }
                     Err(reason) => {
                         violations.report(
@@ -387,6 +501,7 @@ pub fn raw_input_click_entity_system(
 
 /// Inject mouse motion / cursor / wheel messages in `Update`
 /// (alongside the other raw-input bots).
+#[allow(clippy::too_many_arguments)]
 pub fn raw_input_update_system(
     queue: ResMut<RawActionQueue>,
     mut mouse_motion_events: MessageWriter<MouseMotion>,
@@ -394,17 +509,31 @@ pub fn raw_input_update_system(
     mut window_events: MessageWriter<WindowEvent>,
     mut cursor_events: Option<MessageWriter<CursorMoved>>,
     playtest_state: Option<ResMut<PlaytestState>>,
+    mut action_log: Option<ResMut<crate::contract::ActionLog>>,
     mut windows: bevy::ecs::system::Query<
         (bevy::ecs::entity::Entity, &mut bevy::window::Window),
         bevy::ecs::query::With<bevy::window::PrimaryWindow>,
     >,
+    mut headless_window: ResMut<HeadlessWindow>,
+    mut commands: bevy::ecs::system::Commands,
 ) {
     let frame = playtest_state.as_ref().map(|s| s.frame).unwrap_or(0);
-    let window_entity = windows
-        .iter()
-        .next()
-        .map(|(e, _)| e)
-        .unwrap_or(bevy::ecs::entity::Entity::PLACEHOLDER);
+    let window_entity = ensure_window(&mut windows, &mut commands, &mut headless_window);
+    let elapsed_ms = playtest_state
+        .as_ref()
+        .map(|s| s.elapsed_s() as f64 * 1000.0)
+        .unwrap_or(0.0);
+    let mut audit = |action: &str, raw: &RawAction| {
+        if let Some(log) = action_log.as_mut() {
+            log.entries.push(crate::contract::ActionEntry {
+                frame,
+                elapsed_ms,
+                source: crate::contract::ActionSource::BotScenario("raw-input".into()),
+                action: action.to_string(),
+                details: Some(serde_json::to_string(raw).unwrap_or_default()),
+            });
+        }
+    };
     let mut still_pending = VecDeque::new();
     while let Some((target_frame, action)) = queue.0.lock().unwrap().pop_front() {
         if target_frame > frame {
@@ -419,6 +548,7 @@ pub fn raw_input_update_system(
                 window_events.write(WindowEvent::MouseMotion(MouseMotion {
                     delta: bevy::math::Vec2::new(delta.0, delta.1),
                 }));
+                audit("raw:mouse_motion", &action);
             }
             RawAction::Cursor { pos } => {
                 if let Some(ref mut ce) = cursor_events {
@@ -429,6 +559,7 @@ pub fn raw_input_update_system(
                         bevy::math::Vec2::new(pos.0, pos.1),
                     );
                 }
+                audit("raw:cursor", &action);
             }
             RawAction::Wheel { dy } => {
                 mouse_wheel_events.write(MouseWheel {
@@ -445,6 +576,7 @@ pub fn raw_input_update_system(
                     phase: bevy::input::touch::TouchPhase::Started,
                     window: window_entity,
                 }));
+                audit("raw:wheel", &action);
             }
             _ => {
                 // Not handled here; keep for the PreUpdate pass.
@@ -466,7 +598,7 @@ fn inject_gamepad_button(
     frame: u64,
     raw_gamepad_connection_events: &mut MessageWriter<GamepadConnectionEvent>,
     raw_gamepad_events: &mut MessageWriter<bevy::input::gamepad::RawGamepadEvent>,
-    gamepad_holds: &mut ActiveGamepadHolds,
+    gamepad_holds: &mut HashMap<(u64, bevy::input::gamepad::GamepadButton), u64>,
 ) {
     let Some(btn) = parse_gamepad_button(button) else {
         violations.report(
@@ -491,9 +623,7 @@ fn inject_gamepad_button(
         },
     ));
     // Track for release after N frames.
-    gamepad_holds
-        .0
-        .insert((frame, btn), frame + hold_frames as u64);
+    gamepad_holds.insert((frame, btn), frame + hold_frames as u64);
 }
 
 #[cfg(not(feature = "gamepad"))]
@@ -519,12 +649,14 @@ fn inject_gamepad_button(
 fn inject_gamepad_axis(
     axis: &str,
     value: f32,
+    hold_frames: u32,
     violations: &mut Violations,
     commands: &mut bevy::ecs::system::Commands,
     virtual_gamepad: &mut VirtualGamepad,
     frame: u64,
     raw_gamepad_connection_events: &mut MessageWriter<GamepadConnectionEvent>,
     raw_gamepad_events: &mut MessageWriter<bevy::input::gamepad::RawGamepadEvent>,
+    gamepad_axis_holds: &mut HashMap<(u64, bevy::input::gamepad::GamepadAxis), u64>,
 ) {
     let Some(ax) = parse_gamepad_axis(axis) else {
         violations.report(
@@ -548,6 +680,9 @@ fn inject_gamepad_axis(
             value,
         },
     ));
+    if hold_frames > 0 {
+        gamepad_axis_holds.insert((frame, ax), frame + hold_frames as u64);
+    }
 }
 
 #[cfg(not(feature = "gamepad"))]
@@ -555,6 +690,7 @@ fn inject_gamepad_axis(
 fn inject_gamepad_axis(
     axis: &str,
     _value: f32,
+    _hold_frames: u32,
     violations: &mut Violations,
     _commands: &mut bevy::ecs::system::Commands,
     _virtual_gamepad: &mut VirtualGamepad,

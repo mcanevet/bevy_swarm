@@ -450,6 +450,12 @@ pub enum ReplayIntent {
         target: SelectTarget,
     },
     Wait,
+    /// Raw input action for tier-0 games (Z3): the actuator replays it
+    /// verbatim through the real input chain. Details form is the
+    /// serde-tagged RawAction JSON.
+    Raw {
+        raw: RawAction,
+    },
 }
 
 /// Target of a replay Select: Name (plain string, back-compat) or

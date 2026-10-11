@@ -146,11 +146,9 @@ impl bevy::app::Plugin for PlaytestPlugin {
         );
         app.init_resource::<crate::raw_input::RawActionQueue>();
         app.init_resource::<crate::effects::ActionEffects>();
-        app.init_resource::<crate::raw_input::ActiveKeyHolds>();
-        app.init_resource::<crate::raw_input::ActiveMouseHolds>();
+        app.init_resource::<crate::raw_input::InputHolds>();
         app.init_resource::<crate::raw_input::VirtualGamepad>();
-        #[cfg(feature = "gamepad")]
-        app.init_resource::<crate::raw_input::ActiveGamepadHolds>();
+        app.init_resource::<crate::raw_input::HeadlessWindow>();
         // Raw input actuator writes these messages directly; without
         // winit nothing else registers them in a headless app.
         app.add_message::<bevy::input::keyboard::KeyboardInput>();
