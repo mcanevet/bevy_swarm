@@ -189,3 +189,29 @@ fn golden_path_sanitization_rejects_traversal() {
         bevy_swarm::scenario::validate_scenario(&scen).expect("must accept valid name");
     }
 }
+
+#[test]
+fn scenario_duration_tps_caps_reject_dos() {
+    // H2: tps/duration combos that imply enormous tick counts must be
+    // rejected at validation time.
+    let reject = |tps: u32, dur: f64| {
+        let scen: bevy_swarm::scenario::Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"chaos","seed":1}},"tps":{tps},"duration_s":{dur}}}"#
+        ))
+        .unwrap();
+        bevy_swarm::scenario::validate_scenario(&scen).expect_err("must reject");
+    };
+
+    reject(1_001, 1.0); // tps over cap
+    reject(1_000_000, 1.0); // tps way over cap
+    reject(60, 3_600.1); // duration over cap
+    reject(4294967295, 3.4e38); // the original hostile scenario
+    reject(5000, 2000.0); // over both tps cap and 10M tick cap
+    reject(100, 200_000.0); // 20M ticks — over tick cap only
+
+    // Boundary: 1000 tps x 3600 s = 3.6M ticks is accepted.
+    let ok: bevy_swarm::scenario::Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":1},"tps":1000,"duration_s":3600.0}"#)
+            .unwrap();
+    bevy_swarm::scenario::validate_scenario(&ok).expect("boundary combo must be accepted");
+}

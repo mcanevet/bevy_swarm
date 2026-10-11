@@ -633,6 +633,31 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             "duration_s must be finite and > 0".into(),
         ));
     }
+    // Compute-DoS caps (H2): a hostile scenario with huge tps/duration
+    // could otherwise hang the harness or exhaust memory.
+    const MAX_TPS: u32 = 1_000;
+    const MAX_DURATION_S: f32 = 3_600.0;
+    const MAX_TOTAL_TICKS: u64 = 10_000_000;
+    if scenario.tps > MAX_TPS {
+        return Err(ScenarioError::Rejected(format!(
+            "tps {} exceeds the maximum of {MAX_TPS}",
+            scenario.tps
+        )));
+    }
+    if scenario.duration_s > MAX_DURATION_S {
+        return Err(ScenarioError::Rejected(format!(
+            "duration_s {} exceeds the maximum of {MAX_DURATION_S}",
+            scenario.duration_s
+        )));
+    }
+    let total_ticks = (scenario.duration_s * scenario.tps as f32).ceil() as u64;
+    if total_ticks > MAX_TOTAL_TICKS {
+        return Err(ScenarioError::Rejected(format!(
+            "total ticks ({total_ticks}) exceed the maximum of {MAX_TOTAL_TICKS} \
+             (duration_s {} x tps {})",
+            scenario.duration_s, scenario.tps
+        )));
+    }
     // Golden-file path safety (H1): scenario.name is embedded into
     // golden-set file names on disk. Reject anything outside
     // [A-Za-z0-9_-] so path traversal (e.g. "../../etc/x") cannot
