@@ -256,7 +256,22 @@ impl Accessor {
                         _ => return None,
                     }
                 };
-                if with_ids.iter().all(|i| i.is_some()) && without_ids.iter().all(|i| i.is_some()) {
+                if with_ids.iter().all(|i| i.is_some()) {
+                    // Without filters on registered-but-never-spawned
+                    // components exclude NOTHING (no entities have them
+                    // yet) — skip those filters instead of reporting
+                    // count 0. Unresolved without names must at least be
+                    // registered types (load-time checks rejected true
+                    // typos), else defer.
+                    let without_known = {
+                        let registry = world.resource::<AppTypeRegistry>().0.read();
+                        without_names.iter().zip(without_ids.iter()).all(|(n, id)| {
+                            id.is_some() || registry.get_with_short_type_path(n).is_some()
+                        })
+                    };
+                    if !without_known {
+                        return None;
+                    }
                     let mut builder = bevy::ecs::query::QueryBuilder::<Entity>::new(world);
                     for id in with_ids.iter().flatten() {
                         builder.with_id(*id);
@@ -264,7 +279,28 @@ impl Accessor {
                     for id in without_ids.iter().flatten() {
                         builder.without_id(*id);
                     }
-                    *state = Some(builder.build());
+                    // Cache ONLY when fully resolved — a query that
+                    // skipped a not-yet-spawned without filter must be
+                    // rebuilt every evaluation until the component
+                    // exists, or a later spawn would silently stop being
+                    // excluded.
+                    if without_ids.iter().all(|i| i.is_some()) {
+                        *state = Some(builder.build());
+                    } else {
+                        let mut qs = builder.build();
+                        qs.update_archetypes(world);
+                        return Some(
+                            qs.matched_archetypes()
+                                .map(|id| {
+                                    world
+                                        .archetypes()
+                                        .get(id)
+                                        .map(|a| a.len() as usize)
+                                        .unwrap_or(0)
+                                })
+                                .sum(),
+                        );
+                    }
                 } else {
                     // FX6 I2: a registered-but-never-spawned component
                     // has a valid component id but no storage yet —
@@ -273,6 +309,11 @@ impl Accessor {
                     // rejected true typos, treat fully-registered
                     // TYPES with unresolved storage as a valid count
                     // of 0 (nothing matches).
+                    //
+                    // This shortcut is only correct because the
+                    // UNRESOLVED names are in with_names: a with filter
+                    // on a never-spawned type matches 0 entities, so
+                    // the total is 0 regardless of the without side.
                     let registry = world.resource::<AppTypeRegistry>().0.read();
                     let types_known = with_names
                         .iter()
@@ -303,5 +344,71 @@ impl Accessor {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::component::Component;
+    use bevy::prelude::App;
+    use bevy::prelude::MinimalPlugins;
+    use bevy::prelude::World;
+
+    #[derive(Component, Reflect)]
+    struct Spawned;
+
+    #[derive(Component, Reflect)]
+    struct NeverSpawned;
+
+    fn make_world() -> World {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .register_type::<Spawned>()
+            .register_type::<NeverSpawned>();
+        // Spawn at least one entity with Spawned component
+        app.world_mut().spawn(Spawned);
+        std::mem::take(app.world_mut())
+    }
+
+    #[test]
+    fn without_never_spawned_returns_real_count() {
+        // 716.29: without filter on registered-but-never-spawned component
+        // must return the real with-matched count, not 0.
+        let mut world = make_world();
+        let mut accessor = Accessor::Count {
+            with_names: vec!["Spawned".to_string()],
+            without_names: vec!["NeverSpawned".to_string()],
+            state: None,
+        };
+        let count = accessor.eval_count(&mut world);
+        assert_eq!(count, Some(1));
+    }
+
+    #[test]
+    fn with_never_spawned_returns_zero() {
+        // FX6 I2: with filter on never-spawned component still returns 0.
+        let mut world = make_world();
+        let mut accessor = Accessor::Count {
+            with_names: vec!["NeverSpawned".to_string()],
+            without_names: vec![],
+            state: None,
+        };
+        let count = accessor.eval_count(&mut world);
+        assert_eq!(count, Some(0));
+    }
+
+    #[test]
+    fn without_never_spawned_defers_if_unresolved() {
+        // When without names are not registered (unresolved), defer.
+        let mut world = make_world();
+        let mut accessor = Accessor::Count {
+            with_names: vec!["Spawned".to_string()],
+            without_names: vec!["SomeUnknownType".to_string()],
+            state: None,
+        };
+        // resolve_ids errors on the unregistered without name → None.
+        let count = accessor.eval_count(&mut world);
+        assert_eq!(count, None);
     }
 }
