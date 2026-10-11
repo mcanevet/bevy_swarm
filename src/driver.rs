@@ -1241,6 +1241,68 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     })
 }
 
+/// A4/swarm-kpl: post-run determinism check. When a scenario sets
+/// `check_determinism: Some(N)`, run it N times (N >= 2) on FRESH Apps
+/// from `app_builder`, compare per-frame state digests, and report the
+/// `nondeterministic` rule on the first divergence. Returns the base
+/// report with the extra violation appended (status recomputed).
+///
+/// Callers with an app factory (InProcess runner, fixture-runner)
+/// should call this AFTER `run_scenario` when the flag is set.
+pub fn check_scenario_determinism(
+    app_builder: impl Fn() -> App + Sync,
+    scenario: &Scenario,
+    base: PlaytestReport,
+) -> PlaytestReport {
+    let Some(runs) = scenario.check_determinism else {
+        return base;
+    };
+    let det = match crate::determinism::check_determinism(app_builder, scenario, runs.max(2)) {
+        Ok(d) => d,
+        Err(_) => return base,
+    };
+    let mut report = base;
+    if let Some(div) = det.first_divergence {
+        let detail = if div.differing.is_empty() {
+            format!(
+                "cross-run state digest diverged at frame {} after {} runs",
+                div.frame, runs
+            )
+        } else {
+            let fields: Vec<String> = div
+                .differing
+                .iter()
+                .take(5)
+                .map(|(k, a, b)| format!("{}: {:?} != {:?}", k, a, b))
+                .collect();
+            format!(
+                "cross-run state digest diverged at frame {} ({}): {}",
+                div.frame,
+                runs,
+                fields.join(", ")
+            )
+        };
+        report.violations.push(crate::state::ViolationEntry {
+            rule: crate::rules::Rule::Nondeterministic.to_string(),
+            target: "state_digest".to_string(),
+            first_frame: div.frame,
+            last_frame: div.frame,
+            count: 1,
+            detail: detail.clone(),
+            last_detail: detail,
+            fingerprint: None,
+            fingerprint_scheme: 1,
+        });
+        report.violations.sort_by(|a, b| {
+            (a.first_frame, &a.rule, &a.target).cmp(&(b.first_frame, &b.rule, &b.target))
+        });
+        if report.status == crate::enums::PlaytestStatus::Pass {
+            report.status = crate::enums::PlaytestStatus::Fail;
+        }
+    }
+    report
+}
+
 //-----------------------------------------------------------------------
 
 pub(crate) fn cheat_scheduler_system(world: &mut World) {

@@ -16,7 +16,8 @@ pub struct CardPlayed {
     pub card_id: String,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
 pub struct Score(pub f64);
 
 fn setup(mut commands: Commands) {

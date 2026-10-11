@@ -99,7 +99,14 @@ impl<F: Fn() -> App + Sync> ScenarioRunner for InProcess<F> {
         #[cfg(feature = "deterministic-entropy")]
         crate::entropy::enter_run(scenario.bot.seed);
         let mut app = (self.factory)();
-        run_scenario(&mut app, scenario)
+        let report = run_scenario(&mut app, scenario)?;
+        // swarm-kpl: opt-in cross-run determinism check — rerun the
+        // scenario N times on fresh Apps and compare state digests.
+        Ok(if scenario.check_determinism.is_some() {
+            crate::driver::check_scenario_determinism(&self.factory, scenario, report)
+        } else {
+            report
+        })
     }
 }
 

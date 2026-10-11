@@ -79,6 +79,9 @@ fn build_scenario_json(fixture: &str, variant: &str, seed: u64) -> String {
     if let Some(rate) = exp.get("input_rate_hz").and_then(|r| r.as_u64()) {
         scenario["bot"]["input_rate_hz"] = serde_json::json!(rate);
     }
+    if let Some(check_det) = exp.get("check_determinism").and_then(|d| d.as_u64()) {
+        scenario["check_determinism"] = serde_json::json!(check_det);
+    }
     scenario.to_string()
 }
 

@@ -54,6 +54,11 @@ pub struct Scenario {
     /// I4: liveness configuration (default 2s timeout, real-time mode).
     #[serde(default)]
     pub liveness: LivenessConfig,
+    /// A4: opt-in determinism check. None = disabled; Some(N) means
+    /// run the scenario N times (N >= 2) with the same seed and compare
+    /// state digests. Reports "nondeterministic" rule on divergence.
+    #[serde(default)]
+    pub check_determinism: Option<usize>,
 }
 /// Key name → KeyCode (common subset; extend as games need).
 pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {

@@ -7,6 +7,7 @@
   "duration_s": 6.0,
   "must_not_report": [],
   "status": "fail",
+  "check_determinism": 2,
   "must_report": [
     {
       "rule": "nondeterministic"
@@ -15,6 +16,5 @@
   "liveness": {
     "mode": "after_intent",
     "timeout_s": 2.0
-  },
-  "pending": "swarm-kpl"
+  }
 }
