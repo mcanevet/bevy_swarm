@@ -61,7 +61,7 @@ render = ["bevy/bevy_render", "bevy/x11", "bevy/wayland"]
 audio = ["bevy/bevy_audio"]
 gamepad = ["bevy/gamepad", "bevy/bevy_gilrs"]
 deterministic-entropy = ["getrandom04"]
-agent = ["bevy/bevy_remote", "bevy/bevy_render"]
+agent = ["bevy/bevy_remote", "bevy/bevy_render", "getrandom04"]
 
 [dev-dependencies]
 serial_test = "3"

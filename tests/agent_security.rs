@@ -63,11 +63,15 @@ fn token_required_when_configured() {
     let res = bevy_swarm::agent::__test_observe(&world, Some(params));
     assert!(res.is_ok() || res.unwrap_err().code != error_codes::INVALID_REQUEST);
 
-    // No token configured → no auth required.
+    // C2 default-deny: no token configured (hand-built App) → auth
+    // FAILURE, not open access.
     let world = world_with_token(None);
     let params = serde_json::json!({"path": "TestApi.score"});
     let res = bevy_swarm::agent::__test_observe(&world, Some(params));
-    assert!(res.is_ok() || res.unwrap_err().code != error_codes::INVALID_REQUEST);
+    assert!(
+        matches!(&res, Err(e) if e.code == error_codes::INVALID_REQUEST),
+        "missing AgentAuthToken must reject, got: {res:?}"
+    );
 }
 
 #[test]
@@ -349,4 +353,31 @@ fn fx10_release_guard_decision_tested_directly() {
     let err = bevy_swarm::agent::release_guard_decision(true).unwrap_err();
     assert!(err.contains("RELEASE"), "got: {err}");
     assert!(bevy_swarm::agent::release_guard_decision(false).is_ok());
+}
+
+#[test]
+fn c2_default_deny_rejects_without_token() {
+    use bevy::remote::error_codes;
+    // Even on loopback, a hand-built App with no token must reject
+    // ALL token-guarded methods (default-deny, not default-open).
+    let world = world_with_token(None);
+    let err = bevy_swarm::agent::__test_observe(&world, None).unwrap_err();
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
+
+    // Providing a token param does not help — none is configured.
+    let params = serde_json::json!({"path": "TestApi.score", "token": "anything"});
+    let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
+}
+
+#[test]
+fn h3_overlong_token_param_rejected_first() {
+    use bevy::remote::error_codes;
+    // H3: token params > 1KiB are rejected before the constant-time
+    // comparison runs (CPU-DoS guard on multi-MB payloads).
+    let world = world_with_token(Some("sekrit".into()));
+    let long_token = "x".repeat(4096);
+    let params = serde_json::json!({"path": "TestApi.score", "token": long_token});
+    let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
+    assert_eq!(err.code, error_codes::INVALID_REQUEST);
 }
