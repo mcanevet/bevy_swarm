@@ -63,6 +63,57 @@ fn discover_cases() -> Vec<(String, String)> {
     cases
 }
 
+/// Locate the fixture-runner binary WITHOUT a nested `cargo run`
+/// (swarm-13e). `cargo test --workspace` builds every workspace bin
+/// before integration tests run, so `target/<profile>/fixture-runner`
+/// already exists; resolve it directly. Falls back to building once
+/// (with a visible, non-quiet error) if the harness was invoked in a
+/// narrower way.
+fn fixture_runner_bin() -> std::path::PathBuf {
+    use std::sync::OnceLock;
+    static BIN: OnceLock<std::path::PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // target dir: honour CARGO_TARGET_DIR (hermetic runs) else the
+        // workspace-root target/ next to the manifest.
+        let profile = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        let candidates = [
+            std::env::var("CARGO_TARGET_DIR")
+                .map(|t| PathBuf::from(t).join(profile).join("fixture-runner"))
+                .ok(),
+            Some(manifest.join("target").join(profile).join("fixture-runner")),
+        ];
+        for c in candidates.into_iter().flatten() {
+            if c.is_file() {
+                return c;
+            }
+        }
+        // Not pre-built (e.g. `cargo test --test acceptance` alone
+        // still builds all workspace bins? it does NOT for other
+        // packages' bins). Build it once, loudly.
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p", "fixture-runner"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .status()
+            .expect("spawn cargo build -p fixture-runner");
+        assert!(status.success(), "building fixture-runner failed");
+        let path = std::env::var("CARGO_TARGET_DIR")
+            .map(|t| PathBuf::from(t).join(profile).join("fixture-runner"))
+            .unwrap_or_else(|_| manifest.join("target").join(profile).join("fixture-runner"));
+        assert!(
+            path.is_file(),
+            "fixture-runner binary not found at {}",
+            path.display()
+        );
+        path
+    })
+    .clone()
+}
+
 /// Run fixture-runner for a fixture+variant and return the report JSON read
 /// from the file the harness wrote (the user path).
 fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> serde_json::Value {
@@ -97,8 +148,8 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
     std::fs::create_dir_all(&out_dir).expect("create per-case out dir");
     let out_path = out_dir.join("report.json");
 
-    let mut cmd = Command::new("cargo");
-    cmd.args(["run", "--quiet", "-p", "fixture-runner", "--", fixture])
+    let mut cmd = Command::new(fixture_runner_bin());
+    cmd.arg(fixture)
         .arg(scenario)
         .arg("--out")
         .arg(&out_path)
@@ -478,8 +529,8 @@ fn unknown_fixture_bug_panics() {
         "turn_based",
         "regression_pair",
     ] {
-        let out = Command::new("cargo")
-            .args(["run", "--quiet", "-p", "fixture-runner", "--", fixture])
+        let out = Command::new(fixture_runner_bin())
+            .arg(fixture)
             .arg(
                 r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[],"setup":{}}"#,
             )
@@ -505,8 +556,8 @@ fn unknown_fixture_bug_panics() {
 fn fixture_runner_supports_out_flag() {
     let out_dir = std::env::temp_dir().join(format!("fx2-out-test-{}", std::process::id()));
     let out_path = out_dir.join("report.json");
-    let out = Command::new("cargo")
-        .args(["run", "--quiet", "-p", "fixture-runner", "--", "walker"])
+    let out = Command::new(fixture_runner_bin())
+        .arg("walker")
         .arg(r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[],"setup":{}}"#)
         .arg("--out")
         .arg(&out_path)
