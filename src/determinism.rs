@@ -252,6 +252,48 @@ pub(crate) fn record_state_digest_system(world: &mut bevy::ecs::world::World) {
     });
 }
 
+/// Run `scenario` twice on fresh Apps and compare per-frame digests.
+/// Returns `(matches, first_divergence_frame, first_run_digests)` —
+/// the frame of the earliest hash mismatch (or the common-prefix
+/// length when only the trace lengths differ), plus the first run's
+/// digests (with snapshots) so callers can reuse the run instead of
+/// paying a third one.
+pub(crate) fn compare_two_runs_digests(
+    app_builder: impl Fn() -> App,
+    scenario: &Scenario,
+) -> Result<(bool, Option<u64>, Vec<FrameDigest>), ScenarioError> {
+    let run_once = || -> Result<Vec<FrameDigest>, ScenarioError> {
+        let mut app = app_builder();
+        app.insert_resource(StateTrace {
+            with_snapshots: true,
+            stop_after: None,
+            digests: vec![],
+        });
+        let report = run_scenario(&mut app, scenario)?;
+        Ok(report.state_trace.unwrap_or_default())
+    };
+    let trace_a = run_once()?;
+    let trace_b = run_once()?;
+    let matches = trace_a.len() == trace_b.len()
+        && trace_a
+            .iter()
+            .zip(trace_b.iter())
+            .all(|(a, b)| a.hash == b.hash);
+    let first_divergence = if matches {
+        None
+    } else {
+        Some(
+            trace_a
+                .iter()
+                .zip(trace_b.iter())
+                .position(|(a, b)| a.hash != b.hash)
+                .map(|i| trace_a[i].frame)
+                .unwrap_or(trace_a.len().min(trace_b.len()) as u64),
+        )
+    };
+    Ok((matches, first_divergence, trace_a))
+}
+
 /// Run `scenario` `runs` times (>= 2) on fresh Apps and compare
 /// per-frame digests. On mismatch, traces twice more with snapshots to
 /// explain WHICH fields diverged (reporting the earliest divergence
