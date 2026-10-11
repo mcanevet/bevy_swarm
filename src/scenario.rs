@@ -633,6 +633,22 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             "duration_s must be finite and > 0".into(),
         ));
     }
+    // Golden-file path safety (H1): scenario.name is embedded into
+    // golden-set file names on disk. Reject anything outside
+    // [A-Za-z0-9_-] so path traversal (e.g. "../../etc/x") cannot
+    // write outside the golden directory.
+    if let Some(name) = &scenario.name {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(ScenarioError::Rejected(format!(
+                "scenario.name '{name}' is invalid: golden-set names may only contain \
+                 [A-Za-z0-9_-] and must be non-empty",
+            )));
+        }
+    }
     // Bot-specific requirements (C6).
     use crate::enums::BotType;
     match scenario.bot.bot_type {
