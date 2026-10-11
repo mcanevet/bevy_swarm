@@ -86,8 +86,13 @@ pub enum Captured {
 }
 
 /// Severity of a Bevy error.
+///
+/// `Suppressed`: the game's error handler downgraded the error to
+/// Ignore severity. Recorded so downgrade-to-Ignore games cannot make
+/// swarm blind to errors, but does not trigger failure by itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
+    Suppressed,
     Warning,
     Error,
 }
@@ -247,12 +252,12 @@ fn thread_local_system_name() -> Option<String> {
 
 /// Capture a borrowed BevyError + context into the current run's sink.
 ///
-/// Severity mapping: Ignore = not recorded; Trace/Debug/Info/Warning ->
-/// Warning; Error/Panic -> Error.
+/// Severity mapping: Ignore = recorded as Suppressed (not dropped);
+/// Trace/Debug/Info/Warning -> Warning; Error/Panic -> Error.
 pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
     let sev = err.severity();
     let severity = match sev {
-        bevy::ecs::error::Severity::Ignore => return, // not recorded
+        bevy::ecs::error::Severity::Ignore => Severity::Suppressed,
         bevy::ecs::error::Severity::Warning
         | bevy::ecs::error::Severity::Trace
         | bevy::ecs::error::Severity::Debug
@@ -421,5 +426,33 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains_key(&run_id));
+    }
+
+    #[test]
+    fn ignore_severity_errors_recorded_as_suppressed() {
+        let run_id = RunId::new();
+        set_current_run(run_id);
+
+        // Create an Ignore-severity error (downgraded by game handler).
+        let ignore_err = bevy::ecs::error::BevyError::ignore("test ignore");
+        let ctx = bevy::ecs::error::ErrorContext::Command {
+            name: bevy::utils::DebugName::borrowed("test_command"),
+        };
+
+        capture_bevy_error(&ignore_err, &ctx);
+
+        clear_current_run();
+
+        // Verify it was recorded with Suppressed severity.
+        let entries = SINK.lock().unwrap_or_else(|e| e.into_inner())[&run_id]
+            .iter()
+            .filter_map(|e| match e {
+                Captured::BevyError { severity, .. } => Some(*severity),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1, "one BevyError captured");
+        assert_eq!(entries[0], Severity::Suppressed);
     }
 }
