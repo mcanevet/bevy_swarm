@@ -244,6 +244,9 @@ impl Plugin for TestConventionsPlugin {
             .init_resource::<CheatHooks>()
             .init_resource::<ActionLog>()
             .init_resource::<GameVersion>()
+            // 716.30: typed oracle/predicate/policy registrations
+            // (add_oracle etc.) must not panic on a normal app.
+            .init_resource::<crate::typed::TypedRegistry>()
             .init_resource::<crate::identity::IdentityIndex>();
         // I1: also register identity observers here (idempotent) so the
         // game-side contract plugin covers game-only Apps.
