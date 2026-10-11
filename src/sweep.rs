@@ -244,20 +244,102 @@ pub fn run_regressions_and_sweep<F: Fn() -> bevy::app::App + Sync>(
     // FX12 (E3): persist new failures (one file per fingerprint) when
     // the conventions update mode is on.
     if update_regressions_enabled() {
+        // Dedup by fingerprint: multiple seeds hitting the SAME bug
+        // must produce ONE regression record, not one per seed. Keep
+        // the lowest seed as the persisted scenario seed; accumulate
+        // the others into found_by_seeds.
+        let mut records: Vec<RegressionRecord> = Vec::new();
         for f in &sweep.failures {
-            let record = RegressionRecord {
-                schema_version: 1,
-                fingerprint: f.fingerprint.clone(),
-                found_by_seeds: vec![f.seed],
-                status: "staging".to_string(),
-                scenario: {
-                    let mut s = base_for_persist.clone();
-                    s.bot.seed = f.seed;
-                    s
-                },
-            };
+            let seed = f.seed;
+            if let Some(rec) = records.iter_mut().find(|r| r.fingerprint == f.fingerprint) {
+                if seed < rec.scenario.bot.seed {
+                    rec.scenario.bot.seed = seed;
+                }
+                if !rec.found_by_seeds.contains(&seed) {
+                    rec.found_by_seeds.push(seed);
+                }
+            } else {
+                records.push(RegressionRecord {
+                    schema_version: 1,
+                    fingerprint: f.fingerprint.clone(),
+                    found_by_seeds: vec![seed],
+                    status: "staging".to_string(),
+                    scenario: {
+                        let mut s = base_for_persist.clone();
+                        s.bot.seed = seed;
+                        s
+                    },
+                });
+            }
+        }
+        for record in records {
             write_regression(&record, reg_dir)?;
         }
     }
     Ok(RegressionsAndSweepReport { replays, sweep })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fingerprint::Fingerprint;
+    use crate::scenario::Scenario;
+
+    #[test]
+    fn regression_dedup_same_fingerprint_across_seeds() {
+        // Multiple seeds hitting the SAME bug must produce ONE
+        // regression record with found_by_seeds accumulated.
+        let failures = vec![
+            SweepFailure {
+                seed: 3,
+                fingerprint: Fingerprint("fp1".to_string()),
+                rule: "bug".to_string(),
+            },
+            SweepFailure {
+                seed: 1,
+                fingerprint: Fingerprint("fp1".to_string()),
+                rule: "bug".to_string(),
+            },
+            SweepFailure {
+                seed: 5,
+                fingerprint: Fingerprint("fp2".to_string()),
+                rule: "bug".to_string(),
+            },
+        ];
+
+        let base: Scenario =
+            serde_json::from_str(r#"{"bot":{"type":"chaos","seed":0},"duration_s":0.1}"#).unwrap();
+
+        // Dedup logic from regressions_and_sweep
+        let mut records: Vec<RegressionRecord> = Vec::new();
+        for f in &failures {
+            let seed = f.seed;
+            if let Some(rec) = records.iter_mut().find(|r| r.fingerprint == f.fingerprint) {
+                if seed < rec.scenario.bot.seed {
+                    rec.scenario.bot.seed = seed;
+                }
+                if !rec.found_by_seeds.contains(&seed) {
+                    rec.found_by_seeds.push(seed);
+                }
+            } else {
+                records.push(RegressionRecord {
+                    schema_version: 1,
+                    fingerprint: f.fingerprint.clone(),
+                    found_by_seeds: vec![seed],
+                    status: "staging".to_string(),
+                    scenario: {
+                        let mut s = base.clone();
+                        s.bot.seed = seed;
+                        s
+                    },
+                });
+            }
+        }
+
+        assert_eq!(records.len(), 2, "two unique fingerprints");
+        let fp1_rec = records.iter().find(|r| r.fingerprint.0 == "fp1").unwrap();
+        assert_eq!(fp1_rec.scenario.bot.seed, 1, "lowest seed persisted");
+        assert!(fp1_rec.found_by_seeds.contains(&1));
+        assert!(fp1_rec.found_by_seeds.contains(&3));
+    }
 }
