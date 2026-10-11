@@ -397,6 +397,63 @@ pub fn resolve_world_percept(world: &World, path: &str) -> Option<TestFieldValue
             }
             return Some(TestFieldValue::Numeric(count as f64));
         }
+        // Aggregates: "Component:<TypePath>.<field>#sum|#min|#max" —
+        // fold a numeric field over every entity holding the component.
+        // #sum of nothing is 0 (monoid identity); #min/#max of nothing
+        // is undefined (None). Requires at least one dot: everything
+        // before the first dot is the type path, the rest (minus the
+        // aggregate suffix) is the field path.
+        if let Some((agg, agg_kind)) = ["sum", "min", "max"]
+            .iter()
+            .find_map(|k| rest.strip_suffix(&format!("#{k}")).map(|b| (b, *k)))
+        {
+            let (type_path, field) = agg.split_once('.')?;
+            // Registered-but-never-spawned components behave like the
+            // zero-count semantics: #sum folds to 0; min/max are
+            // undefined (fall through to None below when there are no
+            // candidates).
+            let Some(comp_id) = comp_id_for(type_path) else {
+                if registry.get_with_short_type_path(type_path).is_some() && agg_kind == "sum" {
+                    return Some(TestFieldValue::Numeric(0.0));
+                }
+                return None;
+            };
+            let reflect_component = registry
+                .get_with_short_type_path(type_path)?
+                .data::<bevy::ecs::reflect::ReflectComponent>()?;
+            let mut acc: Option<f64> = None;
+            for entity in world.iter_entities() {
+                if !entity.contains_id(comp_id) {
+                    continue;
+                }
+                let Ok(entity_ref) = world.get_entity(entity.id()) else {
+                    continue;
+                };
+                let Some(reflect) = reflect_component.reflect(entity_ref) else {
+                    continue;
+                };
+                let Ok(val) = reflect.reflect_path(field) else {
+                    continue;
+                };
+                let TestFieldValue::Numeric(n) = value_from_reflect(val) else {
+                    continue;
+                };
+                acc = Some(match acc {
+                    None => n,
+                    Some(a) => match agg_kind {
+                        "sum" => a + n,
+                        "min" => a.min(n),
+                        "max" => a.max(n),
+                        _ => unreachable!(),
+                    },
+                });
+            }
+            return Some(TestFieldValue::Numeric(match (agg_kind, acc) {
+                ("sum", None) => 0.0,
+                (_, None) => return None,
+                (_, Some(v)) => v,
+            }));
+        }
         // Field addressing forms:
         //   "Component:<TypePath>{<Name>}.<field>" — STABLE: entity by Name
         //   "Component:<TypePath>@<stable_id>.<field>" — stable id (I1)

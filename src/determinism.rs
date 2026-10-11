@@ -164,16 +164,60 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
     map
 }
 
-/// Collect resource percepts: before Z6 (game-owned type inference),
-/// we defer this to avoid fragile reflection hacks. The canonical
-/// state currently covers TestApi paths, Gameplay transforms, entity
-/// census, and DigestHooks — sufficient for most determinism bugs.
-fn collect_resource_percepts(
-    _world: &bevy::ecs::world::World,
-    _map: &mut BTreeMap<String, String>,
-) {
-    // TODO: after Z6, iterate game-owned resources via their
-    // registered TypeIds and record a digest per resource.
+/// Collect resource percepts: every REGISTERED resource whose type has
+/// `ReflectComponent` data gets one `Resource:<ShortTypePath>` entry
+/// (Debug-formatted whole-resource string). Resources are singletons
+/// so the count is bounded. Harness-internal resources are excluded —
+/// hashing harness bookkeeping (TestApi, StateTrace...) would flag
+/// harness behavior as divergence.
+fn collect_resource_percepts(world: &bevy::ecs::world::World, map: &mut BTreeMap<String, String>) {
+    let Some(registry_arc) = world.get_resource::<bevy::ecs::reflect::AppTypeRegistry>() else {
+        return;
+    };
+    let registry = registry_arc.0.read();
+
+    let internal: &[&str] = &["TestApi", "StateTrace", "DigestHooks", "PlaytestState"];
+
+    for type_reg in registry.iter() {
+        let short = type_reg.type_info().type_path_table().short_path();
+        if internal.contains(&short) {
+            continue;
+        }
+        let Some(reflect_component) = type_reg.data::<bevy::ecs::reflect::ReflectComponent>()
+        else {
+            continue;
+        };
+        // Engine resources (bevy_time::Time etc.) carry wall-clock
+        // Instants and task-pool state — inherently non-deterministic
+        // and not GAME state. Only game-crate resources are digested.
+        let full_path = type_reg.type_info().type_path_table().path();
+        if full_path.starts_with("bevy_") || full_path.starts_with("bevy::") {
+            continue;
+        }
+        let Some(type_id) = registry.get_with_short_type_path(short) else {
+            continue;
+        };
+        let Some(comp_id) = world.components().get_valid_id(type_id.type_id()) else {
+            continue;
+        };
+        // Resources live on singleton entities addressed via
+        // resource_entities.
+        let Some(entity) = world
+            .resource_entities()
+            .iter()
+            .find(|(id, _)| *id == comp_id)
+            .map(|(_, e)| e)
+        else {
+            continue;
+        };
+        let Ok(entity_ref) = world.get_entity(entity) else {
+            continue;
+        };
+        let Some(reflect) = reflect_component.reflect(entity_ref) else {
+            continue;
+        };
+        map.insert(format!("Resource:{}", short), format!("{:?}", reflect));
+    }
 }
 
 /// Exclusive oracle: record the canonical state digest for this frame

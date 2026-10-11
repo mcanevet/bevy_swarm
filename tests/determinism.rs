@@ -194,3 +194,95 @@ fn fx6_reset_hook_panick_is_caught_and_reported() {
         report.violations
     );
 }
+
+/// FX6: a panicking cheat hook must be caught and reported as
+/// cheat_hook_panicked, and LATER scheduled cheats must still run
+/// (the CheatHooks resource survives the panic).
+#[test]
+fn fx6_cheat_hook_panick_is_caught_and_reported() {
+    use bevy_swarm::contract::CheatHooks;
+    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.2,"tps":60,"setup":{"cheats":[{"frame":1,"kind":"boom"},{"frame":3,"kind":"later"}]}}"#,
+    )
+    .unwrap();
+    let mut app = bevy::prelude::App::new();
+    app.add_plugins((
+        bevy::prelude::MinimalPlugins,
+        bevy::transform::TransformPlugin,
+        bevy_swarm::driver::PlaytestPlugin,
+    ));
+    let mut hooks = CheatHooks::default();
+    hooks.register("boom", |_world: &mut bevy::prelude::World| {
+        panic!("cheat hook exploded");
+    });
+    hooks.register("later", |world: &mut bevy::prelude::World| {
+        world.insert_resource(LaterCheatRan(true));
+    });
+    app.insert_resource(hooks);
+    app.insert_resource(LaterCheatRan(false));
+    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario).unwrap();
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|v| v.rule == "cheat_hook_panicked"),
+        "must report cheat_hook_panicked, got: {:?}",
+        report.violations
+    );
+    assert!(
+        app.world()
+            .get_resource::<LaterCheatRan>()
+            .is_some_and(|r| r.0),
+        "the later cheat must still run after the panicking one"
+    );
+}
+
+#[derive(bevy::prelude::Resource, Default)]
+struct LaterCheatRan(bool);
+
+/// FX6 unwind safety: a panicking TestApi resolver during the planner's
+/// taken-Violations region must not lose the Violations resource — the
+/// run completes (crash status) and the report is still produced.
+#[test]
+fn fx6_planner_resolver_panic_keeps_violations_resource() {
+    use bevy_swarm::contract::{RegisterTestApi, TestApiResolve};
+
+    #[derive(bevy::prelude::Resource)]
+    struct PanicApi;
+
+    impl TestApiResolve for PanicApi {
+        fn resolve(&self, _path: &str) -> Option<bevy_swarm::contract::TestFieldValue> {
+            panic!("resolver exploded");
+        }
+    }
+
+    static RESOLVE_CALLED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"above","value":10,"emit":[{"intent":"wait"}]}},"duration_s":0.2,"tps":60,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app = bevy::prelude::App::new();
+    app.add_plugins((
+        bevy::prelude::MinimalPlugins,
+        bevy::transform::TransformPlugin,
+        bevy_swarm::driver::PlaytestPlugin,
+    ));
+    app.insert_resource(PanicApi);
+    app.register_test_api::<PanicApi>();
+    RESOLVE_CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+    // The run must not hang or drop the Violations resource mid-flight.
+    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario);
+    let rep = report.expect("run must complete (panic caught), not error");
+    eprintln!("STATUS: {:?} VIOLATIONS: {:?}", rep.status, rep.violations);
+    // After the run, the report's violation extraction already proves
+    // Violations was available; a lost resource would have shown up as
+    // an unwrap panic inside run_scenario instead of a report.
+    assert!(
+        app.world()
+            .get_resource::<bevy_swarm::harness::Violations>()
+            .is_some(),
+        "Violations resource must survive a mid-run resolver panic"
+    );
+}

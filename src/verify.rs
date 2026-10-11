@@ -1241,29 +1241,22 @@ fn replay_of_audit_log_reproduces_audit_log() {
         !rep1.action_log.is_empty(),
         "chaos run produced no audit entries"
     );
-    eprintln!("CHAOS ACTION LOG:");
-    for e in &rep1.action_log {
-        eprintln!(
-            "  frame={} action={} details={:?}",
-            e.frame, e.action, e.details
-        );
-    }
-
-    // Convert to a replay scenario.
-    // Build replay scenario via minimize helper path
+    // Convert to a replay scenario via the minimize helper path.
     let replay_scenario = replay_from_action_log(&rep1.action_log, 0.5);
     let mut app2 = build_app();
     let rep2 = run_scenario(&mut app2, &replay_scenario).unwrap();
 
-    let seq1: Vec<(u64, String)> = rep1
+    // Compare (frame, action, details) — kind-only comparison would
+    // hide drift in the payload (e.g. coordinates dropped on replay).
+    let seq1: Vec<(u64, String, Option<String>)> = rep1
         .action_log
         .iter()
-        .map(|e| (e.frame, e.action.clone()))
+        .map(|e| (e.frame, e.action.clone(), e.details.clone()))
         .collect();
-    let seq2: Vec<(u64, String)> = rep2
+    let seq2: Vec<(u64, String, Option<String>)> = rep2
         .action_log
         .iter()
-        .map(|e| (e.frame, e.action.clone()))
+        .map(|e| (e.frame, e.action.clone(), e.details.clone()))
         .collect();
     assert_eq!(
         seq1, seq2,
@@ -1369,17 +1362,22 @@ fn single_threaded_applied_by_default() {
         log.0.push(2);
     }
 
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.insert_resource(OrderLog::default());
-    app.add_systems(Update, (sys_a, sys_b));
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"single_threaded":true,"deny_ambiguities":false,"invariants":[]}"#,
+    )
+    .unwrap();
 
-    // Run 30 times; if multi-threaded with ambiguous order, we'd see variations.
     let mut results = std::collections::HashSet::new();
     for _ in 0..30 {
-        app.world_mut().resource_mut::<OrderLog>().0.clear();
-        app.update();
-        results.insert(app.world().resource::<OrderLog>().0.clone());
+        let mut app = build_app_no_scoring();
+        app.add_systems(Update, (sys_a, sys_b));
+        let rep = run_scenario(&mut app, &scenario).unwrap();
+        let log = rep
+            .action_log
+            .last()
+            .map(|e| e.details.clone())
+            .unwrap_or(None);
+        results.insert(log);
     }
     assert_eq!(
         results.len(),
@@ -1399,10 +1397,19 @@ fn deny_ambiguities_rejects_conflicting_systems() {
     let mut app = build_app_no_scoring();
     app.add_systems(Update, (inject_rampant_score_bug, inject_rampant_score_bug));
     let rep = run_scenario(&mut app, &scenario);
+    let Err(e) = rep else {
+        panic!("expected Rejected error for ambiguous systems");
+    };
+    let msg = e.to_string();
     assert!(
-        rep.is_err(),
-        "expected Rejected error for ambiguous systems, got: {:?}",
-        rep
+        msg.contains("schedule ambiguities"),
+        "expected a schedule-ambiguity rejection, got: {msg}"
+    );
+    // The offending SYSTEM NAMES must be named in the rejection —
+    // a message without them gives no actionable signal.
+    assert!(
+        msg.contains("inject_rampant_score_bug"),
+        "rejection must name the conflicting system, got: {msg}"
     );
 }
 
@@ -1654,9 +1661,9 @@ fn minimize_invariant_failure() {
         .iter()
         .filter(|i| matches!(i.intent, crate::harness::ReplayIntent::Choice { index: 2 }))
         .count();
-    assert!(
-        choice2_count >= 3,
-        "need at least 3 Choice-index-2 to reach score 3, got {}",
+    assert_eq!(
+        choice2_count, 3,
+        "the minimal reproducer must be EXACTLY 3 Choice-index-2 inputs (score must cross 2.5, no padding), got {}",
         choice2_count
     );
     // Replay of regression scenario must fail with same rule
@@ -1775,6 +1782,138 @@ fn duration_trimmed_on_minimize() {
         PlaytestStatus::Fail,
         "trimmed scenario must still fail"
     );
+}
+
+/// B2 slippage e2e: minimizing must reproduce the SAME failure
+/// signature, not any failure. Game where Choice{0} trips rule "a" and
+/// Choice{1} trips rule "b"; the original failure is "a", so the
+/// minimal reproducer must still trip "a" (not degenerate to "b").
+#[test]
+fn minimize_does_not_slip_to_different_signature() {
+    fn game() -> bevy::app::App {
+        let mut app = bevy::app::App::new();
+        app.add_plugins((
+            bevy::MinimalPlugins,
+            crate::harness::PlaytestPlugin,
+            crate::contract::TestConventionsPlugin,
+        ));
+        app.insert_resource(Score(0));
+        app.insert_resource(IntentSurface::new(vec![
+            SurfaceVariant::Choice(0),
+            SurfaceVariant::Choice(1),
+        ]));
+        app.add_systems(
+            bevy::app::Update,
+            |mut reader: bevy::ecs::message::MessageReader<crate::contract::UserIntent>,
+             mut score: ResMut<Score>| {
+                for i in reader.read() {
+                    if let crate::contract::UserIntent::Choice { index } = i {
+                        match index {
+                            0 => score.0 += 1,
+                            1 => score.0 -= 1,
+                            _ => {}
+                        }
+                    }
+                }
+            },
+        );
+        app.add_systems(
+            bevy::app::Update,
+            |score: Res<Score>, mut api: ResMut<crate::contract::TestApi>| {
+                api.score = score.0;
+            },
+        );
+        app
+    }
+    // Only rule "a" is checked; a slip would appear as the minimized
+    // scenario failing "b"-style (e.g. negative score crossing a
+    // different threshold) or not failing "a" at all.
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":4},"duration_s":1.0,"invariants":[{"name":"rule_a","rule":"custom","path":"TestApi.score","check":"below","value":2.5}]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut game(), &scen).unwrap();
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Fail,
+        "original run must fail rule_a"
+    );
+    let outcome = crate::harness::minimize_failure(game, &scen, &rep, None).unwrap();
+    // The regression must fail with the SAME rule (no slippage).
+    let mut app = game();
+    let rep2 = run_scenario(&mut app, &outcome.regression_scenario).unwrap();
+    assert_eq!(rep2.status, PlaytestStatus::Fail);
+    assert!(
+        rep2.violations.iter().any(|v| v.rule == "rule_a"),
+        "minimized scenario must reproduce rule_a, got: {:?}",
+        rep2.violations
+    );
+}
+
+/// B2 bomb e2e: a failure that detonates only when inputs arrive in a
+/// specific ORDER (bomb = disarmed by reordering). ddmin must keep an
+/// input sequence that still detonates, not a shuffled subset that
+/// passes.
+#[test]
+fn minimize_keeps_ordered_bomb_reproduction() {
+    // Game: a "bomb" arms on the first Choice{0} and detonates on the
+    // SECOND Choice{0} (two presses, any spacing). Removing one press
+    // disarms it — so the minimal reproducer must retain both presses.
+    fn game() -> bevy::app::App {
+        let mut app = bevy::app::App::new();
+        app.add_plugins((
+            bevy::MinimalPlugins,
+            crate::harness::PlaytestPlugin,
+            crate::contract::TestConventionsPlugin,
+        ));
+        app.insert_resource(Score(0));
+        app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Choice(0)]));
+        app.add_systems(
+            bevy::app::Update,
+            |mut reader: bevy::ecs::message::MessageReader<crate::contract::UserIntent>,
+             mut score: ResMut<Score>| {
+                for i in reader.read() {
+                    if let crate::contract::UserIntent::Choice { index } = i {
+                        if *index == 0 {
+                            score.0 += 1; // arm then detonate at 2 presses
+                        }
+                    }
+                }
+            },
+        );
+        app.add_systems(
+            bevy::app::Update,
+            |score: Res<Score>, mut api: ResMut<crate::contract::TestApi>| {
+                api.score = score.0;
+            },
+        );
+        app
+    }
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":11},"duration_s":1.0,"invariants":[{"name":"bomb","rule":"custom","path":"TestApi.score","check":"below","value":1.5}]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut game(), &scen).unwrap();
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Fail,
+        "two presses must trip bomb"
+    );
+    let outcome = crate::harness::minimize_failure(game, &scen, &rep, None).unwrap();
+    let presses = outcome
+        .minimal_inputs
+        .iter()
+        .filter(|i| matches!(i.intent, crate::harness::ReplayIntent::Choice { index: 0 }))
+        .count();
+    assert_eq!(
+        presses, 2,
+        "minimal reproducer must retain BOTH presses (bomb needs 2), got {}",
+        presses
+    );
+    let mut app = game();
+    let rep2 = run_scenario(&mut app, &outcome.regression_scenario).unwrap();
+    assert_eq!(rep2.status, PlaytestStatus::Fail, "must still detonate");
+    assert!(rep2.violations.iter().any(|v| v.rule == "bomb"));
 }
 
 // ---------------------------------------------------------------------------

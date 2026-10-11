@@ -15,7 +15,7 @@ use crate::scenario::*;
 /// receives candidate subsequences; must be deterministic and side-effect
 /// isolated (caller is responsible for resetting world state between calls).
 /// Returns the smallest found prefix-preserving subsequence that still fails.
-pub fn ddmin_minimize<T: Clone>(actions: &[T], reproduce: impl Fn(&[T]) -> bool) -> Vec<T> {
+pub fn ddmin_minimize<T: Clone>(actions: &[T], mut reproduce: impl FnMut(&[T]) -> bool) -> Vec<T> {
     let mut cur: Vec<T> = actions.to_vec();
     if cur.is_empty() || !reproduce(&cur) {
         return cur; // not reproducible (or empty) — return as-is
@@ -316,25 +316,54 @@ pub fn minimize_failure(
         return Err(MinimizeError::NoReplayableActions);
     }
     let replays = std::cell::Cell::new(0usize);
-    let reproduce = |cand: &[ReplayInput], dur: f32| {
+    // Ok(true) = reproduced, Ok(false) = clean run, Err = the replay
+    // scenario itself failed to RUN (load/validation/setup) — distinct
+    // from a clean pass, so callers don't misattribute a broken replay
+    // setup as "failure not reproducible".
+    let reproduce = |cand: &[ReplayInput], dur: f32| -> Result<bool, ScenarioError> {
         replays.set(replays.get() + 1);
         let mut app = app_builder();
         let rs = replay_scenario(scenario, cand.to_vec(), dur);
-        matches!(run_scenario(&mut app, &rs), Ok(r) if sig.matches(&r))
+        match run_scenario(&mut app, &rs) {
+            Ok(r) => Ok(sig.matches(&r)),
+            Err(e) => Err(e),
+        }
     };
-    // 1. Honesty check: the FULL log must reproduce.
-    if !reproduce(&inputs, scenario.duration_s) {
-        return Err(MinimizeError::NotReproducible { signature: sig });
+    // 1. Honesty check: the FULL log must reproduce. A scenario ERROR
+    // during replay is a harness/setup fault, not evidence about
+    // reproducibility — propagate it as MinimizeError::Scenario.
+    match reproduce(&inputs, scenario.duration_s) {
+        Ok(true) => {}
+        Ok(false) => return Err(MinimizeError::NotReproducible { signature: sig }),
+        Err(e) => return Err(MinimizeError::Scenario(e)),
     }
-    // 2. ddmin over inputs at the original duration.
-    let minimal = ddmin_minimize(&inputs, |c| reproduce(c, scenario.duration_s));
+    // 2. ddmin over inputs at the original duration. Scenario errors
+    // during candidate probing abort the whole minimization — a
+    // candidate that crashes the HARNESS tells us nothing about the
+    // failure signature.
+    let minimal = {
+        let mut probe_err: Option<ScenarioError> = None;
+        let minimal = ddmin_minimize(&inputs, |c| match reproduce(c, scenario.duration_s) {
+            Ok(m) => m,
+            Err(e) => {
+                if probe_err.is_none() {
+                    probe_err = Some(e);
+                }
+                false
+            }
+        });
+        if let Some(e) = probe_err {
+            return Err(MinimizeError::Scenario(e));
+        }
+        minimal
+    };
     // 3. Duration trim: failure frame + 1s margin.
     let fail_frame = first_failure_frame(report, &sig);
     let trimmed = ((fail_frame as f32 / scenario.tps as f32) + 1.0).min(scenario.duration_s);
-    let duration = if reproduce(&minimal, trimmed) {
-        trimmed
-    } else {
-        scenario.duration_s
+    let duration = match reproduce(&minimal, trimmed) {
+        Ok(true) => trimmed,
+        Ok(false) => scenario.duration_s,
+        Err(e) => return Err(MinimizeError::Scenario(e)),
     };
     Ok(MinimizeOutcome {
         regression_scenario: replay_scenario(scenario, minimal.clone(), duration),
