@@ -443,18 +443,23 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
     // Z7: route Bevy errors/logs/panics from this run into a private sink
     // keyed by thread-local RunId, drained into Violations below. Install
-    // the panic hook once per process (chains to previous).
-    static mut PANIC_HOOK_INSTALLED: bool = false;
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // the panic hook exactly once per process (chains to previous). A
+    // lock-free compare_exchange makes concurrent first-use from
+    // parallel workers safe: only the winner installs the hook.
+    static INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if INSTALLED
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_ok()
     {
-        let _guard = LOCK.lock().unwrap();
-        if !unsafe { PANIC_HOOK_INSTALLED } {
-            unsafe { PANIC_HOOK_INSTALLED = true };
-            let prev = std::panic::take_hook();
-            std::panic::set_hook(Box::new(move |info| {
-                crate::sinks::swarm_panic_hook_inner(info, &prev);
-            }));
-        }
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            crate::sinks::swarm_panic_hook_inner(info, &prev);
+        }));
     }
     let run_id = crate::sinks::RunId::new();
     // Log capture: ensure the global subscriber (with our capture

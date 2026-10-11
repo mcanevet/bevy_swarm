@@ -156,6 +156,13 @@ pub fn reset_fallback_counter() {
 /// # Safety
 ///
 /// Caller (getrandom) guarantees `dest` points to `len` writable bytes.
+///
+/// Override contract: getrandom 0.3 resolves this symbol at link time
+/// (weak-symbol override). Any other randomness in the process that
+/// routes through getrandom 0.3 also becomes deterministic — that is
+/// the intended behaviour (headless, seeded runs must not depend on OS
+/// entropy). Bevy / rand / getrandom 0.4 users keep their own sources
+/// unless they also route here.
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn __getrandom_v03_custom(
     dest: *mut u8,
