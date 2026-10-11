@@ -156,7 +156,7 @@ where
         let target = event.metadata().target().to_string();
         let frame = current_frame();
         if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
-            let mut map = SINK.lock().unwrap();
+            let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
             map.entry(run_id).or_default().push(Captured::Log {
                 level: if level == tracing::Level::ERROR {
                     Level::ERROR
@@ -207,7 +207,7 @@ pub fn swarm_panic_hook_inner(
     // Push to the global sink if a run is active.
     if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
         {
-            let mut map = SINK.lock().unwrap();
+            let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
             map.entry(run_id).or_default().push(Captured::Panic {
                 message: message.clone(),
                 location: location.clone(),
@@ -263,7 +263,7 @@ pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
     let message = err.to_string();
     let frame = current_frame();
     if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
-        let mut map = SINK.lock().unwrap();
+        let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(run_id).or_default().push(Captured::BevyError {
             severity,
             context: context.clone(),
@@ -282,18 +282,28 @@ static HANDLER_CHAIN: std::sync::LazyLock<Mutex<HashMap<RunId, bevy::ecs::error:
 /// Register the previous error handler for a run; called by run_scenario
 /// before installing the swarm handler.
 pub fn set_previous_handler(run_id: RunId, prev: bevy::ecs::error::ErrorHandler) {
-    HANDLER_CHAIN.lock().unwrap().insert(run_id, prev);
+    HANDLER_CHAIN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(run_id, prev);
 }
 
 /// Remove a run's handler-chain entry (drop guard / run exit).
 pub fn clear_previous_handler(run_id: RunId) {
-    HANDLER_CHAIN.lock().unwrap().remove(&run_id);
+    HANDLER_CHAIN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&run_id);
 }
 
 /// Look up the chained previous handler for the run active on this thread.
 fn chained_previous() -> Option<bevy::ecs::error::ErrorHandler> {
     let run_id = CURRENT_RUN.with(Cell::get)?;
-    HANDLER_CHAIN.lock().unwrap().get(&run_id).copied()
+    HANDLER_CHAIN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&run_id)
+        .copied()
 }
 
 /// Public wrapper for the driver's error-handler chain lookup.
@@ -327,7 +337,7 @@ pub fn clear_current_run() {
 
 /// Drain captured events for a run.
 pub fn drain_run(run_id: RunId) -> Vec<Captured> {
-    let mut map = SINK.lock().unwrap();
+    let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
     map.remove(&run_id).unwrap_or_default()
 }
 
@@ -378,5 +388,38 @@ mod tests {
         set_current_frame(4242);
         assert_eq!(current_frame(), 4242);
         set_current_frame(0);
+    }
+
+    #[test]
+    fn sink_locks_recover_from_poison() {
+        let run_id = RunId::new();
+
+        // Poison SINK by panicking while holding the lock.
+        let sink_poisoned = std::panic::catch_unwind(|| {
+            let _guard = SINK.lock().unwrap();
+            panic!("poison SINK");
+        });
+        assert!(sink_poisoned.is_err(), "SINK lock must be poisoned");
+
+        // Poison HANDLER_CHAIN the same way.
+        let chain_poisoned = std::panic::catch_unwind(|| {
+            let _guard = HANDLER_CHAIN.lock().unwrap();
+            panic!("poison HANDLER_CHAIN");
+        });
+        assert!(chain_poisoned.is_err(), "HANDLER_CHAIN must be poisoned");
+
+        // Previous implementation (.lock().unwrap()) would panic here.
+        // Poison-recovering accessors must keep working:
+        set_previous_handler(run_id, bevy::ecs::error::match_severity);
+        clear_previous_handler(run_id);
+
+        // And the sink map itself accepts writes post-poison.
+        SINK.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(run_id, Vec::new());
+        assert!(SINK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&run_id));
     }
 }
