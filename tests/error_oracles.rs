@@ -131,9 +131,9 @@ fn violation_snapshot_order_stable_across_repopulations() {
         let mut v = Violations::default();
         // Deliberately inserted in a scrambled order; the map type must
         // not leak iteration order into the snapshot.
-        v.report("zzz_rule", "b_target", "late".into(), 5);
-        v.report("aaa_rule", "z_target", "first".into(), 5);
-        v.report("mmm_rule", "a_target", "later".into(), 5);
+        v.report_named("zzz_rule", "b_target", "late".into(), 5);
+        v.report_named("aaa_rule", "z_target", "first".into(), 5);
+        v.report_named("mmm_rule", "a_target", "later".into(), 5);
         let snap = v.snapshot();
         orders.push(snap.iter().map(|e| e.rule.clone()).collect());
     }

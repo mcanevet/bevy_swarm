@@ -140,11 +140,11 @@ pub(crate) fn run_typed_oracles(world: &mut World) {
         match result {
             Ok(Ok(())) => {}
             Ok(Err(msg)) => {
-                violations.report(&name, "", msg, frame);
+                violations.report_named(&name, "", msg, frame);
             }
             Err(_) => {
                 // System registry error — treat as violation.
-                violations.report(
+                violations.report_named(
                     &name,
                     "",
                     format!("oracle '{}' failed to run (registry error)", name),
@@ -210,7 +210,7 @@ pub(crate) fn custom_policy_bot_system(world: &mut World) {
     }
     let Some(policy_name) = scenario.bot.policy.clone() else {
         world.resource_mut::<Violations>().report(
-            "custom_bot_config",
+            crate::rules::Rule::CustomBotConfig,
             "",
             "custom bot requires `policy` (registered policy name)".to_string(),
             frame,
@@ -221,7 +221,7 @@ pub(crate) fn custom_policy_bot_system(world: &mut World) {
     let Some(id) = registry.policies.get(&policy_name).copied() else {
         world.insert_resource(registry);
         world.resource_mut::<Violations>().report(
-            "custom_bot_config",
+            crate::rules::Rule::CustomBotConfig,
             "",
             format!("policy '{}' is not registered", policy_name),
             frame,
@@ -245,7 +245,7 @@ pub(crate) fn custom_policy_bot_system(world: &mut World) {
         Ok(None) => {}
         Err(_) => {
             world.resource_mut::<Violations>().report(
-                "oracle_error",
+                crate::rules::Rule::OracleError,
                 "",
                 format!("policy '{}' failed to run (registry error)", policy_name),
                 frame,

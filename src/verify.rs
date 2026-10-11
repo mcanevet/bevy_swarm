@@ -2147,9 +2147,9 @@ fn violation_keeps_first_detail() {
     app.insert_resource(Violations::default());
     let mut viol = app.world_mut().resource_mut::<crate::state::Violations>();
     viol.set_context("intent:choice");
-    viol.report("test_rule", "target1", "detail first".into(), 10);
+    viol.report_named("test_rule", "target1", "detail first".into(), 10);
     viol.set_context("intent:wait");
-    viol.report("test_rule", "target1", "detail later".into(), 20);
+    viol.report_named("test_rule", "target1", "detail later".into(), 20);
     let snap = viol.snapshot();
     let e = snap.into_iter().next().unwrap();
     assert_eq!(e.detail, "[intent: intent:choice] detail first");
