@@ -526,10 +526,13 @@ mod tests {
             "duration_s": 0.1,
             "invariants": invariants,
         });
-        let scenario: Scenario = serde_json::from_value(scenario_doc)
-            .expect("calibration JSON must parse as Scenario");
+        let scenario: Scenario =
+            serde_json::from_value(scenario_doc).expect("calibration JSON must parse as Scenario");
         // Compilation requires a real game world with registered types;
         // verifying parse success is sufficient for the round-trip.
-        assert!(!scenario.invariants.is_empty(), "at least one invariant generated");
-        }
+        assert!(
+            !scenario.invariants.is_empty(),
+            "at least one invariant generated"
+        );
+    }
 }
