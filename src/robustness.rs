@@ -31,6 +31,10 @@ pub struct RobustnessSummary {
 pub struct RobustnessTracker {
     /// name -> (min ρ, frame of min, scale)
     mins: BTreeMap<String, (f64, u64, f64)>,
+    /// Eventually-mode invariants: name -> (max ρ over run, frame of
+    /// max, scale). Eventually semantics is best-so-far (max over
+    /// t ≤ D), the dual of always-mode's min.
+    maxs: BTreeMap<String, (f64, u64, f64)>,
 }
 
 impl RobustnessTracker {
@@ -38,11 +42,7 @@ impl RobustnessTracker {
     /// `scale` defaults to max(|threshold|, 1.0) — callers pass the
     /// invariant-specific normalization.
     pub fn observe(&mut self, name: &str, frame: u64, rho: f64, scale: f64) {
-        let scale = if scale.is_finite() && scale > 0.0 {
-            scale
-        } else {
-            1.0
-        };
+        let scale = normalized(scale);
         let e = self
             .mins
             .entry(name.to_string())
@@ -54,27 +54,51 @@ impl RobustnessTracker {
         e.2 = scale;
     }
 
+    /// Eventually-mode: track the BEST (max) inner ρ over the run.
+    pub fn observe_max(&mut self, name: &str, frame: u64, rho: f64, scale: f64) {
+        let scale = normalized(scale);
+        let e = self
+            .maxs
+            .entry(name.to_string())
+            .or_insert((rho, frame, scale));
+        if rho > e.0 {
+            e.0 = rho;
+            e.1 = frame;
+        }
+        e.2 = scale;
+    }
+
     /// Freeze the summary (call at report time).
     pub fn summary(&self) -> RobustnessSummary {
         let per_invariant = self
             .mins
             .iter()
+            .chain(self.maxs.iter())
             .map(|(k, (rho, frame, scale))| (k.clone(), (*rho, *frame, rho / *scale)))
             .collect();
-        let overall =
-            self.mins
-                .values()
-                .map(|(rho, _, scale)| rho / *scale)
-                .fold(None::<f64>, |acc, v| {
-                    Some(match acc {
-                        Some(a) if a < v => a,
-                        _ => v,
-                    })
-                });
+        let overall = self
+            .mins
+            .values()
+            .chain(self.maxs.values())
+            .map(|(rho, _, scale)| rho / *scale)
+            .fold(None::<f64>, |acc, v| {
+                Some(match acc {
+                    Some(a) if a < v => a,
+                    _ => v,
+                })
+            });
         RobustnessSummary {
             per_invariant,
             overall,
         }
+    }
+}
+
+fn normalized(scale: f64) -> f64 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
     }
 }
 
@@ -144,10 +168,19 @@ mod tests {
 
     #[test]
     fn eventually_robustness_is_best_so_far() {
-        // Max over t of inner ρ — the tracker keeps min over run for
-        // the REPORT; eventually-mode callers track best-so-far by
-        // negating (they feed -best). Here: verify the min-tracking
-        // primitive that backs it.
+        // Eventually: max over t ≤ D of inner ρ — best value so far.
+        let mut tr = RobustnessTracker::default();
+        tr.observe_max("e", 1, -5.0, 1.0);
+        tr.observe_max("e", 2, -2.0, 1.0);
+        tr.observe_max("e", 3, 1.0, 1.0); // satisfied here — best so far
+        tr.observe_max("e", 4, -3.0, 1.0); // later dip does NOT lower it
+        let s = tr.summary();
+        assert_eq!(s.per_invariant["e"], (1.0, 3, 1.0));
+    }
+
+    #[test]
+    fn always_robustness_is_worst_over_run() {
+        // Always-mode (default): min over t of ρ(t).
         let mut tr = RobustnessTracker::default();
         tr.observe("e", 1, 5.0, 1.0);
         tr.observe("e", 2, 2.0, 1.0);
