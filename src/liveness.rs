@@ -147,7 +147,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
         if !changed && timeout_frames > 0 {
             let frozen = state_frozen(world);
             world.resource_mut::<Violations>().report(
-                "frozen_world",
+                crate::rules::Rule::FrozenWorld,
                 "world",
                 format!(
                     "no gameplay-relevant state changed for {:.1}s ({} frames) — world may be stuck (soft-lock)",
@@ -195,7 +195,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             if !alive_after_intent && stuck_quanta >= timeout_frames && idle_since_intent >= quarter
             {
                 world.resource_mut::<Violations>().report(
-                    "stuck_after_intent",
+                    crate::rules::Rule::StuckAfterIntent,
                     "world",
                     format!(
                         "no gameplay-relevant state changed for {:.1}s ({} frames) after the intent at frame {} — the game may be ignoring input or soft-locked in a turn",

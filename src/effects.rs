@@ -160,7 +160,7 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
             };
             if world_live {
                 world.resource_mut::<Violations>().report(
-                    "dead_verb",
+                    crate::rules::Rule::DeadVerb,
                     key.as_str(),
                     format!(
                         "action '{}' produced no gameplay-state change in {} samples — the game may not implement it",

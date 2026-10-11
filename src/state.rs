@@ -42,7 +42,13 @@ impl Violations {
         self.context = ctx.into();
     }
 
-    pub fn report(&mut self, rule: &str, target: &str, detail: String, frame: u64) {
+    pub fn report(&mut self, rule: crate::rules::Rule, target: &str, detail: String, frame: u64) {
+        self.report_named(rule.name(), target, detail, frame);
+    }
+
+    /// Report under a dynamic, per-scenario rule name (typed oracles /
+    /// user-named invariants — not part of the `Rule` registry).
+    pub fn report_named(&mut self, rule: &str, target: &str, detail: String, frame: u64) {
         let key = (rule.to_string(), target.to_string());
         let prefixed = format!("[intent: {}] {}", self.context, detail);
         let entry = self.entries.entry(key).or_insert_with(|| ViolationEntry {

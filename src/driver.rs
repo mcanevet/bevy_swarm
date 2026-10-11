@@ -314,9 +314,9 @@ impl PlaytestReport {
         let mut rep = Self::crashed_empty();
         rep.error = Some(msg.to_string());
         let scheme = crate::fingerprint::default_normalizer();
-        let fp = scheme.fingerprint("crash", crate::rules::SCENARIO_ERROR, &[], msg);
+        let fp = scheme.fingerprint("crash", crate::rules::Rule::ScenarioError.name(), &[], msg);
         rep.violations = vec![crate::state::ViolationEntry {
-            rule: crate::rules::SCENARIO_ERROR.to_string(),
+            rule: crate::rules::Rule::ScenarioError.to_string(),
             target: "scenario".to_string(),
             first_frame: 0,
             last_frame: 0,
@@ -739,7 +739,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .unwrap_or_else(|_| {
                 if let Some(mut violations) = app.world_mut().get_resource_mut::<Violations>() {
                     violations.report(
-                        "reset_hook_panicked",
+                        crate::rules::Rule::ResetHookPanicked,
                         k,
                         format!("reset hook '{}' panicked", k),
                         0,
@@ -798,7 +798,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     .get_resource_mut::<Violations>()
                     .expect("Violations initialized by plugin");
                 violations.report(
-                    "readiness_timeout",
+                    crate::rules::Rule::ReadinessTimeout,
                     "world",
                     "game did not become ready within 30s (GameReady never set true)".into(),
                     0,
@@ -858,7 +858,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                             // (excluded from fingerprints/digests); the
                             // user's invariant name rides in the target.
                             violations.report(
-                                crate::rules::FRAME_TIME_ANOMALY,
+                                crate::rules::Rule::FrameTimeAnomaly,
                                 name,
                                 note.clone(),
                                 frame,
@@ -924,7 +924,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         let count = crate::entropy::fallback_draw_count();
         if count > 0 {
             snap.push(crate::state::ViolationEntry {
-                rule: crate::rules::ENTROPY_UNATTRIBUTED_DRAWS.to_string(),
+                rule: crate::rules::Rule::EntropyUnattributedDraws.to_string(),
                 target: "".to_string(),
                 first_frame: 0,
                 last_frame: state.frame,
@@ -1102,7 +1102,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     if let Some(floor) = floor.filter(|f| *f > 0.0) {
                         if measured_fps < floor {
                             snap.push(crate::state::ViolationEntry {
-                                rule: crate::rules::FPS_FLOOR.to_string(),
+                                rule: crate::rules::Rule::FpsFloor.to_string(),
                                 target: inv.name.clone(),
                                 first_frame: 0,
                                 last_frame: state.frame,
@@ -1124,7 +1124,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     if let Some(ceil) = ceiling_ms.filter(|c| *c > 0.0) {
                         if final_metrics.frame_ms_p99 > ceil {
                             snap.push(crate::state::ViolationEntry {
-                                rule: crate::rules::FRAME_TIME_P99_BELOW.to_string(),
+                                rule: crate::rules::Rule::FrameTimeP99Below.to_string(),
                                 target: inv.name.clone(),
                                 first_frame: 0,
                                 last_frame: state.frame,
@@ -1289,7 +1289,7 @@ pub(crate) fn cheat_scheduler_system(world: &mut World) {
             .is_err();
             if panicked {
                 world.resource_mut::<Violations>().report(
-                    "cheat_hook_panicked",
+                    crate::rules::Rule::CheatHookPanicked,
                     &kind,
                     format!("cheat hook '{}' panicked", kind),
                     frame,
@@ -1367,7 +1367,7 @@ pub(crate) fn synthetic_keyboard_bot_system(
             }
             None => {
                 violations.report(
-                    "synthetic_keyboard_config",
+                    crate::rules::Rule::SyntheticKeyboardConfig,
                     &kp.key,
                     "unknown key name (see KeyPressInput docs for supported names)".to_string(),
                     frame,

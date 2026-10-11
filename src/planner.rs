@@ -267,7 +267,7 @@ fn check_postcondition(
     if let Some(min_g) = min_gain {
         if delta < *min_g {
             violations.report(
-                "planner_postcondition",
+                crate::rules::Rule::PlannerPostcondition,
                 path,
                 format!(
                     "[goal {}] achieved but {} changed by {:.3}, min_gain {} — effect weaker than the contract",
@@ -280,7 +280,7 @@ fn check_postcondition(
     if let Some(max_g) = max_gain {
         if delta > *max_g {
             violations.report(
-                "planner_postcondition",
+                crate::rules::Rule::PlannerPostcondition,
                 path,
                 format!(
                     "[goal {}] achieved but {} changed by {:.3}, max_gain {} — effect stronger than the contract",
@@ -418,7 +418,7 @@ pub fn planner_bot_system(world: &mut World) {
     };
     let Some(goal_root) = world.resource::<ScenarioResource>().0.bot.goals.clone() else {
         world.resource_mut::<Violations>().report(
-            "planner_bot_config",
+            crate::rules::Rule::PlannerBotConfig,
             "",
             "planner bot requires `goals` (goal structure)".to_string(),
             frame,
@@ -489,7 +489,7 @@ pub fn planner_bot_system(world: &mut World) {
                         if matches!(parent.goal, GoalNode::Repeat { .. }) {
                             let tr = planner.trace();
                             violations.report(
-                                "planner_goal_timeout",
+                                crate::rules::Rule::PlannerGoalTimeout,
                                 &tr,
                                 "Repeat exceeded max_s without achieving the goal — scenario stuck"
                                     .to_string(),
@@ -524,7 +524,7 @@ pub fn planner_bot_system(world: &mut World) {
                 if planner.0[top_idx].child >= children.len() {
                     let tr = planner.trace();
                     violations.report(
-                        "planner_any_exhausted",
+                        crate::rules::Rule::PlannerAnyExhausted,
                         &tr,
                         format!(
                             "any goal exhausted all {} alternatives without success",
@@ -571,7 +571,7 @@ pub fn planner_bot_system(world: &mut World) {
                         let intent = replay_intent_to_user(ri, world);
                         if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
                             violations.report(
-                                crate::rules::PLANNER_SELECT_TARGET_MISSING,
+                                crate::rules::Rule::PlannerSelectTargetMissing,
                                 &miss,
                                 format!(
                                     "planner Select target '{miss}' not found in identity index"
@@ -611,7 +611,7 @@ pub fn planner_bot_system(world: &mut World) {
                         let intent = replay_intent_to_user(ri, world);
                         if let Some(miss) = PLANNER_SELECT_MISS.with(|c| c.borrow_mut().take()) {
                             violations.report(
-                                crate::rules::PLANNER_SELECT_TARGET_MISSING,
+                                crate::rules::Rule::PlannerSelectTargetMissing,
                                 &miss,
                                 format!(
                                     "planner Select target '{miss}' not found in identity index"

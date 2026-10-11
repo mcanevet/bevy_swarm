@@ -100,7 +100,7 @@ pub(crate) fn check_transform_desync_system(world: &mut World) {
     }
     let mut v = world.resource_mut::<Violations>();
     for (target, detail) in found {
-        v.report(crate::rules::TRANSFORM_DESYNC, &target, detail, frame);
+        v.report(crate::rules::Rule::TransformDesync, &target, detail, frame);
     }
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn check_finite_transforms_system(
         let t = transform.translation;
         if !t.x.is_finite() || !t.y.is_finite() || !t.z.is_finite() {
             violations.report(
-                crate::rules::FINITE_TRANSFORMS,
+                crate::rules::Rule::FiniteTransforms,
                 &label,
                 format!("non-finite translation ({}, {}, {})", t.x, t.y, t.z),
                 state.frame,
@@ -132,7 +132,7 @@ pub(crate) fn check_finite_transforms_system(
         // check missed.
         if !transform.rotation.is_finite() || !transform.scale.is_finite() {
             violations.report(
-                crate::rules::FINITE_TRANSFORMS,
+                crate::rules::Rule::FiniteTransforms,
                 &label,
                 format!(
                     "non-finite rotation ({:?}) or scale ({:?})",
@@ -144,7 +144,7 @@ pub(crate) fn check_finite_transforms_system(
             // Separate rule: denormalized quats cost precision but are
             // not NaN — games may legitimately ignore this one.
             violations.report(
-                "nodes_rotation_unnormalized",
+                crate::rules::Rule::NodesRotationUnnormalized,
                 &label,
                 format!("rotation not normalized: {:?}", transform.rotation),
                 state.frame,
@@ -253,7 +253,7 @@ pub(crate) fn check_bounds_gameplay_system(
                     inv.scale.unwrap_or_else(|| default_bounds_scale(inv)),
                 );
                 if out_of_bounds(transform.translation(), inv) {
-                    violations.report(
+                    violations.report_named(
                         &inv.name,
                         name.as_ref(),
                         format!(
@@ -279,7 +279,7 @@ pub(crate) fn check_bounds_gameplay_system(
                 let matched_all: Vec<(&Name, &GlobalTransform)> =
                     q_all.iter().filter(|(n, _)| n.as_str() == target).collect();
                 if matched_all.is_empty() {
-                    violations.report(
+                    violations.report_named(
                         &inv.name,
                         target,
                         "target not found — expected entity missing from the scene (missing gameplay object?)"
@@ -296,7 +296,7 @@ pub(crate) fn check_bounds_gameplay_system(
                         inv.scale.unwrap_or_else(|| default_bounds_scale(inv)),
                     );
                     if out_of_bounds(transform.translation(), inv) {
-                        violations.report(
+                        violations.report_named(
                             &inv.name,
                             name.as_ref(),
                             format!(
@@ -750,7 +750,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 }
             };
             let Some(count) = count else {
-                world.resource_mut::<Violations>().report(
+                world.resource_mut::<Violations>().report_named(
                     &inv.name,
                     &format!("query({:?})", query),
                     "unresolved component type in query (typo?)".into(),
@@ -820,7 +820,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                             entry.1 = Some(frame);
                         }
                     } else if elapsed_s >= deadline && entry.1.is_none() {
-                        world.resource_mut::<Violations>().report(
+                        world.resource_mut::<Violations>().report_named(
                         &inv.name,
                         &format!("query({:?})", query),
                             format!(
@@ -833,7 +833,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 }
                 None => {
                     if !holds_now {
-                        world.resource_mut::<Violations>().report(
+                        world.resource_mut::<Violations>().report_named(
                             &inv.name,
                             &format!("query({:?})", query),
                             format!(
@@ -903,7 +903,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     .resource_mut::<PlaytestState>()
                     .warned_paths
                     .insert(path.clone());
-                world.resource_mut::<Violations>().report(
+                world.resource_mut::<Violations>().report_named(
                     &inv.name,
                     path,
                     "TestApi field not found — extend TestApi or fix the invariant path"
@@ -941,7 +941,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 if holds {
                     entry.1 = Some(entry.1.unwrap_or(frame)); // first satisfaction
                 } else if elapsed_s >= deadline && entry.1.is_none() {
-                    world.resource_mut::<Violations>().report(
+                    world.resource_mut::<Violations>().report_named(
                         &inv.name,
                         path,
                         format!(
@@ -952,7 +952,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     );
                 }
             } else if !holds {
-                world.resource_mut::<Violations>().report(
+                world.resource_mut::<Violations>().report_named(
                     &inv.name,
                     path,
                     format!("{} = {} ({} {})", path, sv, check, expect),
@@ -1014,7 +1014,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                             entry.1 = Some(frame);
                         }
                     } else if elapsed_s >= deadline && entry.1.is_none() {
-                        world.resource_mut::<Violations>().report(
+                        world.resource_mut::<Violations>().report_named(
                             &inv.name,
                             path,
                             format!(
@@ -1033,7 +1033,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     // the requires section below, so a false WHEN can
                     // never masquerade as a violation.
                     if !is_expert_rule && !holds_now {
-                        world.resource_mut::<Violations>().report(
+                        world.resource_mut::<Violations>().report_named(
                             &inv.name,
                             path,
                             format!("{} = {} (threshold: {})", path, current, thr),
@@ -1068,7 +1068,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                         .or(Some(crate::robustness::default_scale(max_dps)))
                 );
                 if rate > max_dps {
-                    world.resource_mut::<Violations>().report(
+                    world.resource_mut::<Violations>().report_named(
                         &inv.name,
                         path,
                         format!(
@@ -1107,7 +1107,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     )))
                 );
                 if violated {
-                    world.resource_mut::<Violations>().report(
+                    world.resource_mut::<Violations>().report_named(
                         &inv.name,
                         path,
                         format!(
@@ -1207,7 +1207,7 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     .map(|n| format!("{} = {}", path, n))
                     .or_else(|| string_val.clone().map(|s| format!("{} = {}", path, s)))
                     .unwrap_or_else(|| path.clone());
-                world.resource_mut::<Violations>().report(
+                world.resource_mut::<Violations>().report_named(
                     &inv.name,
                     req_path,
                     format!(
@@ -1383,7 +1383,7 @@ pub(crate) fn synthetic_pointer_actionability_check_system(
                 .and_then(|wm| wm.values().next());
             if mouse_hovered.is_none() {
                 violations.report(
-                    "pointer_not_actionable",
+                    crate::rules::Rule::PointerNotActionable,
                     &g.target_name,
                     format!(
                         "click on '{}' completed but hover map shows no entity under cursor — picking backend may be dead or target occluded",
@@ -1395,7 +1395,7 @@ pub(crate) fn synthetic_pointer_actionability_check_system(
         } else {
             // No HoverMap resource → picking backend not wired.
             violations.report(
-                "pointer_not_actionable",
+                crate::rules::Rule::PointerNotActionable,
                 &g.target_name,
                 "no HoverMap resource — picking backend not active".to_string(),
                 frame,

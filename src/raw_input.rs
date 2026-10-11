@@ -282,7 +282,7 @@ pub fn raw_input_preupdate_system(
             } => {
                 let Some(key_code) = parse_raw_key(key) else {
                     violations.report(
-                        "raw_key_invalid",
+                        crate::rules::Rule::RawKeyInvalid,
                         key,
                         "unknown key name".to_string(),
                         frame,
@@ -484,7 +484,7 @@ pub fn raw_input_click_entity_system(
                     }
                     Err(reason) => {
                         violations.report(
-                            "raw_click_target_offscreen",
+                            crate::rules::Rule::RawClickTargetOffscreen,
                             &format!("{target:?}"),
                             reason,
                             frame,
@@ -603,7 +603,7 @@ fn inject_gamepad_button(
 ) {
     let Some(btn) = parse_gamepad_button(button) else {
         violations.report(
-            "raw_gamepad_button_invalid",
+            crate::rules::Rule::RawGamepadButtonInvalid,
             button,
             "unknown button name".to_string(),
             frame,
@@ -638,7 +638,7 @@ fn inject_gamepad_button(
     frame: u64,
 ) {
     violations.report(
-        "raw_gamepad_disabled",
+        crate::rules::Rule::RawGamepadDisabled,
         button,
         "gamepad feature not enabled".to_string(),
         frame,
@@ -661,7 +661,7 @@ fn inject_gamepad_axis(
 ) {
     let Some(ax) = parse_gamepad_axis(axis) else {
         violations.report(
-            "raw_gamepad_axis_invalid",
+            crate::rules::Rule::RawGamepadAxisInvalid,
             axis,
             "unknown axis name".to_string(),
             frame,
@@ -698,7 +698,7 @@ fn inject_gamepad_axis(
     frame: u64,
 ) {
     violations.report(
-        "raw_gamepad_disabled",
+        crate::rules::Rule::RawGamepadDisabled,
         axis,
         "gamepad feature not enabled".to_string(),
         frame,

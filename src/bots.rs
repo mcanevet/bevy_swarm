@@ -72,7 +72,7 @@ pub(crate) fn chaos_bot_system(
             && !raw.mouse_motion
         {
             violations.report(
-                "chaos_bot_config",
+                crate::rules::Rule::ChaosBotConfig,
                 "",
                 "game does not implement testable-conventions: IntentSurface resource missing and no raw_surface configured — chaos cannot know which inputs the game consumes"
                     .to_string(),
@@ -157,7 +157,7 @@ pub(crate) fn chaos_bot_system(
     };
     if surface.0.is_empty() {
         violations.report(
-            "chaos_bot_config",
+            crate::rules::Rule::ChaosBotConfig,
             "",
             "IntentSurface is empty — the game declared no intent variants. Declare the game's input surface (IntentSurface::new(...))"
                 .to_string(),
@@ -217,7 +217,7 @@ pub(crate) fn chaos_bot_system(
             let all: Vec<Entity> = q.iter().collect();
             if all.is_empty() {
                 violations.report(
-                    "chaos_bot_config",
+                    crate::rules::Rule::ChaosBotConfig,
                     "",
                     "SurfaceVariant::Select declared but no Gameplay entities exist to select from"
                         .to_string(),
@@ -330,7 +330,7 @@ pub(crate) fn replay_bot_system(
                                 }
                             };
                             violations.report(
-                                "replay_target_missing",
+                                crate::rules::Rule::ReplayTargetMissing,
                                 &display,
                                 format!(
                                     "frame {}: no Gameplay entity for target '{}'",
@@ -445,7 +445,7 @@ pub(crate) fn synthetic_pointer_bot_system(
         };
         let Some(entity) = idx.by_name(&click.target) else {
             violations.report(
-                "synthetic_pointer_config",
+                crate::rules::Rule::SyntheticPointerConfig,
                 &click.target,
                 "click target not found in identity index".to_string(),
                 state.frame,
@@ -454,7 +454,7 @@ pub(crate) fn synthetic_pointer_bot_system(
         };
         let Ok((_, transform)) = q_named.get(entity) else {
             violations.report(
-                "synthetic_pointer_config",
+                crate::rules::Rule::SyntheticPointerConfig,
                 &click.target,
                 "click target not found among Gameplay entities".to_string(),
                 state.frame,
@@ -463,7 +463,7 @@ pub(crate) fn synthetic_pointer_bot_system(
         };
         let Ok(window_entity) = primary_window.single() else {
             violations.report(
-                "synthetic_pointer_config",
+                crate::rules::Rule::SyntheticPointerConfig,
                 &click.target,
                 "no primary window entity — cannot synthesize pointer events".to_string(),
                 state.frame,
@@ -481,7 +481,7 @@ pub(crate) fn synthetic_pointer_bot_system(
         }
         let Some(position) = viewport_pos else {
             violations.report(
-                "synthetic_pointer_config",
+                crate::rules::Rule::SyntheticPointerConfig,
                 &click.target,
                 "no camera could project the target to viewport coordinates".to_string(),
                 state.frame,
@@ -493,7 +493,7 @@ pub(crate) fn synthetic_pointer_bot_system(
                 .normalize(Some(window_entity))
         else {
             violations.report(
-                "synthetic_pointer_config",
+                crate::rules::Rule::SyntheticPointerConfig,
                 &click.target,
                 "primary window render-target normalization failed".to_string(),
                 state.frame,
@@ -543,7 +543,7 @@ pub(crate) fn pursuit_bot_system(
     let bot = &scenario.0.bot;
     let (Some(agent_name), Some(target_name)) = (&bot.agent_target, &bot.target) else {
         violations.report(
-            "pursuit_bot_config",
+            crate::rules::Rule::PursuitBotConfig,
             "",
             "pursuit bot requires agent_target and target".to_string(),
             state.frame,
@@ -556,7 +556,7 @@ pub(crate) fn pursuit_bot_system(
     let target = target.and_then(|e| q.get(e).ok());
     let (Some((_, agent_t)), Some((_, target_t))) = (agent, target) else {
         violations.report(
-            "pursuit_bot_config",
+            crate::rules::Rule::PursuitBotConfig,
             agent_name,
             format!(
                 "agent '{}' or target '{}' not found — bot issued NO input. Fix agent_target/target; do not treat this run as a valid pursuit exercise.",
