@@ -156,3 +156,36 @@ fn golden_update_env_rewrites() {
     unsafe { std::env::remove_var("BEVY_SWARM_UPDATE") };
     assert!(!bevy_swarm::golden::update_golden_enabled());
 }
+
+#[test]
+fn golden_path_sanitization_rejects_traversal() {
+    // H1: scenario.name is embedded into golden-set file names.
+    // Reject anything outside [A-Za-z0-9_-] to prevent path traversal.
+    let bad_names = vec![
+        "../../etc/passwd",
+        "..\\windows\\system32",
+        "foo/bar",
+        "foo\\bar",
+        "foo.bar",
+        "foo bar",
+        "",
+    ];
+    for name in bad_names {
+        let mut scen = scenario(42);
+        scen.name = Some(name.to_string());
+        let err =
+            bevy_swarm::scenario::validate_scenario(&scen).expect_err("must reject invalid name");
+        assert!(
+            err.to_string().contains("invalid"),
+            "rejected for wrong reason: {err}"
+        );
+    }
+
+    // Valid names pass.
+    let good_names = vec!["clean", "bug_dead_left_key", "test_123", "a"];
+    for name in good_names {
+        let mut scen = scenario(42);
+        scen.name = Some(name.to_string());
+        bevy_swarm::scenario::validate_scenario(&scen).expect("must accept valid name");
+    }
+}
