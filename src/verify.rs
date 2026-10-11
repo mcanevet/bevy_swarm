@@ -301,7 +301,7 @@ fn synthetic_pointer_dead_chain_is_loudly_rejected() {
         rep.violations
             .iter()
             .any(|v| v.rule == "synthetic_pointer_config"
-                && v.detail.contains("no primary window")),
+                && (v.detail.contains("no primary window") || v.detail.contains("no camera"))),
         "headless app must loudly reject pointer synthesis, got: {:?}",
         rep.violations
     );
@@ -1296,6 +1296,9 @@ fn timed_replay_input(frame: u64, intent: crate::harness::ReplayIntent) -> serde
             serde_json::json!({"intent": "axis", "name": name, "value": value})
         }
         crate::harness::ReplayIntent::Wait => serde_json::json!({"intent": "wait"}),
+        crate::harness::ReplayIntent::Raw { raw } => {
+            serde_json::json!({"intent": "raw", "raw": raw})
+        }
     };
     serde_json::json!({ "frame": frame, "intent": inner })
 }

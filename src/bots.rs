@@ -251,6 +251,7 @@ pub(crate) fn replay_bot_system(
     mut violations: ResMut<Violations>,
     scenario: Res<ScenarioResource>,
     idx: Res<crate::identity::IdentityIndex>,
+    raw_queue: ResMut<crate::raw_input::RawActionQueue>,
 ) {
     for entry in &scenario.0.bot.inputs {
         if entry.frame == state.frame {
@@ -276,6 +277,23 @@ pub(crate) fn replay_bot_system(
                 ReplayIntent::Wait => {
                     variant_name = "wait".into();
                     UserIntent::Wait
+                }
+                ReplayIntent::Raw { raw } => {
+                    // Raw actions bypass UserIntent: queue them for the
+                    // raw actuator, replaying through the real input chain.
+                    raw_queue
+                        .0
+                        .lock()
+                        .unwrap()
+                        .push_back((entry.frame, raw.clone()));
+                    state.metrics.input_count += 1;
+                    state
+                        .coverage
+                        .intents_emitted
+                        .entry("raw".into())
+                        .and_modify(|c| *c += 1)
+                        .or_insert(1);
+                    continue;
                 }
                 ReplayIntent::Select { target } => {
                     variant_name = "select".into();

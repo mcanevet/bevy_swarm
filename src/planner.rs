@@ -309,6 +309,9 @@ fn replay_intent_to_user(ri: &ReplayIntent, world: &World) -> Option<UserIntent>
         // planner_select_target_missing violation when the target is
         // absent (previously silently became Wait).
         ReplayIntent::Wait => Some(UserIntent::Wait),
+        // Raw actions are not typed intents — the planner emits them
+        // through the raw queue instead.
+        ReplayIntent::Raw { .. } => None,
         ReplayIntent::Select { target } => {
             let idx = world.get_resource::<crate::identity::IdentityIndex>();
             let resolved = match target {
@@ -342,6 +345,7 @@ fn replay_variant(ri: &ReplayIntent) -> &'static str {
         ReplayIntent::Axis { .. } => "axis",
         ReplayIntent::Select { .. } => "select",
         ReplayIntent::Wait => "wait",
+        ReplayIntent::Raw { .. } => "raw",
     }
 }
 
@@ -358,6 +362,7 @@ fn replay_ctx(ri: &ReplayIntent) -> String {
             SelectTarget::Stable { stable_id } => format!("select:stable={}", stable_id),
         },
         ReplayIntent::Wait => "wait".into(),
+        ReplayIntent::Raw { raw } => format!("raw:{:?}", raw),
     }
 }
 
