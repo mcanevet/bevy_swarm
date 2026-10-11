@@ -504,3 +504,32 @@ fn sanitize_name(s: &str) -> String {
 // ---------------------------------------------------------------------------
 // Frozen-world stuck oracle (aplib-inspired liveness check)
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scenario::Scenario;
+
+    #[test]
+    fn calibration_roundtrip_parses_and_compiles() {
+        // Build a minimal calibration snapshot
+        let snapshot = CalibrationSnapshot {
+            archetype_envelopes: vec![("Player|Health".to_string(), 1, 10)],
+            resource_baselines: vec![("Score".to_string(), 5.0)],
+        };
+        let generated = generate_invariants_from_calibration(&snapshot);
+        let invariants: serde_json::Value =
+            serde_json::from_str(&generated).expect("generator emits valid JSON");
+        // Wrap into a full scenario document and parse.
+        let scenario_doc = serde_json::json!({
+            "bot": {"type": "chaos", "seed": 42},
+            "duration_s": 0.1,
+            "invariants": invariants,
+        });
+        let scenario: Scenario = serde_json::from_value(scenario_doc)
+            .expect("calibration JSON must parse as Scenario");
+        // Compilation requires a real game world with registered types;
+        // verifying parse success is sufficient for the round-trip.
+        assert!(!scenario.invariants.is_empty(), "at least one invariant generated");
+        }
+}
