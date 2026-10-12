@@ -18,10 +18,12 @@ pub fn xml_escape(s: &str) -> String {
             '>' => o.push_str("&gt;"),
             '"' => o.push_str("&quot;"),
             '\'' => o.push_str("&apos;"),
-            // XML 1.0 forbids most control chars
-            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => {
-                o.push_str(&format!("&#x{:X};", c as u32))
-            }
+            // le3.6 (RF2): XML 1.0 forbids C0 control chars (except
+            // \t\n\r) AND character references to them, plus
+            // U+FFFE/U+FFFF. Replace with U+FFFD (replacement char)
+            // so documents stay well-formed regardless of input.
+            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => o.push('\u{FFFD}'),
+            '\u{FFFE}' | '\u{FFFF}' => o.push('\u{FFFD}'),
             c => o.push(c),
         }
     }
@@ -31,7 +33,22 @@ pub fn xml_escape(s: &str) -> String {
 /// CDATA-safe: split any `]]>` into `]]]]><![CDATA[>` so the embedded
 /// JSON cannot terminate the CDATA section early.
 fn cdata_wrap(content: &str) -> String {
-    format!("<![CDATA[{}]]>", content.replace("]]>", "]]]]><![CDATA[>"))
+    // le3.6 (RF2): control chars are illegal inside CDATA too —
+    // filter them like xml_escape (keeping \t\n\r), then split any
+    // `]]>` so the payload can't terminate the section early.
+    let filtered: String = content
+        .chars()
+        .map(|c| {
+            if ((c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r'))
+                || matches!(c, '\u{FFFE}' | '\u{FFFF}')
+            {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
+        .collect();
+    format!("<![CDATA[{}]]>", filtered.replace("]]>", "]]]]><![CDATA[>"))
 }
 
 impl PlaytestReport {
@@ -55,7 +72,7 @@ impl PlaytestReport {
             PlaytestStatus::Crash => {
                 let msg = self.error.as_deref().unwrap_or("crash");
                 out.push_str(&format!(
-                    "        <error message=\"{}\" type=\"crash\">{}\n        `</error>`\n",
+                    "        <error message=\"{}\" type=\"crash\">{}\n        </error>\n",
                     xml_escape(msg),
                     xml_escape(msg)
                 ));
@@ -81,7 +98,7 @@ impl PlaytestReport {
                     .map(|v| v.rule.clone())
                     .unwrap_or_else(|| "failure".to_string());
                 out.push_str(&format!(
-                    "        <failure message=\"{}\" type=\"{}\">\n{}        `</failure>`\n",
+                    "        <failure message=\"{}\" type=\"{}\">\n{}        </failure>\n",
                     xml_escape(&headline),
                     xml_escape(&ftype),
                     xml_escape(&body)
@@ -89,10 +106,10 @@ impl PlaytestReport {
             }
         }
         out.push_str(&format!(
-            "        `<system-out>`{}`</system-out>`\n",
+            "        <system-out>{}</system-out>\n",
             cdata_wrap(&json)
         ));
-        out.push_str("      `</testcase>`\n");
+        out.push_str("      </testcase>\n");
         out
     }
 }
@@ -114,7 +131,7 @@ impl BranchMatrixReport {
         let total_time: f64 = self.outcomes.iter().map(|o| o.report_time()).sum();
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        out.push_str("`<testsuites>`\n");
+        out.push_str("<testsuites>\n");
         out.push_str(&format!(
             "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"{}\" time=\"{:.3}\">\n",
             xml_escape(suite_name),
@@ -126,8 +143,8 @@ impl BranchMatrixReport {
         for o in &self.outcomes {
             out.push_str(&o.report.to_junit_testcase(&o.variant_name, suite_name));
         }
-        out.push_str("  `</testsuite>`\n");
-        out.push_str("`</testsuites>`\n");
+        out.push_str("  </testsuite>\n");
+        out.push_str("</testsuites>\n");
         out
     }
 }
@@ -160,25 +177,48 @@ mod tests_cj8_14 {
         r
     }
 
+    /// le3.6 (RF2): parse any fragment/document with a real XML
+    /// parser. Panics on malformed XML.
+    fn assert_well_formed(xml: &str) {
+        let mut reader = quick_xml::Reader::from_str(xml);
+        reader.config_mut().check_end_names = true;
+        loop {
+            match reader.read_event() {
+                Ok(quick_xml::events::Event::Eof) => break,
+                Ok(_) => {}
+                Err(e) => panic!("malformed XML ({e}): {xml}"),
+            }
+        }
+    }
+
     #[test]
     fn escape_specials() {
         assert_eq!(xml_escape("a<b>&\"'c"), "a&lt;b&gt;&amp;&quot;&apos;c");
-        assert_eq!(xml_escape("\u{1}"), "&#x1;");
+        // le3.6 (RF2): C0 controls and U+FFFE/U+FFFF are REPLACED
+        // (character references to them are illegal in XML 1.0).
+        assert_eq!(xml_escape("\u{1}"), "\u{FFFD}");
+        assert_eq!(xml_escape("\u{0}\u{7}\u{1b}"), "\u{FFFD}\u{FFFD}\u{FFFD}");
+        assert_eq!(xml_escape("\u{FFFE}\u{FFFF}"), "\u{FFFD}\u{FFFD}");
+        // allowed whitespace passes through
         assert_eq!(xml_escape("\t\n\r"), "\t\n\r");
     }
 
     #[test]
-    fn passing_testcase_has_no_failure() {
+    fn passing_testcase_parses_and_has_no_failure() {
         let tc = pass_report().to_junit_testcase("pass-case", "suite");
+        // le3.6 (RF2): REAL parse, no backtick string assertions.
+        assert_well_formed(&format!("<root>{tc}</root>"));
         assert!(tc.contains("<testcase name=\"pass-case\""));
         assert!(!tc.contains("<failure"), "{tc}");
         assert!(!tc.contains("<error"), "{tc}");
-        assert!(tc.contains("`<system-out>`"));
+        assert!(tc.contains("<system-out>"));
+        assert!(!tc.contains('`'), "no literal backticks: {tc}");
     }
 
     #[test]
     fn failing_testcase_escapes_and_details() {
         let tc = fail_report().to_junit_testcase("fail-case", "suite");
+        assert_well_formed(&format!("<root>{tc}</root>"));
         assert!(tc.contains("<failure"));
         assert!(tc.contains("type=\"bounds_check\""));
         // angle brackets + quotes in the target are escaped
@@ -193,24 +233,60 @@ mod tests_cj8_14 {
         let mut r = PlaytestReport::crashed_empty();
         r.error = Some("boom < boom".into());
         let tc = r.to_junit_testcase("crash-case", "suite");
+        assert_well_formed(&format!("<root>{tc}</root>"));
         assert!(tc.contains("<error"));
         assert!(tc.contains("boom &lt; boom"));
     }
 
+    /// le3.6 (RF2): violation detail containing ANSI escapes / NUL /
+    /// U+FFFE must yield WELL-FORMED XML (previously emitted illegal
+    /// &#x1;-style refs).
     #[test]
-    fn cadata_split_protects_system_out() {
+    fn control_chars_yield_well_formed_xml() {
+        let mut r = fail_report();
+        r.violations[0].detail = "\u{1b}[31m red \u{0} bell \u{7}".into();
+        r.violations[0].last_detail = "\u{1b}[31m red \u{0} bell \u{7}".into();
+        r.error = Some("\u{FFFE} bad \u{FFFF}".into());
+        let tc = r.to_junit_testcase("ctrl-case", "suite");
+        assert_well_formed(&format!("<root>{tc}</root>"));
+        assert!(
+            !tc.contains("&#x"),
+            "no char refs to forbidden codepoints: {tc}"
+        );
+    }
+
+    /// le3.6 (RF2): CDATA round-trip — parse the testcase, extract the
+    /// system-out text, and verify it equals the report JSON (with
+    /// the ]]> split undone). Replaces the vacuous bitwise-NOT
+    /// assertion.
+    #[test]
+    fn cdata_split_protects_system_out() {
         let mut r = pass_report();
-        r.violations = vec![];
-        // Inject a ]]>* sequence via the JSON body: set a field we know
-        // round-trips into JSON containing ]]>.
         r.warnings = vec!["evil]]>injection".into()];
         let tc = r.to_junit_testcase("cdata-case", "suite");
-        // The raw terminator must not appear unsplit
-        let body = tc;
+        assert_well_formed(&format!("<root>{tc}</root>"));
+        // Round-trip: strip CDATA wrappers, undo the split, compare
+        // with the serialized JSON.
+        let inner_start = tc.find("<system-out>").unwrap() + "<system-out>".len();
+        let inner_end = tc.rfind("</system-out>").unwrap();
+        let inner = &tc[inner_start..inner_end];
         assert!(
-            !body.matches("]]>").count() > body.matches("]]]]><![CDATA[>").count() + 1,
-            "CDATA terminators must be split: {body}"
+            inner.starts_with("<![CDATA["),
+            "CDATA wrapper missing: {inner}"
         );
+        let content = inner
+            .strip_prefix("<![CDATA[")
+            .and_then(|s| s.strip_suffix("]]>"))
+            .expect("CDATA terminator");
+        let rejoined = content.replace("]]]]><![CDATA[>", "]]>");
+        let expected = serde_json::to_string_pretty(&r).unwrap();
+        assert_eq!(rejoined, expected, "CDATA payload must round-trip");
+        // The CONTENT after rejoining DOES contain ]]> (from the JSON).
+        // What matters: the RAW XML had the split, so the CDATA section
+        // wasn't terminated early. Verify by checking the original XML
+        // contains the split pattern (]]]]><![CDATA[>) but not an
+        // unescaped ]]> inside the CDATA wrapper.
+        assert!(inner.contains("]]]]><![CDATA[>"), "split missing: {inner}");
     }
 
     #[test]
@@ -230,16 +306,15 @@ mod tests_cj8_14 {
             ],
         };
         let doc = matrix.to_junit("swarm");
+        // le3.6 (RF2): REAL parse of the full document (replaces the
+        // trivially-true opens>=closes heuristic).
+        assert_well_formed(&doc);
         assert!(doc.starts_with("<?xml"));
         assert!(doc.contains("tests=\"2\""));
         assert!(doc.contains("failures=\"1\""));
         assert!(doc.contains("errors=\"0\""));
-        // Balanced-tag hand-rolled check
-        let opens = doc.matches('<').count();
-        let closes =
-            doc.matches("</").count() + doc.matches("/>").count() + doc.matches("<?").count();
-        assert!(opens >= closes, "rough balance: {opens} vs {closes}");
         assert_eq!(doc.matches("<testcase").count(), 2);
-        assert_eq!(doc.matches("`</testcase>`").count(), 2);
+        assert_eq!(doc.matches("</testcase>").count(), 2);
+        assert!(!doc.contains('`'), "no literal backticks in document");
     }
 }
