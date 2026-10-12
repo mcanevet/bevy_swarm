@@ -63,7 +63,12 @@ struct AgentRequestSender(std::sync::mpsc::Sender<AgentRequest>);
 
 #[derive(Resource, Default)]
 struct PendingAgentInput {
-    keys: Vec<bevy::input::keyboard::KeyCode>,
+    /// 716.31: key RELEASES pending for a future frame. A key pressed
+    /// via the agent must stay pressed through the END of the frame it
+    /// was pressed in — releasing in the same frame means ButtonInput
+    /// ends the frame NOT-PRESSED (both messages land in the same
+    /// frame's input buffer).
+    pending_key_releases: Vec<(bevy::input::keyboard::KeyCode, u64)>,
     gestures: std::collections::VecDeque<PendingPointerGesture>,
 }
 
@@ -908,7 +913,14 @@ fn agent_flush_system(world: &mut World) {
                 };
                 let window = primary_window_entity(world);
                 world.write_message(key_input(code, bevy::input::ButtonState::Pressed, window));
-                world.resource_mut::<PendingAgentInput>().keys.push(code);
+                // 716.31: release ONE FRAME LATER — pressing and
+                // releasing in the same frame leaves ButtonInput
+                // NOT-PRESSED at frame end.
+                let release_at = world.resource::<AgentFrameCounter>().0 + 1;
+                world
+                    .resource_mut::<PendingAgentInput>()
+                    .pending_key_releases
+                    .push((code, release_at));
                 world.resource_mut::<ActionLog>().record(
                     frame,
                     elapsed_ms,
@@ -1024,15 +1036,25 @@ fn agent_input_system(world: &mut World) {
     let frame = world.resource::<AgentFrameCounter>().0;
 
     // Key releases: each key pressed via the agent gets released one
-    // frame later (adapter observes both halves).
-    let keys: Vec<bevy::input::keyboard::KeyCode> =
-        std::mem::take(&mut world.resource_mut::<PendingAgentInput>().keys);
-    if !keys.is_empty() {
-        let window = primary_window_entity(world);
-        for code in keys {
+    // frame LATER — 716.31: fire only when frame >= release_at so a
+    // key pressed at frame F stays pressed through the end of frame F.
+    let pending: Vec<(bevy::input::keyboard::KeyCode, u64)> = std::mem::take(
+        &mut world
+            .resource_mut::<PendingAgentInput>()
+            .pending_key_releases,
+    );
+    let window = primary_window_entity(world);
+    let mut still_pending = Vec::new();
+    for (code, release_at) in pending {
+        if frame >= release_at {
             world.write_message(key_input(code, bevy::input::ButtonState::Released, window));
+        } else {
+            still_pending.push((code, release_at));
         }
     }
+    world
+        .resource_mut::<PendingAgentInput>()
+        .pending_key_releases = still_pending;
 
     // Pointer gesture halves due this frame.
     let gestures = std::mem::take(&mut world.resource_mut::<PendingAgentInput>().gestures);
@@ -1347,5 +1369,71 @@ mod tests_716_34_agent {
             2,
             "two resets, hook survives first use"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_716_31 {
+    use super::*;
+    use bevy::input::keyboard::KeyCode;
+
+    #[test]
+    fn key_stays_pressed_through_end_of_frame() {
+        // 716.31: a key pressed at frame F must remain PRESSED at the
+        // end of frame F (not same-frame released), and be released at
+        // frame F+1.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<bevy::input::keyboard::KeyboardInput>();
+        app.insert_resource(AgentFrameCounter(0));
+        app.init_resource::<PendingAgentInput>();
+
+        // Simulate a KeyPress request at frame 0 (via the flush path).
+        let frame = 0u64;
+        let code = KeyCode::KeyA;
+        let window = primary_window_entity(app.world_mut());
+        app.world_mut()
+            .write_message(key_input(code, bevy::input::ButtonState::Pressed, window));
+        app.world_mut()
+            .resource_mut::<PendingAgentInput>()
+            .pending_key_releases
+            .push((code, frame + 1));
+
+        // Frame 0: agent_input_system must NOT release the key yet.
+        agent_input_system(app.world_mut());
+        let released_at_f = count_released(app.world_mut());
+        assert_eq!(
+            released_at_f, 0,
+            "key must remain pressed through end of frame F"
+        );
+
+        // Frame 1: the release fires.
+        app.world_mut().resource_mut::<AgentFrameCounter>().0 = 1;
+        agent_input_system(app.world_mut());
+        let released_at_f1 = count_released(app.world_mut());
+        assert_eq!(released_at_f1, 1, "release must fire at frame F+1");
+    }
+
+    /// Count Released KeyboardInput messages via a one-off reader
+    /// system (World has no direct message-read API).
+    fn count_released(world: &mut World) -> usize {
+        #[derive(bevy::prelude::Resource)]
+        struct Count(pub usize);
+        world.insert_resource(Count(0));
+        let sid = world.register_system(
+            |mut reader: bevy::ecs::message::MessageReader<
+                bevy::input::keyboard::KeyboardInput,
+            >,
+             mut count: bevy::ecs::system::ResMut<Count>| {
+                count.0 = reader
+                    .read()
+                    .filter(|e| e.state == bevy::input::ButtonState::Released)
+                    .count();
+            },
+        );
+        world.run_system(sid).unwrap();
+        let n = world.resource::<Count>().0;
+        world.remove_resource::<Count>().unwrap();
+        n
     }
 }
