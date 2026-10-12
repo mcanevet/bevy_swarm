@@ -51,12 +51,15 @@ impl Rule {
                 | Rule::PerfBudgetExceeded
                 | Rule::EntropyUnattributedDraws
                 | Rule::BevySuppressed
+                | Rule::UnusedInput
+                | Rule::UndrivableGame
         )
     }
 }
 
 declare_rules! {
     FrozenWorld => "frozen_world",
+    UndrivableGame => "undrivable_game",
     BevyError => "bevy_error",
     BevyWarning => "bevy_warning",
     LogError => "log_error",
@@ -75,6 +78,7 @@ declare_rules! {
     GoldenDiverged => "golden_diverged",
     DeadWidget => "dead_widget",
     DeadVerb => "dead_verb",
+    UnusedInput => "unused_input",
     TransformDesync => "transform_desync",
     PerfBudgetExceeded => "perf_budget_exceeded",
     StuckAfterIntent => "stuck_after_intent",

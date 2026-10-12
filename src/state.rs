@@ -123,6 +123,8 @@ impl Violations {
         crate::rules::Rule::PerfBudgetExceeded,
         crate::rules::Rule::EntropyUnattributedDraws,
         crate::rules::Rule::BevySuppressed,
+        crate::rules::Rule::UnusedInput,
+        crate::rules::Rule::UndrivableGame,
     ];
 }
 
@@ -205,7 +207,7 @@ pub struct Metrics {
 /// Coverage metrics: counts of intent variants exercised, TestApi paths
 /// read, and reset kinds invoked. Exported in PlaytestReport for
 /// incremental-test selection (cf. SMART's 94% branch coverage).
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Coverage {
     /// Map of intent variant name → count emitted by bots
     pub intents_emitted: HashMap<String, u64>,

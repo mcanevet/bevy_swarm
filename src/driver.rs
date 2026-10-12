@@ -703,6 +703,16 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     let _handler_guard = HandlerGuard;
 
     let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
+    // RF8: populate declared_keys from scenario.bot.raw_surface (tier-0
+    // explicit declarations). Default-surface keys stay unmarked.
+    if let Some(raw) = &scenario.bot.raw_surface {
+        let mut eff = app
+            .world_mut()
+            .resource_mut::<crate::effects::ActionEffects>();
+        for key in &raw.keys {
+            eff.declared_keys.insert(key.clone());
+        }
+    }
     app.insert_resource(compiled);
 
     let tps = scenario.tps as u64;

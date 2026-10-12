@@ -18,6 +18,20 @@ use crate::state::{PlaytestState, Violations};
 /// Minimum samples before an action key can be declared a dead verb.
 pub const DEAD_VERB_MIN_SAMPLES: u64 = 10;
 
+/// RF8: verb family for sibling-drivability grouping. Arrow keys form
+/// one family, WASD letters another; everything else is individual.
+pub fn verb_family(key: &str) -> String {
+    // Strip the actuator prefix ("raw:key:KeyW", "intent:axis:x").
+    let bare = key.rsplit(':').next().unwrap_or(key);
+    if bare.starts_with("Arrow") {
+        "arrow".to_string()
+    } else if matches!(bare, "KeyW" | "KeyA" | "KeyS" | "KeyD") {
+        "wasd".to_string()
+    } else {
+        bare.to_string()
+    }
+}
+
 /// A recorded action awaiting its effect window to elapse.
 #[derive(Clone, Debug)]
 pub struct PendingEffect {
@@ -45,6 +59,12 @@ pub struct ActionEffects {
     /// Change tick at the START of each frame (maintained by the
     /// oracle; actuators only know their frame).
     pub tick_by_frame: HashMap<u64, u32>,
+    /// Keys explicitly declared by the game/scenario (scenario
+    /// `bot.raw_surface` keys). Only declared keys (or keys whose
+    /// verb-group siblings DO have effects) gate dead_verb at tier 0 —
+    /// a guessed default-surface key with no effect is expected when
+    /// the game simply doesn't bind it (RF8).
+    pub declared_keys: std::collections::HashSet<String>,
 }
 
 impl ActionEffects {
@@ -133,6 +153,27 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
         .expect("ActionEffects initialized by plugin")
         .pending = still_pending;
 
+    // RF8: snapshot rates (plus declared keys) before the mutable
+    // update loop, for sibling/family liveness and decl decision.
+    let eff_snapshot = {
+        let eff = world.resource::<ActionEffects>();
+        (eff.rates.clone(), eff.declared_keys.clone())
+    };
+    let (family_live, declared_keys) = {
+        let mut live: std::collections::HashSet<String> = eff_snapshot
+            .0
+            .iter()
+            .filter(|(_, r)| r.effective > 0)
+            .map(|(k, _)| verb_family(k))
+            .collect();
+        // Declared keys belong to declared families; treat them as
+        // live-by-contract (the game claims to bind them).
+        for k in &eff_snapshot.1 {
+            live.insert(verb_family(k));
+        }
+        (live, eff_snapshot.1)
+    };
+
     for (key, effective) in new_rates {
         let (total, _effective_count, report_now) = {
             let mut eff = world
@@ -158,12 +199,35 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
                 let state = world.resource::<PlaytestState>();
                 frame.saturating_sub(state.last_alive_frame) <= window * 4
             };
-            if world_live {
+            // RF8: at tier 0 the default surface is a GUESS. An
+            // ineffective key only gates when the game/scenario
+            // DECLARED it (raw_surface / IntentSurface) or when a
+            // sibling of the same verb family demonstrably works
+            // (e.g. WASD moves but one arrow is dead). Otherwise an
+            // unbound default key is expected — report it as
+            // informational unused_input, not dead_verb.
+            // Intent-actuator keys come from the game's own
+            // IntentSurface declaration — declared by construction.
+            // Raw keys are only declared via scenario.bot.raw_surface.
+            let declared = declared_keys.contains(&key) || !key.starts_with("raw:");
+            let family = verb_family(&key);
+            let sibling_live = family_live.contains(&family);
+            if world_live && (declared || sibling_live) {
                 world.resource_mut::<Violations>().report(
                     crate::rules::Rule::DeadVerb,
                     key.as_str(),
                     format!(
                         "action '{}' produced no gameplay-state change in {} samples — the game may not implement it",
+                        key, total
+                    ),
+                    frame,
+                );
+            } else if world_live {
+                world.resource_mut::<Violations>().report(
+                    crate::rules::Rule::UnusedInput,
+                    key.as_str(),
+                    format!(
+                        "input '{}' produced no gameplay-state change in {} samples (not declared by the game — tier-0 default surface)",
                         key, total
                     ),
                     frame,

@@ -131,7 +131,6 @@ pub struct AutotestReport {
     /// True when the seed loop stopped early at max_failures.
     pub early_stop: bool,
     /// Aggregate coverage (union across runs).
-    #[serde(skip)]
     pub coverage: Option<Coverage>,
     /// Wall-clock timing.
     pub timing: TimingSummary,
@@ -254,10 +253,27 @@ impl AutotestReport {
 
 /// Run a full autotest suite: N seeds × chaos, aggregating failures,
 /// coverage, and writing the report to disk.
+///
+/// RF8: `Clone` is no longer required — use `autotest_factory` for
+/// non-Clone plugins (common for game plugins holding state).
 pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     game_plugin: P,
     config: AutotestConfig,
 ) -> Result<AutotestReport, Box<dyn std::error::Error>> {
+    autotest_factory(move || game_plugin.clone(), config)
+}
+
+/// Factory-based autotest — accepts a closure that constructs the
+/// plugin, so games without `Clone` work natively. Game-type inference
+/// uses the constructed type, preserving Z6 semantics.
+pub fn autotest_factory<P, F>(
+    make_plugin: F,
+    config: AutotestConfig,
+) -> Result<AutotestReport, Box<dyn std::error::Error>>
+where
+    P: bevy::prelude::Plugin + Send + 'static,
+    F: Fn() -> P + Send + Sync + 'static,
+{
     let start = Instant::now();
     let start_ts = SystemTime::now();
     let start_iso = crate::conventions::iso_timestamp(start_ts);
@@ -284,10 +300,14 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
         config.parallel = th;
     }
 
-    // Build the headless app factory (Z2): headless_app RETURNS a
-    // builder closure; call it per run.
-    let build = crate::headless::headless_app(game_plugin.clone());
-    let factory = move || build();
+    // Build the headless app factory (Z2): headless_app_factory RETURNS
+    // a builder closure; call it per run. Arc-shared so the minimize
+    // pass below can reuse the same factory.
+    let make_plugin = std::sync::Arc::new(make_plugin);
+    let factory = crate::headless::headless_app_factory({
+        let make_plugin = make_plugin.clone();
+        move || (make_plugin)()
+    });
 
     let runner = InProcess { factory };
     let seeds: Vec<u64> = (1..=config.num_seeds).collect();
@@ -428,11 +448,14 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
     let mut minimized: Vec<MinimizedFailureSummary> = Vec::new();
     if config.minimize_failures {
         for (seed, base_scen, rep) in &failed_reports {
-            // headless_app returns an opaque, non-Clone builder —
+            // headless_app_factory returns an opaque, non-Clone builder —
             // construct a fresh one per minimization (it captures the
-            // plugin clone internally).
-            let build = crate::headless::headless_app(game_plugin.clone());
-            let outcome = crate::minimize::minimize_failure(build, base_scen, rep, None);
+            // plugin factory internally).
+            let factory = crate::headless::headless_app_factory({
+                let make_plugin = make_plugin.clone();
+                move || (make_plugin)()
+            });
+            let outcome = crate::minimize::minimize_failure(factory, base_scen, rep, None);
             if let Ok(out) = outcome {
                 let fp = rep
                     .violations

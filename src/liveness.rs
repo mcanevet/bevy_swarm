@@ -145,9 +145,18 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
         // → frozen. (changed=false above means nothing changed in the
         // last window_frames = timeout_s of frames.)
         if !changed && timeout_frames > 0 {
+            // RF8: if the actuator produced ZERO effective inputs, the
+            // game is undrivable, not necessarily buggy. Downgrade to
+            // informational.
+            let effect_rate = crate::effects::overall_effect_rate(world).unwrap_or(1.0);
+            let rule = if effect_rate == 0.0 {
+                crate::rules::Rule::UndrivableGame
+            } else {
+                crate::rules::Rule::FrozenWorld
+            };
             let frozen = state_frozen(world);
             world.resource_mut::<Violations>().report(
-                crate::rules::Rule::FrozenWorld,
+                rule,
                 "world",
                 format!(
                     "no gameplay-relevant state changed for {:.1}s ({} frames) — world may be stuck (soft-lock)",
