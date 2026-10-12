@@ -23,6 +23,35 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+## Build & Test Commands
+
+```bash
+cargo build -p fixture-runner  # REQUIRED before acceptance tests
+cargo test -p bevy_swarm --lib # Unit tests
+cargo test -p bevy_swarm --test fx0_gate # Gate integrity tests
+cargo test --workspace --all-features # Full battery (end of bead)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo fmt --check
+```
+
+**TMPDIR note:** If you encounter temp-directory permission issues, set
+`export TMPDIR=/var/folders/zh/4b27878j7wz6dq22rh05qnz80000gn/T/opencode`.
+
+## Project-Specific Guidelines
+
+- **Zero-contract fixtures:** Games under `fixtures/*` have NO bevy_swarm
+  dependency — they are pure Bevy apps exercising the harness.
+- **Acceptance tests:** Always run `cargo build -p fixture-runner` before
+  `cargo test --test acceptance` (stale binary causes misleading failures).
+- **Post-review process:** Follow the workflow from swarm-230: implement
+  per bead acceptance criteria, add tests, verify locally, commit, PR,
+  watch CI green, merge, close bead, push ledger.
+- **Autonomous implementation:** This repo opts into "team-maintainer"
+  mode for the overnight implementer — you MAY commit, push, open PRs,
+  merge green PRs, and close beads without stopping for approval.
+- **Never tag/publish/release:** Tagging, crates.io publishing, and
+  GitHub releases are USER-ONLY actions. Never perform them.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.

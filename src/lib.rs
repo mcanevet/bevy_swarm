@@ -29,6 +29,12 @@
 // `cargo swarm run` wrapper will set it automatically).
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
+// le3.12 (RF13): the README is part of the doctest suite — its
+// code blocks compile in CI, so the Usage snippet can never rot.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct _ReadmeDoctests;
+
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod autotest;
