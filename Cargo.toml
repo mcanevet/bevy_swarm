@@ -65,22 +65,23 @@ serde = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
-# RF9: bevy_winit is a NON-OPTIONAL direct dep so headless_platform()
-# can always disable WinitPlugin by runtime presence — even when
-# bevy_swarm is compiled with default-features=false while the game
-# uses bevy defaults (winit panics without a display). Version-
-# unifies with bevy's own bevy_winit; small compile cost.
-bevy_winit = { version = "0.20", default-features = false }
-# RF9: passthrough deps for render/audio/gilrs detection.
+# RF9: optional passthrough deps for headless platform plugin detection.
+# A consumer building a winit-enabled game with bevy_swarm
+# default-features=false enables `passthrough-winit` so
+# headless_platform() can reference (and disable) WinitPlugin.
+bevy_winit = { version = "0.20", optional = true }
 bevy_render = { version = "0.20", optional = true, default-features = false }
 bevy_audio = { version = "0.20", optional = true, default-features = false }
 bevy_gilrs = { version = "0.20", optional = true, default-features = false }
 
 [features]
 default = ["render", "audio", "gamepad"]
-render = ["bevy/bevy_render", "bevy/x11", "bevy/wayland", "dep:bevy_render"]
-audio = ["bevy/bevy_audio", "dep:bevy_audio"]
-gamepad = ["bevy/gamepad", "bevy/bevy_gilrs", "dep:bevy_gilrs"]
+render = ["bevy/bevy_render", "bevy/x11", "bevy/wayland", "dep:bevy_render", "passthrough-winit"]
+audio = ["bevy/bevy_audio", "dep:bevy_audio", "passthrough-winit"]
+gamepad = ["bevy/gamepad", "bevy/bevy_gilrs", "dep:bevy_gilrs", "passthrough-winit"]
+# Standalone winit passthrough for consumers that only need winit
+# detection (not render/audio/gamepad).
+passthrough-winit = ["dep:bevy_winit"]
 deterministic-entropy = ["getrandom04"]
 agent = ["bevy/bevy_remote", "bevy/bevy_render", "getrandom04"]
 

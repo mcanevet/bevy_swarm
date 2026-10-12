@@ -70,8 +70,10 @@ pub fn headless_platform() -> PluginGroupBuilder {
     // in a headless harness. `contains` guards the disables so this
     // stays correct for any feature combination.
     // Winit: requires an event loop; without DISPLAY it panics in build.
-    // RF9: UNCONDITIONAL (bevy_winit is a non-optional direct dep, so
-    // the type path always compiles — presence is checked at runtime).
+    // RF9: gated on passthrough-winit — a weak dep enabled by
+    // render/audio/gamepad, or explicitly by a consumer whose game pulls
+    // bevy_winit while bevy_swarm is default-features=false.
+    #[cfg(feature = "passthrough-winit")]
     let group = if group.contains::<bevy_winit::WinitPlugin>() {
         group.disable::<bevy_winit::WinitPlugin>()
     } else {
