@@ -428,6 +428,11 @@ impl PlaytestState {
     /// driving the harness manually (e.g. calibration runs).
     pub fn new(tps: u64, _seed: u64) -> Self {
         // seed moved into ChoiceStream (J0); kept for API compat.
+        // b2e.2: tps is CLAMPED to >= 1 (documented): tps=0 panicked
+        // bot-system division paths even though elapsed_s defends
+        // with tps.max(1). Loud-not-fatal: a degenerate config still
+        // produces a usable (if fast) clock rather than a system panic.
+        let tps = tps.max(1);
         PlaytestState {
             frame: 0,
             tps,
