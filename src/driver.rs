@@ -100,6 +100,34 @@ impl bevy::app::Plugin for PlaytestPlugin {
         crate::identity::install_identity(app);
         // I3: typed oracle/predicate/policy registry.
         app.init_resource::<crate::typed::TypedRegistry>();
+        // RF11: bevy's bevy_picking feature compiles viewport_picking
+        // and UiPickingPlugin into UiPlugin. They need the picking
+        // pipeline's resources/messages, which apps without
+        // DefaultPlugins lack. Install them (idempotent).
+        app.init_resource::<bevy::picking::hover::HoverMap>();
+        app.init_resource::<bevy::picking::hover::PreviousHoverMap>();
+        app.init_resource::<bevy::picking::events::PointerState>();
+        app.add_message::<bevy::picking::backend::PointerHits>();
+        app.add_message::<bevy::picking::pointer::PointerInput>();
+        app.add_message::<bevy::picking::events::PointerCancel>();
+        app.add_message::<bevy::picking::events::PointerClick>();
+        app.add_message::<bevy::picking::events::PointerPress>();
+        app.add_message::<bevy::picking::events::PointerDragDrop>();
+        app.add_message::<bevy::picking::events::PointerDragEnd>();
+        app.add_message::<bevy::picking::events::PointerDragEnter>();
+        app.add_message::<bevy::picking::events::PointerDragLeave>();
+        app.add_message::<bevy::picking::events::PointerDragOver>();
+        app.add_message::<bevy::picking::events::PointerDragStart>();
+        app.add_message::<bevy::picking::events::PointerDrag>();
+        app.add_message::<bevy::picking::events::PointerMove>();
+        app.add_message::<bevy::picking::events::PointerOut>();
+        app.add_message::<bevy::picking::events::PointerOver>();
+        app.add_message::<bevy::picking::events::PointerEnter>();
+        app.add_message::<bevy::picking::events::PointerLeave>();
+        app.init_resource::<bevy::picking::PickingSettings>();
+        app.init_resource::<bevy::picking::hover::PointerCaptureMap>();
+        app.init_resource::<bevy::picking::pointer::PointerMap>();
+        app.init_resource::<bevy::picking::backend::ray::RayMap>();
         // RF11: headless camera target_info — fill Camera.computed.target_info
         // from the primary window so resolve_click_position can project world→viewport.
         app.add_systems(bevy::app::PostStartup, headless_camera_target_info_system);
