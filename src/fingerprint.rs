@@ -21,6 +21,12 @@ pub struct FingerprintParts {
 /// Normalization rules: strip volatile tokens (entity IDs, frames,
 /// floats, hex addresses, seeds, paths). Reject keys force splits;
 /// merge keys force merges.
+/// ml5 (M1): fingerprints are BEST-EFFORT grouping keys (FNV-1a 64-bit,
+/// no adversarial collision resistance). Aggressive numeric wildcarding
+/// intentionally merges failures that differ only in concrete values
+/// (that is the feature). Applications needing adversarial collision
+/// resistance should swap the hash for BLAKE3/SHA-256 truncated to 64
+/// bits and tighten normalize_token's number wildcarding.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Normalizer {
     /// Keys that FORCE a split (different values → different fingerprints).

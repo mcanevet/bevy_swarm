@@ -15,9 +15,33 @@ use crate::scenario::*;
 /// receives candidate subsequences; must be deterministic and side-effect
 /// isolated (caller is responsible for resetting world state between calls).
 /// Returns the smallest found prefix-preserving subsequence that still fails.
-pub fn ddmin_minimize<T: Clone>(actions: &[T], mut reproduce: impl FnMut(&[T]) -> bool) -> Vec<T> {
+pub fn ddmin_minimize<T: Clone>(actions: &[T], reproduce: impl FnMut(&[T]) -> bool) -> Vec<T> {
+    ddmin_minimize_with_budget(actions, reproduce, DEFAULT_MAX_REPLAYS)
+}
+
+/// ml5 (L2): default replay budget — a hostile/flaky reproduce
+/// predicate (alternating booleans) drove worst-case O(n^2) replays
+/// x full scenario duration. Callers on expensive scenarios should
+/// pass a tighter budget.
+pub const DEFAULT_MAX_REPLAYS: usize = 10_000;
+
+/// Budgeted ddmin: at most `max_replays` calls to `reproduce`.
+/// Exhausting the budget returns the best minimization so far.
+pub fn ddmin_minimize_with_budget<T: Clone>(
+    actions: &[T],
+    mut reproduce: impl FnMut(&[T]) -> bool,
+    max_replays: usize,
+) -> Vec<T> {
+    let mut budget = max_replays;
+    let mut call = |c: &[T]| -> bool {
+        if budget == 0 {
+            return false; // budget exhausted: treat as non-reproducing
+        }
+        budget -= 1;
+        reproduce(c)
+    };
     let mut cur: Vec<T> = actions.to_vec();
-    if cur.is_empty() || !reproduce(&cur) {
+    if cur.is_empty() || !call(&cur) {
         return cur; // not reproducible (or empty) — return as-is
     }
     let mut n = 2;
@@ -33,7 +57,7 @@ pub fn ddmin_minimize<T: Clone>(actions: &[T], mut reproduce: impl FnMut(&[T]) -
                 .filter(|(j, _)| *j < i || *j >= end)
                 .map(|(_, a)| a.clone())
                 .collect();
-            if reproduce(&candidate) {
+            if call(&candidate) {
                 cur = candidate;
                 removed = true;
                 // restart chunking from the shorter sequence
@@ -60,7 +84,7 @@ pub fn ddmin_minimize<T: Clone>(actions: &[T], mut reproduce: impl FnMut(&[T]) -
                 .filter(|(j, _)| *j != i)
                 .map(|(_, a)| a.clone())
                 .collect();
-            if reproduce(&candidate) {
+            if call(&candidate) {
                 cur = candidate;
                 single_removed = true;
                 break;
@@ -397,4 +421,43 @@ pub fn replayable_inputs(action_log: &[crate::contract::ActionEntry]) -> Vec<Rep
 /// Serialize a regression scenario to pretty JSON for persistence.
 pub fn regression_scenario_json(scenario: &Scenario) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(scenario)
+}
+
+#[cfg(test)]
+mod tests_ml5 {
+    use super::*;
+
+    /// ml5 (L2): budget exhausts and returns the best-so-far
+    /// minimization instead of looping O(n^2) on a flaky predicate.
+    #[test]
+    fn ddmin_budget_stops_flaky_loop() {
+        let actions: Vec<u32> = (0..500).collect();
+        // Flaky predicate: alternates true/false forever.
+        let mut toggles = 0;
+        let calls = std::cell::RefCell::new(0usize);
+        let result = ddmin_minimize_with_budget(
+            &actions,
+            |_c| {
+                *calls.borrow_mut() += 1;
+                toggles += 1;
+                toggles % 2 == 1
+            },
+            50,
+        );
+        assert!(
+            *calls.borrow() <= 50,
+            "budget must cap replay calls, got {}",
+            *calls.borrow()
+        );
+        assert!(!result.is_empty(), "best-so-far returned");
+    }
+
+    /// Budget high enough behaves like the unbudgeted variant.
+    #[test]
+    fn ddmin_budget_large_behaves_same() {
+        let actions = vec![1u32, 2, 3, 4, 5];
+        let a = ddmin_minimize(&actions, |c| c.contains(&5) && c.len() >= 2);
+        let b = ddmin_minimize_with_budget(&actions, |c| c.contains(&5) && c.len() >= 2, 10_000);
+        assert_eq!(a, b);
+    }
 }

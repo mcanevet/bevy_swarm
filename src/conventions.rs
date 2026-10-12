@@ -49,6 +49,11 @@ pub fn special_build_root() -> PathBuf {
 }
 
 /// Persisted files root: `tests/swarm/`
+/// ml5 (M3): persisted roots are PINNED to `tests/swarm/` and do NOT
+/// honor CARGO_TARGET_DIR — an actor steering the test process
+/// environment cannot redirect golden updates / issue-file writes to
+/// arbitrary locations. Only runtime scratch (output_root family)
+/// honors CARGO_TARGET_DIR.
 pub fn persisted_root() -> PathBuf {
     PathBuf::from("tests/swarm")
 }
@@ -165,8 +170,18 @@ pub fn run_id(scenario_hash: u64, seed: u64) -> String {
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     let pid = std::process::id();
-    let mix = (scenario_hash as u32) ^ (seed as u32) ^ count ^ nanos ^ pid;
-    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{mix:08x}")
+    // ml5 (M2): splitmix64 finalizer — the old 32-bit XOR mix had no
+    // avalanche; parallel matrix runs could collide run_ids and
+    // overwrite each other's reports (last-writer-wins corruption).
+    let mut z = scenario_hash
+        ^ (seed << 32)
+        ^ ((count as u64) << 48)
+        ^ ((nanos as u64) << 16)
+        ^ (pid as u64);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^= z >> 31;
+    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}-{z:016x}")
 }
 
 /// Current UTC calendar time, computed without a chrono dependency
@@ -296,11 +311,27 @@ mod tests {
         let id = run_id(0xDEADBEEF, 0);
         let parts: Vec<&str> = id.split('-').collect();
         assert_eq!(parts.len(), 2);
-        // Suffix is 8 hex chars (hash + nanos mixed)
-        assert_eq!(parts[1].len(), 8);
+        // ml5 (M2): suffix is 16 hex chars (splitmix64-mixed hash +
+        // nanos + counter + pid)
+        assert_eq!(parts[1].len(), 16);
         assert!(parts[1].chars().all(|c| c.is_ascii_hexdigit()));
         // Timestamp should match YYYYMMDDTHHMMSS
         assert_eq!(parts[0].len(), 15);
         assert_eq!(parts[0].chars().nth(8), Some('T'));
+    }
+}
+
+#[cfg(test)]
+mod tests_ml5 {
+    /// ml5 (M2): rapid consecutive run_ids never collide (parallel
+    /// matrix runs previously collided via the 32-bit XOR mix).
+    #[test]
+    fn run_ids_rapid_sequence_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..1000u64 {
+            let id = super::run_id(0xDEAD_BEEF, i);
+            let inserted = seen.insert(id.clone());
+            assert!(inserted, "run_id collision at iteration {i}: {id}");
+        }
     }
 }
