@@ -381,3 +381,185 @@ fn h3_overlong_token_param_rejected_first() {
     let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 }
+
+/// le3.5 (RF1): EVERY playtest/* method must reject unauthenticated
+/// calls. Iterates the full PLAYTEST_METHODS table over loopback HTTP
+/// with NO token — each must return the -32600 auth error. Includes
+/// the four formerly-unguarded methods (state, actions, diagnostics,
+/// screenshot — the latter was an unauthenticated disk write).
+#[test]
+#[serial_test::serial]
+fn le35_every_playtest_method_requires_token() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    for method in bevy_swarm::agent::PLAYTEST_METHODS {
+        let resp = brp_roundtrip(
+            &mut app,
+            port,
+            &serde_json::json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": method,
+                "params": {}
+            }),
+        );
+        assert!(
+            is_auth_rejected(&resp),
+            "{method} must be auth-rejected without a token, got: {resp}"
+        );
+    }
+}
+
+/// le3.5 (RF1): playtest/state must not panic when ActionLog /
+/// GameVersion are absent (custom-TestApi games without
+/// TestConventionsPlugin). With the CORRECT token, it returns
+/// defaults instead of crashing the app.
+#[test]
+#[serial_test::serial]
+fn le35_state_no_panic_on_missing_resources() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    // NOTE: no TestConventionsPlugin — ActionLog/GameVersion absent.
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "playtest/state",
+            "params": {"token": "sekrit"}
+        }),
+    );
+    assert!(
+        resp.get("error").is_none(),
+        "playtest/state with token must not error on missing resources: {resp}"
+    );
+    // App survives further updates (no propagated panic).
+    app.update();
+    app.update();
+}
+
+/// le3.5 (RF1): playtest/actions with the correct token on a bare app
+/// (no ActionLog) returns an empty log rather than panicking.
+#[test]
+#[serial_test::serial]
+fn le35_actions_no_panic_on_missing_action_log() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "playtest/actions",
+            "params": {"token": "sekrit"}
+        }),
+    );
+    assert!(resp.get("error").is_none(), "got: {resp}");
+    assert!(
+        resp["result"]["entries"]
+            .as_array()
+            .is_some_and(|a| a.is_empty()),
+        "empty log expected, got: {resp}"
+    );
+    app.update();
+}
+
+/// le3.5 (RF1/qo7.10): an explicitly-configured empty token must NOT
+/// authenticate. Some("") config → {token:""} gets -32600.
+#[test]
+#[serial_test::serial]
+fn le35_empty_token_is_rejected() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("".into()), // explicit empty — treated as unset
+            ..Default::default()
+        },
+    ));
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "world.query",
+            "params": {"token": ""}
+        }),
+    );
+    assert!(
+        is_auth_rejected(&resp),
+        "empty token must be rejected, got: {resp}"
+    );
+}
+
+/// le3.5 (RF1): methods registered AFTER the allow-list sweep must be
+/// removed before they can serve unauthenticated requests. Verifies
+/// that the PreUpdate sweep removes any method not in the allow-list.
+#[test]
+#[serial_test::serial]
+fn le35_late_registered_method_removed() {
+    use bevy::remote::RemoteMethods;
+
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    // Wait for startup sweep to complete
+    loop {
+        app.update();
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+    }
+    // Register a late method (simulating a malicious plugin)
+    let dummy_handler =
+        app.world_mut()
+            .register_system(|_: bevy::ecs::system::In<Option<serde_json::Value>>| {
+                Ok(serde_json::json!({"evil": "ran"}))
+            });
+    app.world_mut().resource_mut::<RemoteMethods>().insert(
+        "game.evil",
+        bevy::remote::RemoteMethodSystemId::Instant(dummy_handler),
+    );
+
+    // Sweep runs in PreUpdate next frame
+    app.update();
+
+    // The method must no longer exist in the method table
+    let methods = app.world().resource::<RemoteMethods>().methods();
+    assert!(
+        !methods.iter().any(|m| m == "game.evil"),
+        "late-registered method must be removed by PreUpdate sweep, found: {methods:?}"
+    );
+}
