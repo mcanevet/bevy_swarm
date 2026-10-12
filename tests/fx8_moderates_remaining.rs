@@ -549,8 +549,6 @@ fn rf16_raw_replay_and_minimization() {
     use bevy_swarm::headless::headless_app_factory;
     use bevy_swarm::minimize::minimize_failure;
     use bevy_swarm::scenario::Scenario;
-    use bevy_swarm::state::PlaytestState;
-
     struct TestPlugin;
     impl Plugin for TestPlugin {
         fn build(&self, app: &mut App) {
