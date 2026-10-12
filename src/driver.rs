@@ -1552,7 +1552,7 @@ mod tests_716_35 {
             r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.016,"tps":60,"invariants":[]}"#,
         )
         .unwrap();
-        let mut app = crate::verify::build_app_no_scoring();
+        let mut app = crate::verify::fixtures::build_app_no_scoring();
         let rep = crate::driver::run_scenario(&mut app, &scenario).unwrap();
         assert!(
             rep.frame_count >= 1,
