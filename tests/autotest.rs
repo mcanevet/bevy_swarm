@@ -107,13 +107,26 @@ fn autotest_unique_run_ids_and_last_pointer() {
     assert_eq!(second_runs.len(), 2, "two distinct run dirs");
     assert_ne!(second_runs[0], second_runs[1], "run IDs differ");
 
-    // Last pointer exists and points to the second run.
+    // Last pointer exists and points to the SECOND (newer) run.
+    // ml5: run_id suffixes are splitmix64-hashed (not lexically
+    // ordered), so identify the newer run by set difference, not by
+    // sort position.
     let last_pointer = runs_dir.join("last");
     assert!(last_pointer.exists(), "last pointer exists");
     let last_content = std::fs::read_to_string(&last_pointer).unwrap();
+    let newer: Vec<_> = second_runs
+        .iter()
+        .filter(|n| !first_runs.contains(n))
+        .collect();
+    assert_eq!(
+        newer.len(),
+        1,
+        "exactly one new run dir from second autotest"
+    );
     assert!(
-        second_runs[1].contains(&last_content),
-        "last points to second run"
+        newer[0].contains(&last_content),
+        "last points to second run: last={last_content} newer={}",
+        newer[0]
     );
 }
 

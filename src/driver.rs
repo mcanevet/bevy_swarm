@@ -332,6 +332,10 @@ impl PlaytestReport {
 
 /// Normalize a sink message for dedup: numbers vary between frames
 /// ("entity 5 failed" vs "entity 6 failed" is one signature).
+/// ml5 (L3): KNOWN fidelity cost — digit-collapsing also merges
+/// "entity 5 failed" with "entity 50 failed" into one grouped entry.
+/// Accepted for dedup purposes (the RAW messages remain in the
+/// report); grouping-by-signature is worth more than exact counting.
 fn normalize_sink_message(msg: &str) -> String {
     msg.chars()
         .map(|c| if c.is_ascii_digit() { '#' } else { c })
@@ -441,6 +445,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // the panic hook exactly once per process (chains to previous). A
     // lock-free compare_exchange makes concurrent first-use from
     // parallel workers safe: only the winner installs the hook.
+    // ml5 (M5): the previous hook is captured AT INSTALL TIME — if
+    // another framework swaps hooks after run_scenario, our capture
+    // loses theirs silently. Accepted (low practical risk).
     static INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if INSTALLED
         .compare_exchange(
