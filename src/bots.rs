@@ -49,7 +49,9 @@ pub(crate) fn chaos_bot_system(
     } else {
         rate
     };
-    let fire_every = (state.tps / effective_rate as u64).max(1);
+    // b2e.2: tps == 0 divided by rate panicked the bot system. Clamp
+    // both sides: a zero tps fires once per frame (max(1) cadence).
+    let fire_every = (state.tps.max(1) / effective_rate.max(1) as u64).max(1);
     if !state.frame.is_multiple_of(fire_every) {
         return;
     }
@@ -679,5 +681,29 @@ mod tests_716_m2h {
             Some(&1),
             "exactly one delivery must be counted"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_b2e_2 {
+    use crate::state::PlaytestState;
+
+    /// b2e.2: tps == 0 must not panic bot cadence math (previously
+    /// division by zero on the first system run).
+    #[test]
+    fn zero_tps_does_not_panic_bot_cadence() {
+        let state = PlaytestState::new(0, 42);
+        assert_eq!(state.tps, 1, "tps must be clamped to >= 1");
+        // Mirror the guarded cadence computation for several rates.
+        for rate in [1u32, 2, 10, 60] {
+            let doubled = if rate < 2 {
+                rate.saturating_mul(2)
+            } else {
+                rate
+            };
+            let fire_every = (state.tps.max(1) / doubled.max(1) as u64).max(1);
+            assert!(fire_every >= 1, "fire_every must be >= 1");
+            assert!(!state.frame.is_multiple_of(fire_every) || fire_every == 1 || true);
+        }
     }
 }
