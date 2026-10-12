@@ -663,7 +663,7 @@ pub fn planner_unfinished_check(
     Some(crate::harness::ViolationEntry {
         fingerprint: None,
         fingerprint_scheme: 1,
-        rule: "planner_goal_unfinished".into(),
+        rule: crate::rules::Rule::PlannerGoalUnfinished.name().to_string(),
         target: ppath.clone(),
         first_frame: top.activated,
         last_frame: state.frame,

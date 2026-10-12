@@ -57,6 +57,12 @@ impl Rule {
 
 declare_rules! {
     FrozenWorld => "frozen_world",
+    BevyError => "bevy_error",
+    BevyWarning => "bevy_warning",
+    LogError => "log_error",
+    LogWarn => "log_warn",
+    Panic => "panic",
+    PlannerGoalUnfinished => "planner_goal_unfinished",
     BevySuppressed => "bevy_suppressed",
     NodesInBounds => "nodes_in_bounds",
     FiniteTransforms => "finite_transforms",
@@ -133,17 +139,35 @@ mod tests {
     fn test_informational_parity() {
         for &rule in Rule::ALL {
             let name = rule.name();
-            let in_list = crate::state::Violations::INFORMATIONAL_RULES.contains(&name);
+            let in_list = crate::state::Violations::INFORMATIONAL_RULES
+                .iter()
+                .any(|r| r.name() == name);
             let via_enum = rule.is_informational();
             assert_eq!(
                 in_list, via_enum,
                 "informational drift for {name}: list={in_list} enum={via_enum}"
             );
         }
-        for name in crate::state::Violations::INFORMATIONAL_RULES {
+        for rule in crate::state::Violations::INFORMATIONAL_RULES {
             assert!(
-                Rule::ALL.iter().any(|r| r.name() == *name),
-                "INFORMATIONAL_RULES lists orphan rule '{name}' (never emitted)"
+                Rule::ALL.contains(rule),
+                "INFORMATIONAL_RULES lists orphan rule '{}' (never emitted)",
+                rule.name()
+            );
+        }
+    }
+
+    /// le3.14 (RF18): docs/rules.md must document EVERY registered
+    /// rule — no missing, no orphan rows.
+    #[test]
+    fn docs_list_all_rules() {
+        let docs = include_str!("../docs/rules.md");
+        for &rule in Rule::ALL {
+            let row = format!("| `{}` |", rule.name());
+            assert!(
+                docs.contains(&row),
+                "docs/rules.md is missing a row for rule '{}'",
+                rule.name()
             );
         }
     }
@@ -166,7 +190,9 @@ mod tests {
             }
             let name = cols[1].trim_matches('`');
             let severity = cols[2];
-            let informational = crate::state::Violations::INFORMATIONAL_RULES.contains(&name);
+            let informational = crate::state::Violations::INFORMATIONAL_RULES
+                .iter()
+                .any(|r| r.name() == name);
             assert_eq!(
                 severity == "informational",
                 informational,

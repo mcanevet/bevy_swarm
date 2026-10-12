@@ -1033,14 +1033,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     if severity == crate::sinks::Severity::Suppressed {
                         sink_groups
                             .entry((
-                                "bevy_suppressed".to_string(),
+                                crate::rules::Rule::BevySuppressed.name().to_string(),
                                 context.clone(),
                                 normalize_sink_message(&message),
                             ))
                             .or_insert((message.clone(), frame, frame, 0));
                         let e = sink_groups
                             .get_mut(&(
-                                "bevy_suppressed".to_string(),
+                                crate::rules::Rule::BevySuppressed.name().to_string(),
                                 context.clone(),
                                 normalize_sink_message(&message),
                             ))
@@ -1052,9 +1052,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     continue;
                 }
                 let rule = if severity >= crate::sinks::Severity::Error {
-                    "bevy_error"
+                    crate::rules::Rule::BevyError.name()
                 } else {
-                    "bevy_warning"
+                    crate::rules::Rule::BevyWarning.name()
                 };
                 (rule.to_string(), context, message, frame)
             }
@@ -1074,9 +1074,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     continue;
                 }
                 let rule = if level == bevy::log::Level::ERROR {
-                    "log_error"
+                    crate::rules::Rule::LogError.name()
                 } else {
-                    "log_warn"
+                    crate::rules::Rule::LogWarn.name()
                 };
                 (rule.to_string(), target, message, frame)
             }
@@ -1103,7 +1103,12 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     Some(loc) => format!("{message} at {loc}"),
                     None => message.clone(),
                 };
-                (String::from("panic"), target, detail, panic_frame)
+                (
+                    crate::rules::Rule::Panic.name().to_string(),
+                    target,
+                    detail,
+                    panic_frame,
+                )
             }
         };
         let key = (
@@ -1145,7 +1150,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             // le3.10 (RF6): informational rules are never fingerprinted
             // (Violations::snapshot already leaves them unfingerprinted;
             // this loop previously stamped frame_time_anomaly anyway).
-            if crate::state::Violations::INFORMATIONAL_RULES.contains(&e.rule.as_str()) {
+            if crate::state::Violations::INFORMATIONAL_RULES
+                .iter()
+                .any(|r| r.name() == e.rule)
+            {
                 e.fingerprint = None;
                 e.fingerprint_scheme = 1;
                 continue;
@@ -1267,7 +1275,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // is Pass.
     let gating = snap
         .iter()
-        .filter(|e| !crate::state::Violations::INFORMATIONAL_RULES.contains(&e.rule.as_str()))
+        .filter(|e| {
+            !crate::state::Violations::INFORMATIONAL_RULES
+                .iter()
+                .any(|r| r.name() == e.rule)
+        })
         .count();
     let status = if crash_detected {
         crate::enums::PlaytestStatus::Crash

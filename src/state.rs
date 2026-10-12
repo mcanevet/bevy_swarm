@@ -83,7 +83,7 @@ impl Violations {
         for e in &mut v {
             // Informational rules (wall-clock frame-time) are NOT
             // fingerprint-gated (U1 rule 9).
-            if Self::INFORMATIONAL_RULES.contains(&e.rule.as_str()) {
+            if Self::INFORMATIONAL_RULES.iter().any(|r| r.name() == e.rule) {
                 e.fingerprint = None;
                 e.fingerprint_scheme = 1;
             } else {
@@ -115,21 +115,15 @@ impl Violations {
     /// (tested); orphan entries frame_time_p99/frame_time_worst
     /// (never emitted by any rule) dropped.
     /// le3.11 (RF7): bevy_suppressed added for Ignore-severity errors.
-    pub const INFORMATIONAL_RULES: &[&str] = &[
-        "frame_time_anomaly",
-        "frame_time_p99_below",
-        "fps_floor",
-        "dead_widget",
-        "perf_budget_exceeded",
-        "entropy_unattributed_draws",
-        "bevy_suppressed",
+    pub const INFORMATIONAL_RULES: &[crate::rules::Rule] = &[
+        crate::rules::Rule::FrameTimeAnomaly,
+        crate::rules::Rule::FrameTimeP99Below,
+        crate::rules::Rule::FpsFloor,
+        crate::rules::Rule::DeadWidget,
+        crate::rules::Rule::PerfBudgetExceeded,
+        crate::rules::Rule::EntropyUnattributedDraws,
+        crate::rules::Rule::BevySuppressed,
     ];
-
-    // NOTE: INFORMATIONAL_RULES intentionally lists rules that are NOT
-    // declared in declare_rules! (they're tracked as metadata only,
-    // excluded from fingerprint gating). The comment in 6wt suggested
-    // checking existence, but that's incorrect — these rules exist
-    // solely in this list.
 }
 
 // ---------------------------------------------------------------------------

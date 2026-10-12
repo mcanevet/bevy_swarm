@@ -1,4 +1,10 @@
 //! I3: Typed oracle/predicate/policy registry — oracles as Bevy systems.
+//!
+//! # Experimental
+//!
+//! This module is **experimental**: its API may change or be removed
+//! without a major version bump. See the README's "Experimental
+//! features" section.
 
 use bevy::ecs::system::SystemId;
 use bevy::ecs::world::World;
