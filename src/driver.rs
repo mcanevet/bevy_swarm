@@ -753,7 +753,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // J1: robustness accumulation (thresholds, bounds, differentials...).
     app.init_resource::<crate::robustness::RobustnessTracker>();
 
-    let total_ticks = (scenario.duration_s * tps as f32) as u64;
+    // 716.35: CEIL to match validate_scenario — truncation ran ZERO
+    // frames for duration_s=0.016 @ tps=60 (0.96 ticks), silently
+    // vacuous-passing validated scenarios. Semantics decided and
+    // documented: a fractional tick count rounds UP — the partial
+    // frame RUNS (ceil), consistent with validation's cap math; a
+    // scenario is never silently zero-length after passing
+    // validation.
+    let total_ticks = (scenario.duration_s * tps as f32).ceil() as u64;
     // Pre-run snapshot for code-aware (system) coverage — see
     // `system_coverage`. Must happen after finish/cleanup so schedules
     // are initialized and enumerable.
@@ -1492,5 +1499,37 @@ mod tests_716_34 {
             .filter(|e| e.action.contains("cheat:my_cheat"))
             .count();
         assert_eq!(n, 2, "audit log must record BOTH executions");
+    }
+}
+
+#[cfg(test)]
+mod tests_716_35 {
+    /// 716.35: duration_s 0.016 @ tps 60 = 0.96 ticks. Truncation ran
+    /// ZERO frames (silent vacuous pass); ceil must run ONE frame,
+    /// matching validate_scenario's tick-count math.
+    #[test]
+    fn fractional_tick_scenario_runs_at_least_one_frame() {
+        let ticks = (0.016f32 * 60f32).ceil() as u64;
+        assert_eq!(ticks, 1, "0.96 ticks must round up to 1 (ceil)");
+        // Truncation (the old bug):
+        assert_eq!(
+            (0.016f32 * 60f32) as u64,
+            0,
+            "precondition: truncation yields 0"
+        );
+
+        // End-to-end: a validated scenario with fractional tick count
+        // must run >= 1 frame and produce a non-vacuous report.
+        let scenario: crate::scenario::Scenario = serde_json::from_str(
+            r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.016,"tps":60,"invariants":[]}"#,
+        )
+        .unwrap();
+        let mut app = crate::verify::build_app_no_scoring();
+        let rep = crate::driver::run_scenario(&mut app, &scenario).unwrap();
+        assert!(
+            rep.frame_count >= 1,
+            "fractional-tick scenario must run at least 1 frame, ran {}",
+            rep.frame_count
+        );
     }
 }
