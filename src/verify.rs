@@ -2816,7 +2816,7 @@ fn regression_roundtrip_one_file_per_fingerprint() {
     assert!(names.contains(&"regression_bbbb2222bbbb2222.json".to_string()));
 
     // Roundtrip: load_regressions parses both forms (record + bare scenario).
-    let loaded = crate::sweep::load_regressions(&dir).unwrap();
+    let loaded = crate::sweep::load_regressions(&dir, &mut 0).unwrap();
     assert_eq!(loaded.len(), 2);
     assert!(loaded.iter().any(|r| r.fingerprint == fp1));
     assert!(loaded.iter().any(|r| r.fingerprint == fp2));
@@ -2829,7 +2829,7 @@ fn regression_roundtrip_one_file_per_fingerprint() {
         serde_json::to_string(&scenario).unwrap(),
     )
     .unwrap();
-    let loaded2 = crate::sweep::load_regressions(&dir).unwrap();
+    let loaded2 = crate::sweep::load_regressions(&dir, &mut 0).unwrap();
     assert_eq!(loaded2.len(), 3);
 
     let _ = std::fs::remove_dir_all(&dir);

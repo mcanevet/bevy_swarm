@@ -54,6 +54,8 @@ pub struct SweepReport {
     pub seeds_run: u64,
     pub failures: Vec<SweepFailure>,
     pub early_stop: bool,
+    /// 716.35 (qa8.14): regression files skipped due to parse errors.
+    pub skipped_regression_files: u64,
 }
 
 /// Run a seed sweep over the configured range, deduplicating by
@@ -129,6 +131,7 @@ pub fn sweep_seeds<F: Fn() -> bevy::app::App + Sync>(
         seeds_run,
         failures,
         early_stop,
+        skipped_regression_files: 0,
     })
 }
 
@@ -159,7 +162,12 @@ impl Default for RegressionRecord {
 
 /// Load all regression files from a directory (one per fingerprint).
 /// Also accepts bare Scenarios (legacy format).
-pub fn load_regressions(dir: &Path) -> Result<Vec<RegressionRecord>, std::io::Error> {
+/// 716.35 (qa8.14): logs a warning for each malformed file and returns
+/// the count of skipped files via the output parameter.
+pub fn load_regressions(
+    dir: &Path,
+    skipped_out: &mut u64,
+) -> Result<Vec<RegressionRecord>, std::io::Error> {
     let mut records = vec![];
     if !dir.exists() {
         return Ok(records);
@@ -174,13 +182,23 @@ pub fn load_regressions(dir: &Path) -> Result<Vec<RegressionRecord>, std::io::Er
         // Try parsing as RegressionRecord first; fallback to Scenario.
         match serde_json::from_str::<RegressionRecord>(&contents) {
             Ok(rec) => records.push(rec),
-            Err(_) => {
+            Err(e1) => {
                 // Legacy: bare Scenario — wrap it.
                 if let Ok(scen) = serde_json::from_str::<Scenario>(&contents) {
                     records.push(RegressionRecord {
                         scenario: scen,
                         ..RegressionRecord::default()
                     });
+                } else {
+                    // 716.35 (qa8.14): visible warning naming the file
+                    // and the parse error (silently skipping corrupt
+                    // regression files causes false confidence).
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    eprintln!(
+                        "WARNING: skipped regression file '{}' (malformed JSON): {}",
+                        name, e1
+                    );
+                    *skipped_out += 1;
                 }
             }
         }
@@ -228,7 +246,8 @@ pub fn run_regressions_and_sweep<F: Fn() -> bevy::app::App + Sync>(
     sweep_config: SweepConfig,
     reg_dir: &Path,
 ) -> Result<RegressionsAndSweepReport, Box<dyn std::error::Error>> {
-    let records = load_regressions(reg_dir)?;
+    let mut skipped_reg_files = 0u64;
+    let records = load_regressions(reg_dir, &mut skipped_reg_files)?;
     let base_for_persist = base_scenario.clone();
     // Replay each regression (they should still fail).
     let mut replays = Vec::new();
@@ -240,7 +259,8 @@ pub fn run_regressions_and_sweep<F: Fn() -> bevy::app::App + Sync>(
             still_fails,
         });
     }
-    let sweep = sweep_seeds(runner, base_scenario, sweep_config)?;
+    let mut sweep = sweep_seeds(runner, base_scenario, sweep_config)?;
+    sweep.skipped_regression_files = skipped_reg_files;
     // FX12 (E3): persist new failures (one file per fingerprint) when
     // the conventions update mode is on.
     if update_regressions_enabled() {
@@ -341,5 +361,57 @@ mod tests {
         assert_eq!(fp1_rec.scenario.bot.seed, 1, "lowest seed persisted");
         assert!(fp1_rec.found_by_seeds.contains(&1));
         assert!(fp1_rec.found_by_seeds.contains(&3));
+    }
+}
+
+#[cfg(test)]
+mod tests_qa8_14 {
+    use super::*;
+    use std::io::Write;
+
+    /// qa8.14: malformed regression files are skipped with a visible
+    /// warning naming the file, and the skipped count is reported.
+    #[test]
+    fn malformed_regression_file_warns_and_counts() {
+        let dir = std::env::temp_dir().join(format!("qa8_14_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // One good record, one corrupt file (partial write).
+        let good: Scenario = serde_json::from_str(
+            r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"tps":60}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("regression_good.json"),
+            serde_json::to_string(&RegressionRecord {
+                scenario: good,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut f = std::fs::File::create(dir.join("regression_corrupt.json")).unwrap();
+        f.write_all(b"{\"scenario\": {\"du").unwrap(); // truncated JSON
+        drop(f);
+
+        let mut skipped = 0u64;
+        let loaded = load_regressions(&dir, &mut skipped).unwrap();
+        assert_eq!(loaded.len(), 1, "good record loads");
+        assert_eq!(skipped, 1, "corrupt file counted as skipped");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SweepReport carries the skipped count for surfacing in reports.
+    #[test]
+    fn sweep_report_has_skipped_count() {
+        let rep = SweepReport {
+            seeds_run: 0,
+            failures: vec![],
+            early_stop: false,
+            skipped_regression_files: 2,
+        };
+        assert_eq!(rep.skipped_regression_files, 2);
     }
 }
