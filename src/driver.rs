@@ -354,15 +354,20 @@ fn normalize_sink_message(msg: &str) -> String {
 /// currently registered. Call BEFORE the readiness gate and before
 /// snapshot_systems (which initializes schedules). Schedules created
 /// lazily afterward keep the default executor (document this caveat).
-fn force_single_threaded(app: &mut App) {
-    let mut schedules = app
+fn force_single_threaded(app: &mut App) -> Result<(), ScenarioError> {
+    let Some(mut schedules) = app
         .world_mut()
         .remove_resource::<bevy::ecs::schedule::Schedules>()
-        .unwrap();
+    else {
+        return Err(ScenarioError::Rejected(
+            "force_single_threaded: Schedules not found in app".into(),
+        ));
+    };
     for (_label, sched) in schedules.iter_mut() {
         sched.set_executor(SingleThreadedExecutor::new());
     }
     app.world_mut().insert_resource(schedules);
+    Ok(())
 }
 
 /// Split a rendered ambiguity report into individual "-- A and B\n
@@ -528,17 +533,23 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
     // Force single-threaded execution on all schedules.
     if scenario.single_threaded {
-        force_single_threaded(app);
+        force_single_threaded(app)?;
     }
 
     // Ambiguity gate (finalize): force schedule initialization NOW so
     // ambiguity errors surface as a structured rejection instead of a
     // panic inside Schedule::run during the update loop.
     if scenario.deny_ambiguities {
-        let mut schedules = app
+        // qa8.16: hand-built minimal Apps may lack Schedules —
+        // structured rejection instead of a panic.
+        let Some(mut schedules) = app
             .world_mut()
             .remove_resource::<bevy::ecs::schedule::Schedules>()
-            .unwrap();
+        else {
+            return Err(ScenarioError::Rejected(
+                "deny_ambiguities: Schedules not found in app".into(),
+            ));
+        };
         let mut errs = Vec::new();
         for (_label, sched) in schedules.iter_mut() {
             if let Err(e) = sched.initialize(app.world_mut()) {

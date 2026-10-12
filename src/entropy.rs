@@ -163,6 +163,11 @@ pub fn reset_fallback_counter() {
 /// the intended behaviour (headless, seeded runs must not depend on OS
 /// entropy). Bevy / rand / getrandom 0.4 users keep their own sources
 /// unless they also route here.
+///
+/// qa8.16: fragility note — the extern "Rust" symbol punning across
+/// getrandom 0.3/0.4 relies on transitive layout equality of Error
+/// types (both wrap NonZeroU32). The compile-time asserts above cover
+/// 0.4's Error; add a runtime sanity check on first call.
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn __getrandom_v03_custom(
     dest: *mut u8,
@@ -170,6 +175,16 @@ pub unsafe extern "Rust" fn __getrandom_v03_custom(
 ) -> Result<(), getrandom04::Error> {
     // Safety: caller guarantees dest points to len valid bytes.
     let buf = unsafe { std::slice::from_raw_parts_mut(dest, len) };
+
+    // qa8.16: runtime sanity check on first call.
+    static CHECKED: std::sync::Once = std::sync::Once::new();
+    CHECKED.call_once(|| {
+        let sz = std::mem::size_of::<getrandom04::Error>();
+        let al = std::mem::align_of::<getrandom04::Error>();
+        if sz != 4 || al != 4 {
+            eprintln!("WARNING: getrandom04::Error layout unexpected (sz={}, al={}); FFI contract may be broken", sz, al);
+        }
+    });
 
     STREAM.with(|s| {
         match s.borrow_mut().as_mut() {

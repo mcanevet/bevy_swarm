@@ -109,17 +109,32 @@ impl Normalizer {
     fn redact_merge_keys(&self, raw: &str) -> String {
         let mut out = raw.to_string();
         for key in &self.merge_keys {
-            let Some(pos) = out.find(key.as_str()) else {
-                continue;
-            };
-            let after = pos + key.len();
-            let rest = &out[after..];
-            let sep_len = usize::from(rest.starts_with('=') || rest.starts_with(':'));
-            let val_end = rest[sep_len..]
-                .find(char::is_whitespace)
-                .map(|i| sep_len + i)
-                .unwrap_or(rest.len());
-            out = format!("{}[merged:{}]{}", &out[..pos], key, &rest[val_end..]);
+            // qa8.16: redact EVERY occurrence of the merge key, not
+            // just the first ("entity:12v3 leaked entity:45v7" used
+            // to keep the second id → split fingerprints). Scan with
+            // a cursor: each replacement inserts "[merged:key]",
+            // whose "[merged:" prefix does not re-match `key` before
+            // the cursor, so we resume scanning AFTER the marker.
+            let marker = format!("[merged:{key}]");
+            let mut cursor = 0usize;
+            while let Some(rel) = out[cursor..].find(key.as_str()) {
+                let pos = cursor + rel;
+                let after = pos + key.len();
+                let rest = &out[after..];
+                let sep_len = usize::from(rest.starts_with('=') || rest.starts_with(':'));
+                let val_end = rest[sep_len..]
+                    .find(char::is_whitespace)
+                    .map(|i| sep_len + i)
+                    .unwrap_or(rest.len());
+                let tail = rest[val_end..].to_string();
+                let head = out[..pos].to_string();
+                out = format!("{}{}{}", head, marker, tail);
+                // Resume after the marker text.
+                cursor = pos + marker.len();
+                if cursor >= out.len() {
+                    break;
+                }
+            }
         }
         out
     }
@@ -354,5 +369,38 @@ mod tests {
             "entity:45v7 leaked resource",
         );
         assert_eq!(fp1, fp2, "different entities should yield same fingerprint");
+    }
+}
+
+#[cfg(test)]
+mod tests_qa8_16 {
+    use super::*;
+
+    /// qa8.16: redact_merge_keys must redact EVERY occurrence of the
+    /// merge key — "entity:12v3 leaked entity:45v7" previously kept
+    /// the second id (split fingerprints for the same bug).
+    #[test]
+    fn merge_keys_redact_all_occurrences() {
+        let cfg = Normalizer {
+            merge_keys: vec!["entity".to_string()],
+            ..Default::default()
+        };
+        let out = cfg.redact_merge_keys("entity:12v3 leaked entity:45v7 badly");
+        assert!(
+            !out.contains("12v3") && !out.contains("45v7"),
+            "both entity ids must be redacted, got: {out}"
+        );
+        assert_eq!(out.matches("[merged:entity]").count(), 2, "both marked");
+    }
+
+    /// Single occurrence still works (regression).
+    #[test]
+    fn merge_keys_single_occurrence() {
+        let cfg = Normalizer {
+            merge_keys: vec!["entity".to_string()],
+            ..Default::default()
+        };
+        let out = cfg.redact_merge_keys("entity:99 leaked stuff");
+        assert!(!out.contains("99"), "id must be redacted: {out}");
     }
 }
