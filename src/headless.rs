@@ -127,6 +127,11 @@ pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
         let mut app = App::new();
         let platform = headless_platform();
 
+        // le3.11 (RF7): disable LogPlugin's default subscriber and
+        // install our capture layer via custom_layer so log capture
+        // works even when the harness runs in-process (LogPlugin no
+        // longer beats ensure_global_subscriber).
+        let platform = platform.disable::<bevy::log::LogPlugin>();
         // Try to add platform plugins; detect bundling conflicts.
         if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             app.add_plugins(platform);
@@ -142,6 +147,16 @@ pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
         }
 
         app.add_plugins(game_plugin.clone());
+        // le3.11 (RF7): install LogPlugin with the swarm capture layer
+        // as custom_layer — integrates with the game's logging while
+        // ensuring our capture layer sees all events.
+        let log_plugin = bevy::log::LogPlugin {
+            custom_layer: crate::sinks::log_custom_layer,
+            ..default()
+        };
+        if !app.is_plugin_added::<bevy::log::LogPlugin>() {
+            app.add_plugins(log_plugin);
+        }
         // FX4.1: add PlaytestPlugin once (bots + oracles). Guard against
         // double-add in case the harness is reused.
         if !app.is_plugin_added::<crate::driver::PlaytestPlugin>() {

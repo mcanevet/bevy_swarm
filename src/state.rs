@@ -114,6 +114,7 @@ impl Violations {
     /// le3.10 (RF6): kept in parity with Rule::is_informational()
     /// (tested); orphan entries frame_time_p99/frame_time_worst
     /// (never emitted by any rule) dropped.
+    /// le3.11 (RF7): bevy_suppressed added for Ignore-severity errors.
     pub const INFORMATIONAL_RULES: &[&str] = &[
         "frame_time_anomaly",
         "frame_time_p99_below",
@@ -121,6 +122,7 @@ impl Violations {
         "dead_widget",
         "perf_budget_exceeded",
         "entropy_unattributed_draws",
+        "bevy_suppressed",
     ];
 
     // NOTE: INFORMATIONAL_RULES intentionally lists rules that are NOT
