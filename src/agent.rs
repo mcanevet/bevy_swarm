@@ -453,7 +453,7 @@ impl Plugin for AgentPlugin {
             .unwrap_or_else(|| {
                 let generated =
                     generate_random_token().expect("agent token generation from OS randomness");
-                tracing::warn!(
+                eprintln!(
                     "bevy_swarm agent: no BEVY_SWARM_AGENT_TOKEN configured; \
                  generated a random session token. Set BEVY_SWARM_AGENT_TOKEN \
                  to use the agent programmatically. Token: {generated}"

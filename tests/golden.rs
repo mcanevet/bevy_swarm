@@ -148,6 +148,7 @@ fn golden_missing_is_not_same() {
 }
 
 #[test]
+#[serial_test::serial]
 fn golden_update_env_rewrites() {
     // FX9: convention is BEVY_SWARM_UPDATE=golden, not
     // BEVY_SWARM_UPDATE_GOLDEN.

@@ -153,6 +153,25 @@ impl GoldenReport {
 ///
 /// Runs each scenario once, recording per-frame digests and periodic
 /// snapshots. Returns a GoldenSet ready to be saved.
+/// le3.12 (RF13): reject path separators, '..' and NUL in golden
+/// entry names — a scenario named `../../x` previously wrote outside
+/// the golden dir.
+fn sanitize_entry_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // Collapse any surviving traversal sequences outright.
+    let no_dots = sanitized.replace("..", "_");
+    no_dots.trim().to_string()
+}
+
 pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
     app_factory: F,
     scenarios: &[Scenario],
@@ -193,10 +212,13 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
         // Naming: use scenario.name (if present) + seed; fall back to
         // index+seed for backwards compatibility. Unique scenario names
         // prevent reordering from renaming/overwriting golden files.
+        // le3.12 (RF13): scenario names are SANITIZED — a name with a
+        // path separator or '..' previously escaped the golden dir.
         let scenario_name = scenario
             .name
             .clone()
             .unwrap_or_else(|| scenario_idx.to_string());
+        let scenario_name = sanitize_entry_name(&scenario_name);
         let entry_name = format!("scenario-{}-{}", scenario_name, scenario.bot.seed);
         golden_set
             .scenarios
@@ -461,6 +483,19 @@ pub fn diff_states(
             }
         })
         .collect()
+}
+
+#[test]
+fn le312_sanitizes_entry_names() {
+    assert_eq!(sanitize_entry_name("normal"), "normal");
+    assert_eq!(sanitize_entry_name("with/slash"), "with_slash");
+    assert_eq!(sanitize_entry_name("../escape"), "__escape");
+    assert_eq!(sanitize_entry_name("dots..here"), "dots_here");
+    assert_eq!(
+        sanitize_entry_name("naughty/backslash"),
+        "naughty_backslash"
+    );
+    assert_eq!(sanitize_entry_name("emoji🎮"), "emoji_");
 }
 
 #[cfg(test)]

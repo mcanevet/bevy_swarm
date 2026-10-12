@@ -10,16 +10,13 @@ Every bead references these conventions instead of inventing new paths or format
 
 **Members:**
 - `.` — the `bevy_swarm` library crate (publishable)
-- `bevy_swarm_cli/` — CLI tool (created by Z10; `publish = false`)
-- `fixtures/*` — plain fixture games for black-box testing (created by X1/X2)
-- `tests/fixture-runner` — test harness for fixtures (created by X1)
-- `bench/*` — benchmark suites (created by R3/R4)
+- `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_swarm dependency)
 
 **Shared dependencies** (single place to pin, per Z0):
 
 ```toml
 [workspace.dependencies]
-bevy = { version = "0.20.0-rc.2", default-features = false }
+bevy = { version = "0.20.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
@@ -47,7 +44,9 @@ target/bevy_swarm/
 └── coverage-index.json          # T7 coverage index
 ```
 
-**Run ID format:** `<UTC_yyyymmddThhmmss>-<8hex-of-scenario+seed-hash>`
+**Run ID format:** `<UTC_yyyymmddThhmmssZ>-<16hex>` — 16 hex chars mix a
+process-local counter, nanoseconds and the PID (`conventions.rs`). It is
+UNIQUE per run, not a content hash of scenario+seed.
 (helper: `bevy_swarm::conventions::run_id`).
 
 **Build directory for special builds** (Z14 entropy cfg, R4): `target/bevy_swarm-build/`
@@ -61,8 +60,8 @@ All persisted files live under `tests/swarm/`:
 tests/swarm/
 ├── config.json                  # Budgets, allow-lists, fingerprint rules, defaults
 ├── issues.json                  # T13 known issues
-├── golden/                      # Z11 golden expectations
-├── regressions/                 # E3 regression scenarios
+├── expectations/               # X2 acceptance expectations (per fixture)
+├── pending.json                 # xfails awaiting oracle rules
 ├── model.json                   # S2/S3 semantic model
 ├── corpus/                      # J2 fuzzing corpus
 └── perf-baseline.json           # T5 performance baselines
@@ -85,13 +84,23 @@ Every persisted file and every report has a top-level `schema_version: <int>`.
 
 ## 5. Update Mode
 
-Single environment variable:
-
 ```bash
 BEVY_SWARM_UPDATE=golden,issues,model,perf,regressions  # or 'all'
 ```
 
-- Without this env var, **nothing** under `tests/swarm/` is ever written.
+Environment variables read by the harness (full table):
+
+| Variable | Purpose |
+|---|---|
+| `BEVY_SWARM_UPDATE` | categories allowed to rewrite goldens/expectations |
+| `BEVY_SWARM_SEEDS` | override seed sweep range |
+| `BEVY_SWARM_DURATION` | override default scenario duration |
+| `BEVY_SWARM_THREADS` | parallel worker count for matrix runs |
+| `BEVY_SWARM_AGENT_TOKEN` | auth token for the agent feature |
+| `SWARM_TRANSFORM_DESYNC_TOL` | tolerance for transform desync detection |
+
+- Without `BEVY_SWARM_UPDATE`, nothing under `tests/swarm/` is written by
+  CHECK paths; `record_golden` is an explicit library call that always writes.
 - CI never commits changes (external side effects need user approval).
 - Insta-style semantics: only the listed categories update.
 - Helpers: `bevy_swarm::conventions::{parse_update_mode, can_update}`.

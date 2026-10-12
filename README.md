@@ -2,7 +2,7 @@
 
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
-**Targets Bevy 0.20** (currently `v0.20.0-rc.2` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
+**Targets Bevy 0.20** (`0.20.0` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
 
 ## Conventions
 
@@ -20,28 +20,32 @@ surface that can silently diverge from real game behavior.
 
 | bevy_swarm | Bevy |
 |-----------|------|
-| 0.1.0 (unreleased) | 0.20 (`v0.20.0-rc.2` on crates.io) |
+| 0.1.0 (unreleased) | 0.20 (`0.20.0`) |
 
 ## Gameplay Snapshot Testing (Z11)
 
 Record and compare per-frame state digests to detect gameplay regressions across versions:
 
-```rust
+```rust,no_run
 use bevy_swarm::golden::{record_golden, check_golden, GoldenSet, Tolerance};
+use bevy_swarm::scenario::Scenario;
+use bevy::prelude::App;
 
+# fn main() {
 // Record a baseline (once):
-let scenarios = vec![/* ... */];
-record_golden(|| App::new(), &scenarios, "tests/swarm/expectations").unwrap();
+let scenarios: Vec<Scenario> = vec![];
+record_golden(|| App::new(), &scenarios, "tests/swarm/golden").unwrap();
 
 // Check against goldens (in CI or tests):
-let set = GoldenSet::load("tests/swarm/expectations").unwrap();
+let set = GoldenSet::load("tests/swarm/golden").unwrap();
 let report = check_golden(|| App::new(), &set, &Tolerance::default()).unwrap();
 assert!(report.all_same(), "no regressions");
+# }
 ```
 
-- **Approval workflow**: Set `BEVY_SWARM_UPDATE_GOLDEN=1` to rewrite golden files; commit the diff for review.
+- **Approval workflow**: Set `BEVY_SWARM_UPDATE=golden` (or `all`) to rewrite golden files; commit the diff for review. `BEVY_SWARM_UPDATE` unset means read-only.
 - **Determinism required**: Run `check_determinism` first; nondeterministic scenarios are flagged.
-- **Cross-platform tolerance**: Float tolerance applies only when comparing across platforms; same-platform digest mismatches are failures.
+- **Tolerance**: float tolerance smooths timing/platform noise; same-platform digest mismatches are still failures (platform is not compared separately).
 - **Readable diffs**: If your game exposes state via `TestApi`, diffs show field names/values instead of raw hashes.
 
 ## What it does
@@ -51,7 +55,7 @@ assert!(report.all_same(), "no regressions");
 - **Oracles** — frozen-world soft-lock detection, Welford frame-time anomaly detection, true rolling p99, readiness gate, finite-transform NaN check (all entities, not only Gameplay)
 - **CA² system coverage** — which registered systems actually executed, with zero instrumentation (wrap-safe schedule tick-age snapshots)
 - **Failure minimization** — ddmin over the structured action log shrinks ANY failure (crashes and invariant violations) to a ready-to-save regression scenario with a trimmed duration, and fails honestly with `NotReproducible` when the log alone cannot reproduce the failure
-- **Calibration** — `--calibrate` runs a chaos session and derives suggested invariants from archetype-count envelopes, with zero game annotations
+- **Calibration** — `diagnostics::calibrate_world` runs a chaos session and derives suggested invariants from archetype-count envelopes, with zero game annotations (library API; there is no CLI flag)
 - **Loud contracts** — missing picking backends, unresolved TestApi paths, vacuous setups REJECT the scenario instead of silently passing
 
 ## Usage
@@ -61,16 +65,20 @@ assert!(report.all_same(), "no regressions");
 bevy_swarm = "0.1" # or path/git
 ```
 
-```rust
-use bevy_swarm::harness::{run_scenario, validate_scenario, Scenario};
+```rust,no_run
+use bevy_swarm::harness::{run_scenario, Scenario};
 
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
 let scenario: Scenario = serde_json::from_str(
     r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"above","value":3,"emit":[{"intent":"choice","index":0}]}},"duration_s":1.0,"invariants":[]}"#,
 )?;
 
 let mut app = build_your_headless_app(); // your game's plugins + PlaytestPlugin
 let report = run_scenario(&mut app, &scenario)?;
-assert_eq!(report.status, "pass");
+assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
+# Ok(())
+# }
+# fn build_your_headless_app() -> bevy::prelude::App { unimplemented!() }
 ```
 
 ## Game-side contract (deliberately thin)
@@ -89,7 +97,7 @@ Games with none of these still work: reflection-based percepts and auto-discover
 
 At its core, the data flow per frame:
 
-```mermaid
+```mermaid,ignore
 flowchart LR
     Bots[Bots] -->|UserIntent| Game[Game Systems]
     Game --> World[(World)]
@@ -122,7 +130,7 @@ version bump; the JSON DSL is the stable surface for v0.1.
 
 Emit JUnit XML for CI test reporters (GitHub Actions, GitLab, Jenkins):
 
-```rust,no_run
+```rust,ignore
 let matrix = run_branch_matrix(build_app, vec![variant_a, variant_b])?;
 std::fs::write("target/swarm-junit.xml", matrix.to_junit("swarm"))?;
 ```
@@ -141,7 +149,7 @@ Two loops (see docs/conventions.md):
   path a user takes — and asserts on the report JSON contract
   (`docs/report-schema.json`). Bug variants are selected at runtime via
   the `FIXTURE_BUG` env var, so clean and buggy share one build.
-- **Inner loop (unit):** `src/verify.rs` and module tests for algorithms
+- **Inner loop (unit):** module tests inside `src/` for algorithms (determinism, fingerprints, oracles)
   and semantics.
 
 To add a fixture: create `fixtures/<game>/` (depends on bevy ONLY),
@@ -151,8 +159,8 @@ false-positive guard; every `bug_<name>.json` documents a planted bug).
 
 ## Development
 
-```
-cargo test              # 48 lib tests
+```bash
+cargo test              # ~200 lib tests
 cargo test --tests       # integration/regression suites
 cargo test --features agent
 cargo clippy --all-targets -- -D warnings
@@ -168,7 +176,7 @@ scenario runs multiple times on fresh `App`s and per-frame canonical state
 digests are compared. On divergence you get the first divergent frame and
 the differing fields (e.g. `Gameplay[Ball].translation.x`):
 
-```rust
+```rust,ignore
 let report = bevy_swarm::determinism::check_determinism(build_app, &scenario, 2)?;
 if !report.is_deterministic() {
     println!("{:?}", report.first_divergence);
@@ -204,7 +212,7 @@ cross-run ThreadRng state leakage. The `InProcess` runner now calls
 `enter_run` before the factory so plugin-build draws are seeded.
 
 **Important**: The hook signature must match exactly:
-```rust
+```rust,ignore
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn __getrandom_v03_custom(
     dest: *mut u8,
@@ -258,14 +266,24 @@ mutation, Go-Explore) and LLM falsifiers.
 ## Security (agent feature)
 
 The `agent` feature exposes BRP (arbitrary world reads and **mutation**) over
-HTTP. Treat it like an open debugger:
+HTTP. Threat model: **the agent is an open debugger gated by a shared secret,
+safe on loopback only**. Remote use additionally requires a TLS-terminating
+proxy — the HTTP transport is plaintext.
 
 - Binds to `127.0.0.1:15702` by default; non-loopback addresses are refused
   unless `AgentConfig { allow_remote: true, .. }` is set explicitly.
-- Set a token via `AgentConfig::token` or the `BEVY_SWARM_AGENT_TOKEN` env
-  var: every `playtest/*` method then requires `params.token` to match
-  (`INVALID_REQUEST` otherwise, before any param parsing). Built-in
-  `world.*` BRP methods are not covered (no request middleware in
-  `RemoteHttpPlugin` 0.20) — keep the endpoint on loopback.
+- **Default-deny**: a token is ALWAYS required for `playtest/*` methods.
+  Configure one via `AgentConfig::token` or the `BEVY_SWARM_AGENT_TOKEN`
+  env var. When neither is set, a cryptographically random session token
+  is generated and printed to stderr at startup (eprintln, so it survives
+  even when the plugin is added before `LogPlugin`).
+- Token comparison is constant-time; an explicitly-empty configured token
+  is treated as unset and does not authenticate `{token: ""}`.
 - Release builds with the agent active log a loud warning; set
   `deny_in_release: true` to panic instead. Never ship agent-enabled builds.
+
+**Experimental features** (known limitations, see docs):
+- `autotest()` — false positives on default intent keys and static games (RF8)
+- raw input (gamepad/pointer injection) — gamepad actions not in the audit log (RF16)
+- `ClickEntity`/pointer picking — `NoViewportSize` failures without a camera (RF11)
+- deterministic entropy — `rand::rng()` not reproducible on the same thread (RF10)

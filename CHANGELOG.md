@@ -7,67 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### E2: JUnit XML output (swarm-cj8.14)
-
-- `PlaytestReport::to_junit_testcase(name, classname)` — one `<testcase>`; Fail -> `<failure>` (rule/target/frames/count/detail), Crash -> `<error>`; full report JSON in `<system-out>` CDATA (with `]]>` splitting).
-- `BranchMatrixReport::to_junit(suite_name)` — full document; failures/errors tallied from statuses.
-- `AutotestReport::to_junit(suite_name)` — one `<testcase>` per seed run; written automatically to `runs/<run-id>/junit.xml` (U1 convention).
-- `PlaytestReport.wall_time_s` — wall-clock run-loop duration measured in the driver (used for `<testcase time>`, falling back to simulated time).
-- `BranchOutcome::is_fail/is_crash/report_time` helpers.
-- Hand-written XML with full escaping (`&<>` quotes, control chars) — no new dependencies.
-- README: CI snippet writing `matrix.to_junit("swarm")` to `target/swarm-junit.xml` and uploading as an artifact.
-
-### FX2: Acceptance Harness Integrity (swarm-qo7.2)
-
-- **FX2.1**: `fixture-runner --out <path>` for unique report paths per case; fatal errors on write failure.
-- **FX2.2**: Extended `must_report` with `detail_contains`, `target`, `min_count` filters; pinned actual bug details in expectation files (walker/bug_dead_left_key pins "intent:move:left").
-- **FX2.3**: All fixtures panic on unknown `FIXTURE_BUG`; walker/turn_based/spawner use `known_bug()` helper; regression_pair refactored to Bug enum.
-- **FX2.4**: turn_based adapter syncs Score → TestApi.score; bug_checkop_boundary.json rewritten with custom rule pinning score==50; pending key removed.
-- **FX2.5**: X2 coverage expanded — walker 9 bugs, turn_based 5 bugs; regression_pair/bug_v2_damage.json added; clean.json asserts no frozen_world/dead_verb.
-- **FX2.6**: Renamed tests/swarm/golden → tests/swarm/expectations; deleted bogus trajectories (scenario-42.golden.json, scenario-7.golden.json).
-- **FX2.7**: Added `schema_version` to config.json and expectation files; removed `$schema` from expectations (kept only in docs/report-schema.json).
-- **FX2.8**: Updated docs/report-schema.json with state_trace field, deduped last_detail; added full JSON-schema validation via jsonschema dev-dependency.
-- **FX2.9**: Created Rule enum registry in src/rules.rs; unit test asserts emitted == registered; renamed finite_transforms oracle output from "nodes_finite" to registry name.
-- **FX2.10**: Added `fixtures_have_no_harness_plumbing` test forbidding Gameplay/RealTime/PlaytestPlugin/IntentSurface in fixture crates.
-- **FX2.11**: All fixture Cargo.tomls now have edition/license/publish.workspace=true.
-
-### FX1: Liveness & Dead Verb Fixes (swarm-qo7.1) — MERGED & CLOSED
-
-- Fixed false-positive frozen_world in turn_based/spawner by extending liveness scope to game-owned resources (via GameTypes prefixes).
-- Excluded Wait intents from dead_verb detection; per-direction Move keys (intent:move:left) isolate direction-specific bugs.
-- Anchored effect windows on frame-start ticks (PlaytestState.effect_window_snapshots) instead of Last oracle ticks.
-- Added "world live" gating before reporting dead_verb.
-- Updated clean.json files to duration_s >= 6.0; added meta-test clean_fixtures_pass_long.
-
+### Added
+- **le3.11 (RF7): error/log capture** — LogPlugin custom_layer integration (headless_app installs swarm capture layer via `LogPlugin::custom_layer`), stable sink fingerprints (digit-run normalization + count-suffix stripping), `bevy_suppressed` informational rule for Ignore-severity errors, drop-guarded handler install (handler moved after load-time validation). PR #124.
+- **le3.10 (RF6): informational rules** — informational rules never gate run status, fps_floor uses wall-clock time, `Rule::is_informational()` derived from enum with parity test. PR #123.
+- **le3.9 (RF5): expert-rule semantics** — text-WHEN rules fixed, J1 overall<0 iff fail corrected, text REQUIRE robustness ±1, deadline-capped observe_max. PR #122.
+- **le3.8 (RF4): liveness** — softlock detection fixed (sticky-streak-only, timeout-scaled ring buffers, spawner liveness:off exemption), `IdlePhase` resource-based clean system demo. PR #121.
+- **le3.7 (RF3): gate integrity** — per-case guard on many seeds, no fake/vacuous bugs, strict must_report matching, no stale binary (always rebuild fixture-runner). PR #120.
+- **le3.6 (RF2): JUnit XML** — malformed XML fixed (illegal control chars, vacuous CDATA). PR #119.
+- **le3.5 (RF1): auth guard** — token-guard every playtest method, no crash on missing resources, real screenshot sandbox. PR #118.
+- **Qa8.16**: ambiguity detection hardened (merge-key redaction, hand-built minimal Apps structured rejection).
+- **o0t**: Component-path validation changed (typos now reject at load for Component: paths).
+- **ml5**: hardening (deterministic entropy, single-threaded executor fixes).
 
 ### Fixed
-- **FX1: clean fixtures falsely report `frozen_world`/`dead_verb`** — four root causes: (1) the liveness window counted raw change ticks (dozens per frame) instead of frames — now windowed via per-frame start-tick snapshots in `PlaytestState`, with warmup history treated as live; (2) effect windows anchored on a post-reaction tick, counting the game's response as pre-action state — now anchored on the intent frame's start tick, and capped below the bot's inter-action interval (tps/2 windows overlapped neighboring intents, masking dead verbs); (3) fixture adapters tagged `Gameplay` in Startup before the game's spawn commands applied — now `Added<T>`-filtered Update systems; (4) `intent:wait` is a deliberate no-op — excluded from dead-verb tracking, and move verbs keyed per direction (`intent:move:left` etc.) so partial input wiring isolates. Liveness now also covers game-owned resources (Z6 `GameTypes` prefixes) — resource-only games (turn_based, regression_pair) were invisible to component scans. `stuck_after_intent` compares state changes strictly after the intent frame's start tick, not `last_alive_frame >= last_intent` (which counted pre-intent same-frame changes). Acceptance harness serialized (shared `runs/last` raced across parallel tests). Clean fixtures pass 6s chaos runs (meta-test `clean_fixtures_pass_long`); odd-frame mutations count as live (new unit test).
-
-### Added
-- **J1: quantitative robustness semantics (STL-style signed margins)** — `src/robustness.rs`: every invariant computes a signed distance to violation ρ (positive = satisfied by that margin) in `report.robustness`: `per_invariant {name: [min ρ, frame of min, normalized min]}` + `overall` (min of normalized mins; < 0 iff the run failed an invariant). Threshold, query-count, differential, max_delta_per_sec, expert-implication and bounds invariants all feed it. Optional invariant `scale` field (default max(|threshold|, 1.0); bounds use the half-width) normalizes units so large-unit invariants don't dominate. Boolean verdict == sign of ρ (debug_assert-enforced). Basis for falsification (J2/J3) and LLM feedback (M2).
-- **J1 re-review fixes (2026-10)** — corrected robustness semantics: (1) expert WHEN→REQUIRE implication now records ρ = `max(-ρ_W, ρ_R)` every frame — a false WHEN is vacuously satisfied (positive, no masking) and the WHEN threshold no longer fires standalone violations under the rule name; (2) `eventually` invariants track the best-so-far max (not the run min) — `RobustnessTracker::observe_max`; (3) text equals/ne invariants lift to ±1 robustness (unit scale); (4) seeded table/property tests prove boolean verdict ⇔ sign of ρ and overall < 0 iff fail.
+- **Sink fingerprint instability** — same error repeated 10 vs 1000 frames yielded different fingerprints; fixed by collapsing digit runs to single # and stripping (xN) suffix before fingerprinting.
+- **Ignore-severity errors dropped** — Suppressed errors now surface as `bevy_suppressed` informational rule.
+- **Half-installed handler after rejected run** — handler install moved after all load-time validation; rejected runs no longer leave a dangling handler.
+- **Golden path traversal** — scenario names with `..` or `/` previously escaped the golden dir; now sanitized.
+- **README doctest rot** — Usage snippet now compiles; env vars corrected; experimental features marked.
+- **docs/conventions.md drift** — member list corrected, version pinned to 0.20.0, run ID format clarified, golden path fixed, env var table added.
 
 ### Changed
-- **J0: RNG stream change** — bot randomness now flows through `ChoiceStream` (Lemire multiply-shift, unbiased on small bounds) instead of `next_rand()%n`. Seed N gives a different run than in 0.1; replaying `report.choices` reproduces runs exactly. `PlaytestState::rng`/`next_rand` removed.
+- **Documentation overhaul** — README doctests included in CI, AGENTS.md/CLAUDE.md filled with project-specific build/test commands and guidelines, CHANGELOG consolidated to Keep a Changelog format.
 
-### Added
-- **J0: ChoiceStream — record/replay bot random choices** — `src/choice.rs`: `ChoiceStream` resource (replay prefix + continuation `prng|zeros|reseed(u64)`, every draw recorded as `{frame, value, bound}`). Scenario `bot.choices` (replay prefix) and `bot.continuation`. Report `choices: Vec<Choice>` always populated. Substrate for J2 (mutation), J3 (Go-Explore), K2 (shrinking).
-- **I5: Action-effect oracle (actuator-agnostic) + per-action effect rates** — `src/effects.rs`: every audited action (intents via the audit log, Z3 raw actions) records a `PendingEffect`; after `effect_window_frames` (default tps/2) an effect = any gameplay-state change since the action's tick (I4 `changed_since`). Report gains `action_effect_rate: {key: {effective, total}}`. Rule `dead_verb` (Major): an action key with 0% effect over ≥10 samples. `overall_effect_rate()` feeds the Z1 vacuity guard.
-
-### Added
-- **Z6: Gameplay inference from the game's crate path** — `src/game_types.rs`: `GameTypes` (crate-prefix classification, `from_plugin::<P>()`, `.with_crate(...)`), `infer_gameplay_archetypes`, and sticky tagging that inserts the real `Gameplay` + `InferredGameplay` markers on entities whose archetype has ≥1 game-owned component (cameras/lights/windows/UI/observers excluded). Explicit `Gameplay` markers disable inference. Wired via `headless_app` (GameTypes insert) and an incremental `First`-set system. Tests in `tests/game_inference.rs` + lib tests.
-
-### Added
-- **I3: Typed Rust API** — oracles, goal predicates and bot policies as plain Bevy systems: `PlaytestAppExt::{add_oracle, add_goal_predicate, add_bot_policy}` registering into a `TypedRegistry`; `run_typed_oracles` in `PlaytestSet::Oracles`; scenario `oracles` selection (None = all, unknown names reject at load); planner `{"kind":"predicate","name":...}` goals; `BotType::Custom` + `bot.policy`. Tests in `tests/typed.rs` incl. minimization of typed-oracle failures. JSON DSL unchanged.
-
-### Added
-- **I2: Compiled invariants** — load-time component resolution (typos reject before any frame runs), archetype-level query counts via QueryBuilder + matched_archetypes (O(archetypes) vs O(entities)), pre-parsed ParsedPath for reflect fields, lazy component-id resolution for Startup-spawned components. New `src/compiled.rs` with `CompiledScenario` resource, `Accessor::Count` fast path, and `CompiledKind::QueryCount`. Tests: `unknown_component_rejected_at_load`, `count_is_archetype_level`, `lazy_registered_component_count_works`. Delta windows converted to VecDeque (eliminating O(n) remove(0)).
-
-### Added
-- New `raw_input` module (Z3): `RawActionQueue`, `ActiveKeyHolds`, `ActiveMouseHolds`, `VirtualGamepad` resources
-- `RawAction` enum variants: `Key`, `MouseButton`, `Click`, `MouseMove`, `Cursor`, `Wheel`, `GamepadButton`, `GamepadAxis`, `ClickEntity`, `Wait`
-- Systems `raw_input_preupdate_system` (keyboard/gamepad in PreUpdate) and `raw_input_update_system` (mouse/cursor/wheel in Update), wired into `PlaytestPlugin`
-- Optional `gamepad` crate feature (`bevy/gamepad`): lazily spawned virtual gamepad emitting `GamepadConnectionEvent`, `RawGamepadButtonChangedEvent`, `RawGamepadAxisChangedEvent`
+### Removed
+- **Obsolete docs** — `src/verify.rs` references removed from README (module tests inside `src/` now documented).
 - Integration tests in `tests/raw_input.rs`
 - Z11 version-to-version differential testing (golden trajectories): record_golden/check_golden with per-frame digests + periodic snapshots, Tolerance for float comparisons, digest-only vs readable diffs via TestApi, BEVY_SWARM_UPDATE_GOLDEN approval workflow. Integration tests in tests/golden.rs
 - Z18 autotest() integration: AutotestConfig (16 seeds × 20s chaos defaults, BEVY_SWARM_SEEDS/DURATION/THREADS env overrides), autotest(game_plugin, config) building on headless_app + run_matrix (parallel, fresh App per seed), AutotestReport {schema_version, contract_tier, harness_mode, scope, runs, failures, coverage, summary()} persisted to target/bevy_swarm/runs/autotest-<elapsed>/report.json. Integration tests in tests/autotest.rs

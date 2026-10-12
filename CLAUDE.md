@@ -61,18 +61,37 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+cargo build -p fixture-runner  # REQUIRED before acceptance tests
+cargo test -p bevy_swarm --lib # Unit tests
+cargo test -p bevy_swarm --test fx0_gate # Gate integrity tests
+cargo test --workspace --all-features # Full battery (end of bead)
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo fmt --check
 ```
+
+**TMPDIR note:** If you encounter temp-directory permission issues, set
+`export TMPDIR=/var/folders/zh/4b27878j7wz6dq22rh05qnz80000gn/T/opencode`.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+`bevy_swarm` is an in-process playtest harness for Bevy games: typed
+intent bots (chaos/replay/planner/pursuit) drive the game through
+`UserIntent` messages; oracle systems evaluate invariants each frame;
+the driver (`src/driver.rs`) pumps the schedule and collects a
+`PlaytestReport` with violations, fingerprints and metrics. Golden
+snapshots, determinism checks, seed sweeps and JUnit XML output are
+built on top. `fixtures/*` are zero-contract pure-Bevy games used by the
+acceptance suite (`tests/acceptance.rs`, run via `fixture-runner`).
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **Zero-contract fixtures:** `fixtures/*` have NO bevy_swarm dependency.
+- **Acceptance tests:** run `cargo build -p fixture-runner` first (stale
+  binary = misleading failures).
+- **Post-review process:** implement per bead, test, PR, green CI,
+  merge, close bead, `bd dolt push`.
+- **Autonomous implementation:** team-maintainer opt-in for the
+  overnight implementer (commit/PR/merge/close OK).
+- **Never tag/publish/release:** tagging, crates.io publishing, GitHub
+  releases are USER-ONLY actions.
