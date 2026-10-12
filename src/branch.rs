@@ -164,7 +164,10 @@ pub fn run_matrix(
                         report: PlaytestReport::scenario_error(&e.to_string()),
                     },
                 };
-                results.lock().unwrap().push((idx, outcome));
+                results
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push((idx, outcome));
             });
             handles.push(handle);
             if handles.len() >= max_parallel {
@@ -176,7 +179,11 @@ pub fn run_matrix(
         }
     });
 
-    let mut ordered: Vec<(usize, BranchOutcome)> = results.lock().unwrap().drain(..).collect();
+    let mut ordered: Vec<(usize, BranchOutcome)> = results
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain(..)
+        .collect();
     ordered.sort_by_key(|(idx, _)| *idx);
     Ok(BranchMatrixReport {
         outcomes: ordered.into_iter().map(|(_, o)| o).collect(),
