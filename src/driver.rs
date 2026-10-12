@@ -100,6 +100,9 @@ impl bevy::app::Plugin for PlaytestPlugin {
         crate::identity::install_identity(app);
         // I3: typed oracle/predicate/policy registry.
         app.init_resource::<crate::typed::TypedRegistry>();
+        // RF11: headless camera target_info — fill Camera.computed.target_info
+        // from the primary window so resolve_click_position can project world→viewport.
+        app.add_systems(bevy::app::PostStartup, headless_camera_target_info_system);
 
         // Every harness system is gated on a live scenario so the plugin
         // is safe to leave in a production App (or an App never driven
@@ -1525,6 +1528,31 @@ static INSTALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::Atomic
 
 pub fn panic_hook_install_count() -> usize {
     INSTALL_COUNT.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// RF11: fill `Camera.computed.target_info` from the primary window
+/// when bevy_render's camera_system is absent (headless runs with
+/// RenderPlugin disabled). Without target_info, pointer picking and
+/// `resolve_click_position` fail with NoViewportSize.
+pub(crate) fn headless_camera_target_info_system(
+    primary_window: Query<&bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+    mut cameras: Query<&mut bevy::camera::Camera>,
+) {
+    use bevy::camera::RenderTargetInfo;
+    let Some(window) = primary_window.iter().next() else {
+        return;
+    };
+    let info = RenderTargetInfo {
+        physical_size: window.physical_size(),
+        scale_factor: window.resolution.scale_factor(),
+    };
+    for mut camera in &mut cameras {
+        // Only fill when bevy_render's camera_system hasn't already
+        // (it sets target_info when RenderPlugin is present).
+        if camera.computed.target_info.is_none() {
+            camera.computed.target_info = Some(info.clone());
+        }
+    }
 }
 
 pub(crate) fn synthetic_keyboard_bot_system(
