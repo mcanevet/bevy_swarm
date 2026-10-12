@@ -477,12 +477,13 @@ fn fx8_click_entity_projects_to_viewport() {
     // PreUpdate (InputSystems).
     app.update();
 
-    // Verify that ButtonInput received a press (left click).
+    // Verify that ButtonInput received a just_pressed (ClickEntity is a
+    // momentary click: press then release next frame).
     assert!(
         app.world()
             .resource::<ButtonInput<bevy::input::mouse::MouseButton>>()
-            .pressed(bevy::input::mouse::MouseButton::Left),
-        "ClickEntity must press left mouse button"
+            .just_pressed(bevy::input::mouse::MouseButton::Left),
+        "ClickEntity must just-press left mouse button"
     );
 }
 

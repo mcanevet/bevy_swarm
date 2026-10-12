@@ -432,8 +432,12 @@ pub fn raw_input_preupdate_system(
 
 #[allow(clippy::too_many_arguments)]
 /// Handle ClickEntity actions in Update (after cursor moves, before mouse press).
+/// RF11: complex entity query supports both world-space entities
+/// (GlobalTransform) and UI nodes (ComputedNode + UiGlobalTransform).
+#[allow(clippy::type_complexity)]
 pub fn raw_input_click_entity_system(
     queue: ResMut<RawActionQueue>,
+    mut holds: ResMut<InputHolds>,
     mut mouse_button_events: MessageWriter<MouseButtonInput>,
     mut window_events: MessageWriter<WindowEvent>,
     mut cursor_events: Option<MessageWriter<CursorMoved>>,
@@ -449,9 +453,11 @@ pub fn raw_input_click_entity_system(
     mut commands: bevy::ecs::system::Commands,
     entities: bevy::ecs::system::Query<(
         Entity,
-        &GlobalTransform,
+        Option<&GlobalTransform>,
         Option<&Name>,
         Option<&crate::identity::StableId>,
+        Option<&bevy::ui::ComputedNode>,
+        Option<&bevy::ui::UiGlobalTransform>,
     )>,
     cameras: bevy::ecs::system::Query<(&Camera, &GlobalTransform)>,
 ) {
@@ -484,6 +490,10 @@ pub fn raw_input_click_entity_system(
                             true,
                             window_entity,
                         );
+                        // RF11: schedule the release so a second ClickEntity
+                        // registers a fresh just_pressed (and the button is
+                        // not stuck held at run end).
+                        holds.mouse.insert((frame, btn), frame + 1);
                         action_effects.record(&format!("raw:click_entity:{target:?}"), frame);
                         if let Some(log) = action_log.as_mut() {
                             log.entries.push(crate::contract::ActionEntry {
@@ -743,26 +753,43 @@ fn connect_virtual_gamepad(
 /// Resolve a ClickEntity target to a viewport (logical) position.
 /// Returns the screen position if the entity is visible through an
 /// active camera; otherwise an error describing why not.
+/// RF11: UI nodes are supported via ComputedNode + UiGlobalTransform
+/// (they have no GlobalTransform, so the world-space projection path
+/// can't find them); their center in logical pixels is used directly.
+#[allow(clippy::type_complexity)]
 fn resolve_click_position(
     entities: &bevy::ecs::system::Query<(
         Entity,
-        &GlobalTransform,
+        Option<&GlobalTransform>,
         Option<&Name>,
         Option<&crate::identity::StableId>,
+        Option<&bevy::ui::ComputedNode>,
+        Option<&bevy::ui::UiGlobalTransform>,
     )>,
     cameras: &bevy::ecs::system::Query<(&Camera, &GlobalTransform)>,
     target: &EntityRef,
 ) -> Result<bevy::math::Vec2, String> {
-    let (_, target_transform, _, _) = match target {
+    let (_, world_transform, _, _, computed_node, ui_transform) = match target {
         EntityRef::ByName(name) => entities
             .iter()
-            .find(|(_, _, n, _)| n.is_some_and(|n| n.as_ref() == name))
+            .find(|(_, _, n, _, _, _)| n.is_some_and(|n| n.as_ref() == name))
             .ok_or_else(|| format!("no entity with Name {name:?}"))?,
         EntityRef::ByStableId(sid) => entities
             .iter()
-            .find(|(_, _, _, s)| s.is_some_and(|s| s.0 == *sid))
+            .find(|(_, _, _, s, _, _)| s.is_some_and(|s| s.0 == *sid))
             .ok_or_else(|| format!("no entity with StableId {sid:?}"))?,
     };
+    // UI branch: node center in logical pixels (physical size scaled by
+    // the inverse scale factor, offset by the UiGlobalTransform
+    // translation which is in logical pixels).
+    if let (Some(node), Some(ui_t)) = (computed_node, ui_transform) {
+        let size_logical = node.size() * node.inverse_scale_factor;
+        let center = ui_t.affine().translation + size_logical / 2.0;
+        return Ok(center);
+    }
+    // World-space branch: project through the first active camera.
+    let target_transform = world_transform
+        .ok_or_else(|| "target has neither GlobalTransform nor UI components".to_string())?;
     let world_pos = target_transform.translation();
     let (camera, cam_transform) = cameras
         .iter()

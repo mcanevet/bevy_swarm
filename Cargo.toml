@@ -54,6 +54,8 @@ exclude = [
 getrandom04 = { package = "getrandom", version = "0.4", optional = true }
 bevy = { workspace = true, features = [
     "bevy_picking",
+    "ui_picking",
+    "sprite_picking",
     "bevy_window",
     "bevy_camera",
     "bevy_ui",
