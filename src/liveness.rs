@@ -160,7 +160,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     } else {
         // Turn-based: only require liveness AFTER an intent was consumed.
         if let Some(last_intent) = last_intent_frame {
-            let idle_since_intent = frame.saturating_sub(last_intent);
+            // (le3.8: idle_since_intent intentionally unused — see below)
             // FX1: "alive after the intent" must mean state CHANGED
             // after the intent's frame STARTED (same-frame reactions
             // count — bots run in PreUpdate, games react in Update).
@@ -191,9 +191,14 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
                     state.stuck_after_intent_quanta += quarter;
                 }
             }
+            // le3.8 (RF4): remove idle_since_intent >= quarter check.
+            // A bot that retries every 15 frames defeats the old guard
+            // — the softlock is invisible because idle_since_intent
+            // never accumulates. The STICKY STREAK (stuck_quanta) is
+            // the correct measure: if no reaction occurs for timeout_s
+            // despite intents arriving, the game is softlocked.
             let stuck_quanta = world.resource::<PlaytestState>().stuck_after_intent_quanta;
-            if !alive_after_intent && stuck_quanta >= timeout_frames && idle_since_intent >= quarter
-            {
+            if !alive_after_intent && stuck_quanta >= timeout_frames {
                 world.resource_mut::<Violations>().report(
                     crate::rules::Rule::StuckAfterIntent,
                     "world",

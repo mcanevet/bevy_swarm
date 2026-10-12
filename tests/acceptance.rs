@@ -645,12 +645,9 @@ fn clean_fixtures_pass_long() {
         fixtures
     );
     for fixture in &fixtures {
-        // Spawner is self-limiting by design (spawn 10, then idle) —
-        // a clean quiescent real-time game. Its acceptance expectation
-        // declares liveness mode off; mirror that here. (FX1 re-review:
-        // the harness adapter no longer lies with a TurnBased tag.)
+        // le3.8 (RF4): spawner uses IdlePhase watch; others real_time.
         let liveness = if fixture == "spawner" {
-            serde_json::json!({"mode": "off"})
+            serde_json::json!({"mode": "real_time", "watch": ["IdlePhase"]})
         } else {
             serde_json::json!({"mode": "real_time"})
         };
@@ -685,9 +682,8 @@ fn clean_fixtures_pass_long() {
 
 /// FX1 re-review: a swallow-everything softlock (bug_softlock_turn_4)
 /// must be detected EVEN WHILE THE BOT KEEPS RETRYING — the stuck
-/// streak counts time since the last successful reaction, not since
-/// the last attempt. With timeout 2.0s and a default-rate bot, the
-/// old code never fired (idle resets on every retry).
+/// le3.8 (RF4): the sticky-streak-only fix (idle_since_intent check
+/// removed) ensures detection even with aggressive/fast bots.
 #[test]
 fn softlock_detected_while_bot_retries() {
     for timeout_s in [0.5f64, 2.0] {
@@ -713,6 +709,93 @@ fn softlock_detected_while_bot_retries() {
             timeout_s
         );
     }
+}
+
+/// le3.8 (RF4): aggressive bot at 30 Hz must still detect softlock.
+/// The old guard (idle_since_intent >= quarter) was defeated by any
+/// bot retrying at least every 15 frames.
+#[test]
+fn softlock_aggressive_30hz_detected() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 42, "persona": "aggressive", "input_rate_hz": 30},
+        "duration_s": 10.0,
+        "invariants": [],
+        "setup": {},
+        "liveness": {"mode": "after_intent", "timeout_s": 2.0}
+    })
+    .to_string();
+    let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+    let stuck = report["violations"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("stuck_after_intent"))
+        })
+        .unwrap_or(false);
+    assert!(
+        stuck,
+        "bug_softlock_turn_4 not detected with aggressive bot at 30Hz"
+    );
+}
+
+/// le3.8 (RF4): 32-seed sweep — all seeds must detect the softlock.
+#[test]
+fn softlock_sweep_seeds_1_to_32() {
+    let mut misses = Vec::new();
+    for seed in 1..=32 {
+        let scenario = serde_json::json!({
+            "bot": {"type": "chaos", "seed": seed},
+            "duration_s": 10.0,
+            "invariants": [],
+            "setup": {},
+            "liveness": {"mode": "after_intent", "timeout_s": 2.0}
+        })
+        .to_string();
+        let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+        let stuck = report["violations"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("stuck_after_intent"))
+            })
+            .unwrap_or(false);
+        if !stuck {
+            misses.push(seed);
+        }
+    }
+    assert!(
+        misses.is_empty(),
+        "softlock missed seeds {:?} at 10s duration, 2s timeout",
+        misses
+    );
+}
+
+/// le3.8 (RF4): frozen_world must still fire for liveness timeouts
+/// beyond the old 600-frame ring capacity (10s @ 60 TPS). The ring
+/// cap now scales with timeout_s — spinner bug_frozen with a 12s
+/// timeout over 30s must be detected (it silently passed before).
+#[test]
+fn frozen_world_fires_for_long_timeouts() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 30.0,
+        "invariants": [],
+        "setup": {},
+        "liveness": {"mode": "real_time", "timeout_s": 12.0}
+    })
+    .to_string();
+    let report = run_case_with_scenario("spinner", "bug_frozen", &scenario);
+    let frozen = report["violations"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("frozen_world"))
+        })
+        .unwrap_or(false);
+    assert!(
+        frozen,
+        "bug_frozen with 12s timeout not detected — ring buffer cap regression?"
+    );
 }
 
 /// FX1 re-review: Wait intents must NOT arm the stuck_after_intent

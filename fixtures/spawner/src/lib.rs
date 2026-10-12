@@ -12,11 +12,26 @@ use bevy::prelude::*;
 #[reflect(Component)]
 pub struct LeakyEntity;
 
-fn spawn_clean_system(mut commands: Commands, mut frame: Local<u64>) {
+/// Idle-phase resource: a real "attract mode" — even a quiescent,
+/// self-limiting game normally animates (menus breathe, sprites
+/// pulse). le3.8 (RF4): the old liveness:off exemption is gone; the
+/// clean spawner stays live through this genuine gameplay state.
+#[derive(Resource, Reflect, Default)]
+#[reflect(Resource)]
+pub struct IdlePhase(pub f32);
+
+fn spawn_clean_system(
+    mut commands: Commands,
+    mut frame: Local<u64>,
+    mut phase: ResMut<IdlePhase>,
+    time: Res<Time>,
+) {
     if *frame < 10 {
         commands.spawn((LeakyEntity, Transform::default()));
     }
     *frame += 1;
+    // Genuine idle animation: the spawn indicator pulses.
+    phase.0 = (time.elapsed_secs() * 2.0).sin();
 }
 
 fn spawn_buggy_system(mut commands: Commands) {
@@ -34,6 +49,8 @@ impl Plugin for SpawnerGamePlugin {
 
         let registry = app.world_mut().resource_mut::<AppTypeRegistry>();
         registry.0.write().register::<LeakyEntity>();
+        registry.0.write().register::<IdlePhase>();
+        app.init_resource::<IdlePhase>();
 
         if buggy {
             app.add_systems(Update, spawn_buggy_system);
