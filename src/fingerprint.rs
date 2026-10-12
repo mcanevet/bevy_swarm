@@ -115,6 +115,12 @@ impl Normalizer {
     fn redact_merge_keys(&self, raw: &str) -> String {
         let mut out = raw.to_string();
         for key in &self.merge_keys {
+            // le3.13 (RF14): an EMPTY merge key matches at the cursor
+            // on every pass, inserting markers forever (hang + OOM).
+            // Skip empty keys outright.
+            if key.is_empty() {
+                continue;
+            }
             // qa8.16: redact EVERY occurrence of the merge key, not
             // just the first ("entity:12v3 leaked entity:45v7" used
             // to keep the second id → split fingerprints). Scan with
@@ -300,6 +306,20 @@ fn is_entity_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le313_empty_merge_key_ignored() {
+        // le3.13 (RF14): an empty merge key must be skipped —
+        // previously caused infinite loop + OOM.
+        let n = Normalizer {
+            merge_keys: vec!["".to_string(), "real_key".to_string()],
+            ..Default::default()
+        };
+        let result = n.redact_merge_keys("some text with whitespace");
+        assert!(result.contains("some text"));
+        assert!(!result.contains("[merged:]")); // no marker for empty key
+        assert!(!result.contains("[merged:real_key]")); // real_key not present
+    }
 
     #[test]
     fn fx7_normalize_table_driven() {

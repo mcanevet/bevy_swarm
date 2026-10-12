@@ -123,6 +123,60 @@ fn compile_accessor(world: &mut World, inv: &Invariant) -> Result<Option<Accesso
         return Ok(None);
     };
 
+    // le3.13 (RF14): Component: paths must be validated at load —
+    // typos must reject before any frame runs. Before #84 the old
+    // EntityField accessor did this; now we restore it explicitly.
+    if let Some(rest) = path.strip_prefix("Component:") {
+        // Parse "Type.field" or "Type#count" or aggregates.
+        let (type_path, selector) =
+            rest.split_once(['.', '#'])
+                .ok_or_else(|| ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "missing '.' or '#' in Component:<Type>.<selector>".into(),
+                })?;
+        // If the separator was '#', the selector must be recombined
+        // with it (aggregate form: count/sum/min/max).
+        let selector_owned;
+        let selector = if !rest.contains('.') && rest.contains('#') {
+            selector_owned = format!("#{}", selector);
+            selector_owned.as_str()
+        } else {
+            selector
+        };
+        // Resolve type_id (reject unregistered types).
+        let registry = world.resource::<AppTypeRegistry>().0.read();
+        let components = world.components();
+        let Some(_comp_id) = resolve_type_id(type_path, &registry, components)? else {
+            return Err(ScenarioError::InvalidComponent {
+                name: type_path.into(),
+                reason: "type not registered".into(),
+            });
+        };
+        drop(registry);
+        // Validate selector: #count, #sum, #min, #max, or a field path.
+        if selector.starts_with('#') {
+            // Aggregate form — accept any valid aggregate keyword.
+            match selector {
+                "#count" | "#sum" | "#min" | "#max" => (),
+                other => {
+                    return Err(ScenarioError::InvalidComponent {
+                        name: path.to_string(),
+                        reason: format!("unknown aggregate '{}'", other),
+                    });
+                }
+            }
+        } else {
+            // Field path — parse it (reject malformed).
+            ParsedPath::parse(selector).map_err(|e| ScenarioError::InvalidComponent {
+                name: path.to_string(),
+                reason: format!("invalid field path: {:?}", e),
+            })?;
+        }
+        // Component: paths are not yet implemented as Accessor variants
+        // — return None but VALIDATE (the test confirms rejection at load).
+        return Ok(None);
+    }
+
     // Resource field.
     if let Some(rest) = path.strip_prefix("Resource:") {
         let (type_path, field) =
@@ -369,6 +423,26 @@ mod tests {
         // Spawn at least one entity with Spawned component
         app.world_mut().spawn(Spawned);
         std::mem::take(app.world_mut())
+    }
+
+    #[test]
+    fn le313_component_path_typo_rejected_at_load() {
+        // le3.13 (RF14): Component: paths must be validated at load.
+        let mut world = make_world();
+        // Typo'd type name.
+        let inv: Invariant =
+            serde_json::from_str(r#"{"name":"test","rule":"custom","path":"Component:Gamepla.x"}"#)
+                .unwrap();
+        let err = compile_accessor(&mut world, &inv)
+            .err()
+            .expect("typo must reject");
+        assert!(matches!(err, ScenarioError::InvalidComponent { .. }));
+        // Aggregate forms accepted.
+        let inv_count: Invariant = serde_json::from_str(
+            r#"{"name":"test","rule":"custom","path":"Component:Spawned#count"}"#,
+        )
+        .unwrap();
+        assert!(compile_accessor(&mut world, &inv_count).is_ok());
     }
 
     #[test]
