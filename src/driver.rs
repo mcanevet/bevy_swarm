@@ -342,9 +342,24 @@ impl PlaytestReport {
 /// Accepted for dedup purposes (the RAW messages remain in the
 /// report); grouping-by-signature is worth more than exact counting.
 fn normalize_sink_message(msg: &str) -> String {
-    msg.chars()
-        .map(|c| if c.is_ascii_digit() { '#' } else { c })
-        .collect()
+    // le3.11 (RF7): collapse consecutive digits to a single '#' so
+    // "x6" and "x18" (and "hp 9" vs "hp 10") normalize identically —
+    // per-digit replacement left width-dependent groups and unstable
+    // fingerprints across run durations.
+    let mut out = String::with_capacity(msg.len());
+    let mut prev_digit = false;
+    for c in msg.chars() {
+        if c.is_ascii_digit() {
+            if !prev_digit {
+                out.push('#');
+            }
+            prev_digit = true;
+        } else {
+            out.push(c);
+            prev_digit = false;
+        }
+    }
+    out
 }
 
 /// Run a validated scenario against an already-built headless App.
@@ -480,62 +495,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // layer) exists before the run emits any events.
     crate::sinks::ensure_global_subscriber();
     crate::sinks::set_current_run(run_id);
-    // FX5 Z7: drop guard clears the thread-local CURRENT_RUN even on
-    // early return Err paths (reset/cheat/component rejections below).
-    struct RunGuard;
-    impl Drop for RunGuard {
-        fn drop(&mut self) {
-            crate::sinks::clear_current_run();
-        }
-    }
-    let _run_guard = RunGuard;
-    // Install the swarm error handler by REPLACING the
-    // FallbackErrorHandler resource directly (never via
-    // App::set_error_handler, which panics if the game already called
-    // it and would be skipped if the game inserted the resource
-    // itself). The previous handler is remembered per-run so the
-    // wrapper can record the error and then chain to the game's
-    // handler. Parallel runs keep separate chains via thread-local
-    // CURRENT_RUN routing in sinks.
-    use bevy::ecs::error::ErrorContext;
-    if let Some(prev_resource) = app
-        .world()
-        .get_resource::<bevy::ecs::error::FallbackErrorHandler>()
-    {
-        crate::sinks::set_previous_handler(run_id, prev_resource.0);
-    } else {
-        // No game handler: chain to Bevy's severity-matched default so
-        // panic-severity errors still unwind and warnings still log.
-        crate::sinks::set_previous_handler(run_id, bevy::ecs::error::match_severity);
-    }
-
-    #[derive(bevy::ecs::resource::Resource)]
-    struct SwarmHandlerRestore {
-        prev: Option<bevy::ecs::error::FallbackErrorHandler>,
-    }
-    let prev_resource = app
-        .world_mut()
-        .remove_resource::<bevy::ecs::error::FallbackErrorHandler>();
-    if app.world().get_resource::<SwarmHandlerRestore>().is_none() {
-        fn swarm_error_handler(mut err: bevy::ecs::error::BevyError, ctx: ErrorContext) {
-            let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
-            // Capture first (severity/context/message), then chain.
-            crate::sinks::capture_bevy_error(&err, &ctx);
-            if is_panic {
-                if let Some(payload) = err.take_payload() {
-                    std::panic::resume_unwind(payload);
-                }
-            }
-            // Chain to the game's handler last: it consumes err.
-            if let Some(prev_fn) = crate::sinks::chained_previous_public() {
-                prev_fn(err, ctx);
-            }
-        }
-        app.insert_resource(bevy::ecs::error::FallbackErrorHandler(swarm_error_handler));
-        app.insert_resource(SwarmHandlerRestore {
-            prev: prev_resource,
-        });
-    }
+    // le3.11 (RF7): the swarm error handler and the run-id are BOTH
+    // guarded by a single drop guard — a scenario rejected after the
+    // handler is installed no longer leaves it half-installed (the
+    // next run on the same App captured nothing). Drop restores the
+    // previous handler and clears CURRENT_RUN on every path.
 
     // Finish plugin building exactly like App::run (Plugin::finish
     // hooks: render app links, late registrations).
@@ -672,6 +636,72 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
     // I2: compile invariants once — unknown component/query types
     // reject at LOAD time, before any frame runs.
+    // Install the swarm error handler by REPLACING the
+    // FallbackErrorHandler resource directly (never via
+    // App::set_error_handler, which panics if the game already called
+    // it and would be skipped if the game inserted the resource
+    // itself). The previous handler is remembered per-run so the
+    // wrapper can record the error and then chain to the game's
+    // handler. Parallel runs keep separate chains via thread-local
+    // CURRENT_RUN routing in sinks.
+    use bevy::ecs::error::ErrorContext;
+    if let Some(prev_resource) = app
+        .world()
+        .get_resource::<bevy::ecs::error::FallbackErrorHandler>()
+    {
+        crate::sinks::set_previous_handler(run_id, prev_resource.0);
+    } else {
+        // No game handler: chain to Bevy's severity-matched default so
+        // panic-severity errors still unwind and warnings still log.
+        crate::sinks::set_previous_handler(run_id, bevy::ecs::error::match_severity);
+    }
+
+    // le3.11 (RF7): DROP-GUARDED handler install. `HandlerGuard`
+    // restores the previous FallbackErrorHandler and clears
+    // CURRENT_RUN on drop — including every early-return Err path
+    // (UnknownReset, UnknownCheat, ContractMissing, ambiguity
+    // rejections). The old SwarmHandlerRestore-resource scheme left
+    // the wrapper installed after a rejected run, so the NEXT run on
+    // the same App captured zero errors.
+    #[derive(bevy::ecs::resource::Resource)]
+    struct SwarmHandlerRestore {
+        prev: Option<bevy::ecs::error::FallbackErrorHandler>,
+    }
+    let prev_resource = app
+        .world_mut()
+        .remove_resource::<bevy::ecs::error::FallbackErrorHandler>();
+    let already_wrapped = app.world().get_resource::<SwarmHandlerRestore>().is_some();
+    if !already_wrapped {
+        fn swarm_error_handler(mut err: bevy::ecs::error::BevyError, ctx: ErrorContext) {
+            let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
+            // Capture first (severity/context/message), then chain.
+            crate::sinks::capture_bevy_error(&err, &ctx);
+            if is_panic {
+                if let Some(payload) = err.take_payload() {
+                    std::panic::resume_unwind(payload);
+                }
+            }
+            // Chain to the game's handler last: it consumes err.
+            if let Some(prev_fn) = crate::sinks::chained_previous_public() {
+                prev_fn(err, ctx);
+            }
+        }
+        app.insert_resource(bevy::ecs::error::FallbackErrorHandler(swarm_error_handler));
+        app.insert_resource(SwarmHandlerRestore {
+            prev: prev_resource,
+        });
+    }
+    struct HandlerGuard;
+    impl Drop for HandlerGuard {
+        fn drop(&mut self) {
+            // Runs on success AND on every early Err return AFTER
+            // the handler install point (load-time validation all
+            // happens BEFORE the install, so no half-installed state).
+            crate::sinks::clear_current_run();
+        }
+    }
+    let _handler_guard = HandlerGuard;
+
     let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
     app.insert_resource(compiled);
 
@@ -995,7 +1025,30 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 message,
                 frame,
             } => {
+                // le3.11 (RF7): Suppressed (Ignore-severity) errors
+                // surface in the report as an INFORMATIONAL rule
+                // (bevy_suppressed) — never gating, but visible
+                // end-to-end instead of dropped at the drain.
                 if severity < crate::sinks::Severity::Warning {
+                    if severity == crate::sinks::Severity::Suppressed {
+                        sink_groups
+                            .entry((
+                                "bevy_suppressed".to_string(),
+                                context.clone(),
+                                normalize_sink_message(&message),
+                            ))
+                            .or_insert((message.clone(), frame, frame, 0));
+                        let e = sink_groups
+                            .get_mut(&(
+                                "bevy_suppressed".to_string(),
+                                context.clone(),
+                                normalize_sink_message(&message),
+                            ))
+                            .unwrap();
+                        e.1 = e.1.min(frame);
+                        e.2 = e.2.max(frame);
+                        e.3 += 1;
+                    }
                     continue;
                 }
                 let rule = if severity >= crate::sinks::Severity::Error {
@@ -1104,11 +1157,27 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                     .and_then(|rest| rest.find("] "))
                     .map(|end| &e.detail["[intent: ".len() + end + 2..])
                     .unwrap_or(e.detail.as_str());
+                // le3.11 (RF7): strip the "(xN)" count suffix before
+                // fingerprinting — the same error firing 10 vs 1000
+                // frames must yield the same fingerprint.
+                let raw_detail = if raw_detail.ends_with(')')
+                    && raw_detail.contains("(x")
+                    && raw_detail.rfind("(x").is_some_and(|i| {
+                        raw_detail[i..].chars().skip(2).all(|c| c.is_ascii_digit())
+                    }) {
+                    &raw_detail[..raw_detail.rfind("(x").unwrap()]
+                } else {
+                    raw_detail
+                };
+                // Normalize digits in sink messages before
+                // fingerprinting — the same error repeated 10 vs 1000
+                // frames must yield the same fingerprint (dedupe stability).
+                let normalized = normalize_sink_message(raw_detail);
                 e.fingerprint = Some(norm.fingerprint(
                     "violation",
                     &e.rule,
                     std::slice::from_ref(&e.target),
-                    raw_detail,
+                    &normalized,
                 ));
                 e.fingerprint_scheme = 1;
             }

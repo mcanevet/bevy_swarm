@@ -122,6 +122,15 @@ static SINK: std::sync::LazyLock<Mutex<HashMap<RunId, Vec<Captured>>>> =
 /// Safe to call repeatedly; installs once. If another subscriber was
 /// already set (e.g. the game's own LogPlugin beat us to it), this is a
 /// no-op — the allow-list in the driver tolerates that message.
+/// le3.11 (RF7): LogPlugin::custom_layer hook — installs the capture
+/// layer into the game's own LogPlugin subscriber. With this hook on
+/// headless_app, log capture works even when the harness runs
+/// in-process: the CaptureLayer rides on top of LogPlugin's own
+/// subscriber rather than racing `set_global_default`.
+pub fn log_custom_layer(_app: &mut bevy::prelude::App) -> Option<bevy::log::BoxedLayer> {
+    Some(Box::new(CaptureLayer))
+}
+
 pub fn ensure_global_subscriber() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| {
@@ -135,7 +144,9 @@ pub fn ensure_global_subscriber() {
 }
 
 /// Tracing layer capturing WARN/ERROR events into the current run.
-struct CaptureLayer;
+/// le3.11 (RF7): public so headless_app can install it via
+/// LogPlugin::custom_layer.
+pub struct CaptureLayer;
 
 impl<S> tracing_subscriber::Layer<S> for CaptureLayer
 where

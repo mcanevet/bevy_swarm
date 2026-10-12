@@ -50,12 +50,14 @@ impl Rule {
                 | Rule::DeadWidget
                 | Rule::PerfBudgetExceeded
                 | Rule::EntropyUnattributedDraws
+                | Rule::BevySuppressed
         )
     }
 }
 
 declare_rules! {
     FrozenWorld => "frozen_world",
+    BevySuppressed => "bevy_suppressed",
     NodesInBounds => "nodes_in_bounds",
     FiniteTransforms => "finite_transforms",
     FrameTimeAnomaly => "frame_time_anomaly",

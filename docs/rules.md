@@ -10,6 +10,7 @@ Expectation files (X2) reference only these names.
 | `FINITE_TRANSFORMS` | `finite_transforms` | determinism |
 | `FRAME_TIME_ANOMALY` | `frame_time_anomaly` | informational |
 | `FRAME_TIME_P99_BELOW` | `frame_time_p99_below` | informational |
+| `BEVY_SUPPRESSED` | `bevy_suppressed` | informational |
 | `FPS_FLOOR` | `fps_floor` | informational |
 | `METAMORPHIC_TICK_RATE` | `metamorphic_tick_rate` | determinism |
 | `AGGREGATE_CONSERVATION` | `aggregate_conservation` | determinism |

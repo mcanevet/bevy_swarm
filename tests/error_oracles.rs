@@ -285,10 +285,13 @@ fn sink_events_dedupe_grouped() {
         Err(bevy::ecs::error::BevyError::warning("repeat-offender-a"))
     });
     let rep = run_scenario(&mut app, &scenario_json()).unwrap();
+    // le3.11: match on the RULE, not the raw text — the game's chained
+    // default handler also logs the error (log_warn entry legitimately
+    // contains the same message under the agent feature).
     let offenders: Vec<_> = rep
         .violations
         .iter()
-        .filter(|v| v.detail.contains("repeat-offender-a"))
+        .filter(|v| v.rule == "bevy_warning" && v.detail.contains("repeat-offender-a"))
         .collect();
     assert_eq!(
         offenders.len(),
@@ -379,4 +382,161 @@ fn fps_floor_reports_informational() {
         );
         assert!(v.fingerprint.is_none());
     }
+}
+
+/// le3.11 (RF7): log capture works with the game's own LogPlugin
+/// present (headless_app installs the capture layer via
+/// LogPlugin::custom_layer — no racing set_global_default).
+#[test]
+fn le311_log_capture_with_game_logplugin() {
+    use bevy_swarm::headless::headless_app;
+    // A trivial game plugin that logs an error every frame.
+    #[derive(Clone, Default)]
+    struct NoisyGame;
+    impl bevy::prelude::Plugin for NoisyGame {
+        fn build(&self, app: &mut bevy::prelude::App) {
+            app.add_systems(bevy::prelude::Update, || {
+                bevy::log::error!("le311 boom");
+            });
+        }
+    }
+    let sc: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    let build = headless_app(NoisyGame);
+    let mut app = build();
+    let rep = run_scenario(&mut app, &sc).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "log_error"),
+        "log_error must fire with LogPlugin present; got {:?}",
+        rep.violations
+            .iter()
+            .map(|v| v.rule.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// le3.11 (RF7): the same sink error over different durations yields
+/// the SAME fingerprint (digits normalized, count stripped).
+#[test]
+fn le311_sink_fingerprint_stable_across_durations() {
+    #[derive(Clone, Default)]
+    struct NoisyGame;
+    impl bevy::prelude::Plugin for NoisyGame {
+        fn build(&self, app: &mut bevy::prelude::App) {
+            app.add_systems(bevy::prelude::Update, || {
+                bevy::log::error!("hp went to 9 at tick");
+            });
+        }
+    }
+    let mut fps = Vec::new();
+    for dur in [0.1f64, 0.3] {
+        let sc: Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":{dur},"invariants":[]}}"#
+        ))
+        .unwrap();
+        let build = bevy_swarm::headless::headless_app(NoisyGame);
+        let mut app = build();
+        let rep = run_scenario(&mut app, &sc).unwrap();
+        let entry = rep
+            .violations
+            .iter()
+            .find(|v| v.rule == "log_error")
+            .expect("log_error must fire");
+        fps.push(entry.fingerprint.clone());
+    }
+    assert_eq!(
+        fps[0], fps[1],
+        "same error at different durations must share a fingerprint"
+    );
+}
+
+/// le3.11 (RF7): Ignore-severity (Suppressed) errors surface in the
+/// report under the informational bevy_suppressed rule.
+#[test]
+fn le311_suppressed_errors_surface_in_report() {
+    #[derive(Clone, Default)]
+    struct SuppressingGame;
+    impl bevy::prelude::Plugin for SuppressingGame {
+        fn build(&self, app: &mut bevy::prelude::App) {
+            app.insert_resource(bevy::ecs::error::FallbackErrorHandler(
+                |_err: bevy::ecs::error::BevyError, _ctx: bevy::ecs::error::ErrorContext| {},
+            ));
+            app.add_systems(bevy::prelude::Update, || {
+                #[derive(Debug)]
+                struct Silenced;
+                impl std::fmt::Display for Silenced {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(f, "silenced-e7")
+                    }
+                }
+                impl std::error::Error for Silenced {}
+                // Returned from the system so Bevy routes it through
+                // the FallbackErrorHandler chain (swarm wrapper first).
+                fn suppressed() -> Result<(), bevy::ecs::error::BevyError> {
+                    Err(bevy::ecs::error::BevyError::new(
+                        bevy::ecs::error::Severity::Ignore,
+                        Silenced,
+                    ))
+                }
+                suppressed()
+            });
+        }
+    }
+    let sc: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    let build = bevy_swarm::headless::headless_app(SuppressingGame);
+    let mut app = build();
+    let rep = run_scenario(&mut app, &sc).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "bevy_suppressed"),
+        "suppressed errors must surface as bevy_suppressed; got {:?}",
+        rep.violations
+            .iter()
+            .map(|v| v.rule.as_str())
+            .collect::<Vec<_>>()
+    );
+    // Informational: does not gate.
+    assert_eq!(rep.status, PlaytestStatus::Pass);
+}
+
+/// le3.11 (RF7): after a REJECTED scenario, the next run on the same
+/// App still captures errors (no half-installed handler).
+#[test]
+fn le311_reuse_after_rejected_run() {
+    #[derive(Clone, Default)]
+    struct NoisyGame;
+    impl bevy::prelude::Plugin for NoisyGame {
+        fn build(&self, app: &mut bevy::prelude::App) {
+            app.add_systems(bevy::prelude::Update, || {
+                bevy::log::error!("le311 still-broken");
+            });
+        }
+    }
+    let build = bevy_swarm::headless::headless_app(NoisyGame);
+    let mut app = build();
+    // Rejected: unknown reset kind.
+    let bad: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.05,"invariants":[],"setup":{"resets":[{"kind":"nope"}]}}"#,
+    )
+    .unwrap();
+    let err = run_scenario(&mut app, &bad);
+    assert!(err.is_err(), "unknown reset must be rejected");
+    // Valid run: errors must still be captured.
+    let good: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut app, &good).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "log_error"),
+        "post-rejection run must still capture log errors; got {:?}",
+        rep.violations
+            .iter()
+            .map(|v| v.rule.as_str())
+            .collect::<Vec<_>>()
+    );
 }
