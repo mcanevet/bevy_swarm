@@ -448,11 +448,16 @@ thread_local! {
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 
-    // Z14: enter deterministic entropy run (spawn a fresh thread if feature enabled).
+    // Z14: enter deterministic entropy run. RF10: SKIP the re-enter
+    // when InProcess already entered on this thread — re-entering
+    // resets the stream to its start, making plugin-build draws and
+    // the first run-time draws identical (UUID collisions).
     #[cfg(feature = "deterministic-entropy")]
     {
         crate::entropy::reset_fallback_counter();
-        crate::entropy::enter_run(scenario.bot.seed);
+        if !crate::entropy::in_deterministic_run() {
+            crate::entropy::enter_run(scenario.bot.seed);
+        }
     }
     // FX3: Drop guard ensures exit_run runs even on early returns/panics.
     #[cfg(feature = "deterministic-entropy")]
@@ -1408,7 +1413,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 /// Callers with an app factory (InProcess runner, fixture-runner)
 /// should call this AFTER `run_scenario` when the flag is set.
 pub fn check_scenario_determinism(
-    app_builder: impl Fn() -> App + Sync,
+    app_builder: impl Fn() -> App + Send + Sync,
     scenario: &Scenario,
     base: PlaytestReport,
 ) -> PlaytestReport {

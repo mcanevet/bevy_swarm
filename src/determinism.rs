@@ -334,7 +334,7 @@ pub(crate) fn compare_two_runs_digests(
 /// explain WHICH fields diverged (reporting the earliest divergence
 /// found in the traced pair, falling back to the hash-mismatch frame).
 pub fn check_determinism(
-    app_builder: impl Fn() -> App,
+    app_builder: impl Fn() -> App + Send + Sync,
     scenario: &Scenario,
     runs: usize,
 ) -> Result<DeterminismReport, ScenarioError> {
@@ -343,14 +343,43 @@ pub fn check_determinism(
     let mut mismatch_frame: Option<u64> = None;
 
     for _ in 0..runs {
-        let mut app = app_builder();
-        app.insert_resource(StateTrace {
-            with_snapshots: false,
-            stop_after: None,
-            digests: vec![],
-        });
-        let report = run_scenario(&mut app, scenario)?;
-        let digests = report.state_trace.unwrap_or_default();
+        // RF10: run each rerun on a FRESH thread with enter_run called
+        // before the builder — rand's ThreadRng is per-thread and
+        // cached, so reusing the calling thread carries state between
+        // reruns and reports false nondeterministic violations for
+        // games that use rand::rng().
+        #[cfg(feature = "deterministic-entropy")]
+        let digests = {
+            let scenario = &scenario;
+            let app_builder = &app_builder;
+            std::thread::scope(|s| {
+                s.spawn(move || {
+                    crate::entropy::enter_run(scenario.bot.seed);
+                    let mut app = app_builder();
+                    app.insert_resource(StateTrace {
+                        with_snapshots: false,
+                        stop_after: None,
+                        digests: vec![],
+                    });
+                    let report = run_scenario(&mut app, scenario)?;
+                    crate::entropy::exit_run();
+                    Ok(report.state_trace.unwrap_or_default())
+                })
+                .join()
+                .unwrap()
+            })?
+        };
+        #[cfg(not(feature = "deterministic-entropy"))]
+        let digests = {
+            let mut app = app_builder();
+            app.insert_resource(StateTrace {
+                with_snapshots: false,
+                stop_after: None,
+                digests: vec![],
+            });
+            let report = run_scenario(&mut app, scenario)?;
+            report.state_trace.unwrap_or_default()
+        };
         match &first_run {
             None => first_run = Some(digests),
             Some(baseline) => {
