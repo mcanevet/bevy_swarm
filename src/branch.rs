@@ -29,12 +29,12 @@ impl BranchOutcome {
         self.report.status == crate::enums::PlaytestStatus::Pass
     }
 
-    /// cj8.14 (E2): ended in a Fail status (JUnit <failure>).
+    /// cj8.14 (E2): ended in a Fail status (JUnit `<failure>`).
     pub fn is_fail(&self) -> bool {
         self.report.status == crate::enums::PlaytestStatus::Fail
     }
 
-    /// cj8.14 (E2): ended in a Crash status (JUnit <error>).
+    /// cj8.14 (E2): ended in a Crash status (JUnit `<error>`).
     pub fn is_crash(&self) -> bool {
         self.report.status == crate::enums::PlaytestStatus::Crash
     }

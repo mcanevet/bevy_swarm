@@ -237,7 +237,7 @@ pub struct PlaytestReport {
     /// FX12 (A1): simulated duration in seconds = frame_count / tps.
     pub simulated_duration_s: f64,
     /// cj8.14 (E2): wall-clock duration of the run loop, seconds.
-    /// Used by JUnit output for the <testcase time> attribute when
+    /// Used by JUnit output for the `<testcase time>` attribute when
     /// present (falls back to simulated time).
     pub wall_time_s: f64,
     /// Frames spent waiting for GameReady before the scenario began.

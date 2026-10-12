@@ -55,7 +55,7 @@ impl PlaytestReport {
             PlaytestStatus::Crash => {
                 let msg = self.error.as_deref().unwrap_or("crash");
                 out.push_str(&format!(
-                    "        <error message=\"{}\" type=\"crash\">{}\n        </error>\n",
+                    "        <error message=\"{}\" type=\"crash\">{}\n        `</error>`\n",
                     xml_escape(msg),
                     xml_escape(msg)
                 ));
@@ -81,7 +81,7 @@ impl PlaytestReport {
                     .map(|v| v.rule.clone())
                     .unwrap_or_else(|| "failure".to_string());
                 out.push_str(&format!(
-                    "        <failure message=\"{}\" type=\"{}\">\n{}        </failure>\n",
+                    "        <failure message=\"{}\" type=\"{}\">\n{}        `</failure>`\n",
                     xml_escape(&headline),
                     xml_escape(&ftype),
                     xml_escape(&body)
@@ -89,10 +89,10 @@ impl PlaytestReport {
             }
         }
         out.push_str(&format!(
-            "        <system-out>{}</system-out>\n",
+            "        `<system-out>`{}`</system-out>`\n",
             cdata_wrap(&json)
         ));
-        out.push_str("      </testcase>\n");
+        out.push_str("      `</testcase>`\n");
         out
     }
 }
@@ -114,7 +114,7 @@ impl BranchMatrixReport {
         let total_time: f64 = self.outcomes.iter().map(|o| o.report_time()).sum();
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        out.push_str("<testsuites>\n");
+        out.push_str("`<testsuites>`\n");
         out.push_str(&format!(
             "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"{}\" time=\"{:.3}\">\n",
             xml_escape(suite_name),
@@ -126,8 +126,8 @@ impl BranchMatrixReport {
         for o in &self.outcomes {
             out.push_str(&o.report.to_junit_testcase(&o.variant_name, suite_name));
         }
-        out.push_str("  </testsuite>\n");
-        out.push_str("</testsuites>\n");
+        out.push_str("  `</testsuite>`\n");
+        out.push_str("`</testsuites>`\n");
         out
     }
 }
@@ -173,7 +173,7 @@ mod tests_cj8_14 {
         assert!(tc.contains("<testcase name=\"pass-case\""));
         assert!(!tc.contains("<failure"), "{tc}");
         assert!(!tc.contains("<error"), "{tc}");
-        assert!(tc.contains("<system-out>"));
+        assert!(tc.contains("`<system-out>`"));
     }
 
     #[test]
@@ -240,6 +240,6 @@ mod tests_cj8_14 {
             doc.matches("</").count() + doc.matches("/>").count() + doc.matches("<?").count();
         assert!(opens >= closes, "rough balance: {opens} vs {closes}");
         assert_eq!(doc.matches("<testcase").count(), 2);
-        assert_eq!(doc.matches("</testcase>").count(), 2);
+        assert_eq!(doc.matches("`</testcase>`").count(), 2);
     }
 }

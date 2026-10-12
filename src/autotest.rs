@@ -185,7 +185,7 @@ pub struct MinimizedFailureSummary {
 
 impl AutotestReport {
     /// cj8.14 (E2): JUnit XML document for CI dashboards. One
-    /// <testcase> per seed run; failures/errors counted from statuses.
+    /// `<testcase>` per seed run; failures/errors counted from statuses.
     pub fn to_junit(&self, suite_name: &str) -> String {
         let esc = crate::junit::xml_escape;
         let tests = self.runs.len();
