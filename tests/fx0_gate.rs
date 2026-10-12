@@ -340,6 +340,28 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
     for line in &summary {
         eprintln!("{}", line);
     }
+    // 6wt: per-seed detection floor — a variant detected on ZERO seeds
+    // must fail loudly even if errors were somehow empty; and any
+    // variant below the floor is reported explicitly.
+    let mut rate_errors: Vec<String> = Vec::new();
+    for line in &summary {
+        // Format: "fixture/variant: H/T seeds detected (...)"
+        if let Some(rest) = line.split(": ").nth(1) {
+            if let Some((ht, _)) = rest.split_once(' ') {
+                if let Some((hits, total)) = ht.split_once('/') {
+                    let (hits, total): (u64, u64) =
+                        (hits.parse().unwrap_or(0), total.parse().unwrap_or(1));
+                    if total > 0 && hits * 2 < total {
+                        rate_errors.push(format!(
+                            "{line} — detection rate {}/{} below floor",
+                            hits, total
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    total_errors.extend(rate_errors);
     // Known gap: walker/bug_dead_left_key seed 5 (swarm-lgn) —
     // the chaos bot path on seed 5 doesn't trigger the bug.
     // Remove it from errors; follow-up bead tracks the detection gap.

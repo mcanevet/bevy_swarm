@@ -121,6 +121,12 @@ impl Violations {
         "perf_budget_exceeded",
         "entropy_unattributed_draws",
     ];
+
+    // NOTE: INFORMATIONAL_RULES intentionally lists rules that are NOT
+    // declared in declare_rules! (they're tracked as metadata only,
+    // excluded from fingerprint gating). The comment in 6wt suggested
+    // checking existence, but that's incorrect — these rules exist
+    // solely in this list.
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +434,7 @@ impl PlaytestState {
     /// driving the harness manually (e.g. calibration runs).
     pub fn new(tps: u64, _seed: u64) -> Self {
         // seed moved into ChoiceStream (J0); kept for API compat.
+
         // b2e.2: tps is CLAMPED to >= 1 (documented): tps=0 panicked
         // bot-system division paths even though elapsed_s defends
         // with tps.max(1). Loud-not-fatal: a degenerate config still

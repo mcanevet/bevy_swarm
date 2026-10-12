@@ -450,6 +450,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         std::panic::set_hook(Box::new(move |info| {
             crate::sinks::swarm_panic_hook_inner(info, &prev);
         }));
+        INSTALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Release);
     }
     let run_id = crate::sinks::RunId::new();
     // Log capture: ensure the global subscriber (with our capture
@@ -1365,6 +1366,15 @@ pub(crate) fn cheat_scheduler_system(world: &mut World) {
         world.insert_resource(hooks);
     }
 }
+/// 6wt: how many times the process-wide panic hook installer has won
+/// the compare_exchange (must be exactly 1 across the process life).
+/// Asserted in tests/soundness.rs (16-thread race test).
+static INSTALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn panic_hook_install_count() -> usize {
+    INSTALL_COUNT.load(std::sync::atomic::Ordering::Acquire)
+}
+
 pub(crate) fn synthetic_keyboard_bot_system(
     mut state: ResMut<PlaytestState>,
     mut violations: ResMut<Violations>,
