@@ -296,3 +296,142 @@ fn fx3_rand_rng_acceptance_matrix() {
     assert_eq!(a, b, "same seed must reproduce rand::rng() draws");
     assert_ne!(a, c, "different seed must diverge");
 }
+// RF10: same-seed run_scenario calls on the SAME thread produce
+// identical rand::rng() draws. InProcess::run spawns a fresh thread
+// per run when deterministic-entropy is enabled.
+#[test]
+#[cfg(feature = "deterministic-entropy")]
+fn rf10_same_thread_run_scenario_reproducible() {
+    use bevy::prelude::*;
+    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use bevy_swarm::driver::PlaytestPlugin;
+    use bevy_swarm::scenario::Scenario;
+    use rand::RngExt;
+    use std::sync::{Arc, Mutex};
+
+    let captured = Arc::new(Mutex::new(Vec::<u64>::new()));
+
+    let factory = |captured: Arc<Mutex<Vec<u64>>>| {
+        move || {
+            let mut app = bevy::app::App::new();
+            app.add_plugins(PlaytestPlugin);
+            let cap = captured.clone();
+            app.add_systems(Update, move |mut done: Local<bool>| {
+                if !*done {
+                    *done = true;
+                    let val = rand::rng().random::<u64>();
+                    cap.lock().unwrap().push(val);
+                }
+            });
+            app
+        }
+    };
+
+    let scenario: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":5},"duration_s":0.05}"#).unwrap();
+
+    let runner = InProcess {
+        factory: factory(captured.clone()),
+    };
+    let _ = runner.run(&scenario).unwrap();
+    let _ = runner.run(&scenario).unwrap();
+
+    let vals = captured.lock().unwrap();
+    assert_eq!(vals.len(), 2, "two runs");
+    assert_eq!(
+        vals[0], vals[1],
+        "same seed must reproduce rand::rng() draws across same-thread runs"
+    );
+}
+
+// RF10: check_determinism reruns on fresh threads — no false
+// nondeterministic violation for rand::rng() games.
+#[test]
+#[cfg(feature = "deterministic-entropy")]
+fn rf10_check_determinism_rand_rng_no_false_violation() {
+    use bevy::prelude::*;
+    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use bevy_swarm::driver::PlaytestPlugin;
+    use bevy_swarm::scenario::Scenario;
+    use rand::RngExt;
+
+    let factory = || {
+        let mut app = bevy::app::App::new();
+        app.add_plugins(PlaytestPlugin);
+        app.add_systems(Update, |mut done: Local<bool>| {
+            if !*done {
+                *done = true;
+                let _val = rand::rng().random::<u64>();
+            }
+        });
+        app
+    };
+
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":5},"duration_s":0.05,"check_determinism":3}"#,
+    )
+    .unwrap();
+
+    let runner = InProcess { factory };
+    let report = runner.run(&scenario).unwrap();
+
+    // Should NOT have a nondeterministic violation
+    let violations = report
+        .violations
+        .iter()
+        .filter(|v| v.rule == "nondeterministic")
+        .collect::<Vec<_>>();
+    assert!(violations.is_empty(), "rand::rng() game with check_determinism=3 should not report false nondeterministic violation: {:?}", violations);
+}
+
+// RF10: build-time and runtime entropy draws are DIFFERENT.
+// Previously, run_scenario called enter_run again after InProcess,
+// resetting the stream to its start and duplicating the first N bytes.
+#[test]
+#[cfg(feature = "deterministic-entropy")]
+fn rf10_build_time_vs_runtime_entropy_different() {
+    use bevy::prelude::*;
+    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use bevy_swarm::driver::PlaytestPlugin;
+    use bevy_swarm::scenario::Scenario;
+    use std::sync::{Arc, Mutex};
+
+    let captured = Arc::new(Mutex::new((Vec::<u8>::new(), Vec::<u8>::new())));
+
+    let factory = |captured: Arc<Mutex<(Vec<u8>, Vec<u8>)>>| {
+        move || {
+            let mut app = bevy::app::App::new();
+            app.add_plugins(PlaytestPlugin);
+            let cap = captured.clone();
+            // Plugin build: draw 16 bytes
+            let mut buf = [0u8; 16];
+            getrandom04::fill(&mut buf).unwrap();
+            cap.lock().unwrap().0 = buf.to_vec();
+
+            let cap2 = captured.clone();
+            app.add_systems(Startup, move || {
+                // Startup system: draw 16 bytes
+                let mut buf = [0u8; 16];
+                getrandom04::fill(&mut buf).unwrap();
+                cap2.lock().unwrap().1 = buf.to_vec();
+            });
+            app
+        }
+    };
+
+    let scenario: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":5},"duration_s":0.05}"#).unwrap();
+
+    let runner = InProcess {
+        factory: factory(captured.clone()),
+    };
+    let _ = runner.run(&scenario).unwrap();
+
+    let guard = captured.lock().unwrap();
+    let (build_bytes, runtime_bytes) = (&guard.0, &guard.1);
+    assert_ne!(
+        build_bytes.as_slice(),
+        runtime_bytes.as_slice(),
+        "build-time and runtime entropy draws should differ"
+    );
+}

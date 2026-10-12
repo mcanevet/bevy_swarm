@@ -1,6 +1,6 @@
 //! Branch testing: run variant scenarios, compare reports.
 
-use crate::driver::{run_scenario, PlaytestReport};
+use crate::driver::{check_scenario_determinism, run_scenario, PlaytestReport};
 use crate::scenario::{Scenario, ScenarioError};
 use bevy::app::App;
 
@@ -114,20 +114,57 @@ pub struct InProcess<F> {
 
 impl<F: Fn() -> App + Sync> ScenarioRunner for InProcess<F> {
     fn run(&self, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
-        // Z14: enter deterministic run BEFORE the factory so plugin-build
-        // draws are seeded (not unattributed fallback).
-        #[cfg(feature = "deterministic-entropy")]
-        crate::entropy::enter_run(scenario.bot.seed);
-        let mut app = (self.factory)();
-        let report = run_scenario(&mut app, scenario)?;
-        // swarm-kpl: opt-in cross-run determinism check — rerun the
-        // scenario N times on fresh Apps and compare state digests.
-        Ok(if scenario.check_determinism.is_some() {
-            crate::driver::check_scenario_determinism(&self.factory, scenario, report)
-        } else {
+        run_impl(&self.factory, scenario)
+    }
+}
+
+/// RF10: deterministic-entropy variant — spawn a FRESH thread for the
+/// entire run. rand::ThreadRng is per-thread and cached; a fresh
+/// thread guarantees reproducible draws across same-seed runs and
+/// prevents cross-run carryover in check_determinism reruns.
+#[cfg(feature = "deterministic-entropy")]
+fn run_impl<F: Fn() -> App + Sync>(
+    factory: &F,
+    scenario: &Scenario,
+) -> Result<PlaytestReport, ScenarioError> {
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            // Z14: enter deterministic run BEFORE the factory so
+            // plugin-build draws are seeded.
+            crate::entropy::enter_run(scenario.bot.seed);
+            let mut app = (factory)();
+            let report = match run_scenario(&mut app, scenario) {
+                Ok(report) if scenario.check_determinism.is_some() => {
+                    // swarm-kpl: opt-in cross-run determinism check —
+                    // rerun the scenario N times on fresh Apps and
+                    // compare state digests (each rerun gets its own
+                    // fresh thread in check_determinism).
+                    Ok(check_scenario_determinism(factory, scenario, report))
+                }
+                other => other,
+            };
+            crate::entropy::exit_run();
             report
         })
-    }
+        .join()
+        .unwrap()
+    })
+}
+
+/// Without deterministic-entropy there is no thread-local entropy
+/// state, so run in place (cheaper; no fresh thread needed).
+#[cfg(not(feature = "deterministic-entropy"))]
+fn run_impl<F: Fn() -> App + Sync>(
+    factory: &F,
+    scenario: &Scenario,
+) -> Result<PlaytestReport, ScenarioError> {
+    let mut app = (factory)();
+    let report = run_scenario(&mut app, scenario)?;
+    Ok(if scenario.check_determinism.is_some() {
+        check_scenario_determinism(factory, scenario, report)
+    } else {
+        report
+    })
 }
 
 /// Run a matrix of scenarios in PARALLEL — one freshly-spawned scoped
