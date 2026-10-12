@@ -59,10 +59,12 @@ fn bundled_default_plugins_reports_guidance() {
     // DefaultPlugins then conflicts. Bevy panics with "plugin was already
     // added"; our builder must convert that into a GameBundlesPlatform-style
     // message naming the plugin and pointing at the fix.
-    let result = std::panic::catch_unwind(|| {
+    // jeh: AssertUnwindSafe — headless_app's returned builder captures
+    // non-UnwindSafe state; the closure provably doesn't resume with it.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let build = headless_app(BundledPlatformPlugin);
         let _app = build();
-    });
+    }));
     assert!(
         result.is_err(),
         "bundled DefaultPlugins must not succeed silently"
