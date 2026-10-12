@@ -76,7 +76,7 @@ agent = ["bevy/bevy_remote", "bevy/bevy_render", "getrandom04"]
 
 [dev-dependencies]
 # le3.6 (RF2): parse every emitted JUnit document in tests
-quick-xml = "0.38"
+quick-xml = "0.42"
 serial_test = "3"
 # Z14 entropy tests: uuid uses getrandom 0.4 for v4 generation
 uuid = { version = "1", features = ["v4", "rng-getrandom"] }
