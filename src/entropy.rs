@@ -91,6 +91,15 @@ impl Xoshiro256StarStar {
 
 /// Enter a deterministic entropy run with the given seed.
 /// Must be called before building the App or running scenarios.
+/// Enter a deterministic run context on THIS thread.
+///
+/// nhw (finding B): this MUST run on the driving thread before any
+/// entropy draws. run_scenario does this internally (driver.rs), and
+/// InProcess::run additionally enters it in child threads (branch.rs).
+/// Custom ScenarioRunner implementations or direct getrandom users on
+/// spawned threads without enter_run silently fall back to the
+/// process-global stream (detected as 'unattributed entropy draws'
+/// by the entropy_unattributed_draws rule).
 pub fn enter_run(seed: u64) {
     // FX3: diagnostic when the feature is on but the build cfg is not —
     // entropy interception silently no-ops in that misconfiguration.
