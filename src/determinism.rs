@@ -96,14 +96,19 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
 
     // 2. Gameplay entities: bit-exact transforms keyed by name (with
     // occurrence index for collisions).
-    let mut names: std::collections::HashMap<String, usize> = Default::default();
+    // nhw: entity iteration order (world.iter_entities) is
+    // nondeterministic across runs, so occurrence suffixes #0/#1
+    // could be assigned to swapped entities even with identical final
+    // state. Collect (name, pos, rotation) first, SORT by (name,
+    // position), THEN assign occurrence indices — spawn order and
+    // archetype topology no longer influence the canonical keys.
     #[derive(Clone)]
-    struct Row {
-        key: String,
+    struct RawRow {
+        name: String,
         pos: [String; 3],
         rotation: String,
     }
-    let mut rows: Vec<Row> = vec![];
+    let mut raw: Vec<RawRow> = vec![];
     for entity in world.iter_entities() {
         let (Some(name), Some(t)) = (entity.get::<Name>(), entity.get::<Transform>()) else {
             continue;
@@ -111,15 +116,8 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
         if entity.get::<crate::harness::Gameplay>().is_none() {
             continue;
         }
-        let occ = names.entry(name.as_str().to_string()).or_insert(0);
-        let key = if *occ == 0 {
-            name.as_str().to_string()
-        } else {
-            format!("{}#{}", name.as_str(), occ)
-        };
-        *occ += 1;
-        rows.push(Row {
-            key,
+        raw.push(RawRow {
+            name: name.as_str().to_string(),
             pos: [
                 t.translation.x.to_bits().to_string(),
                 t.translation.y.to_bits().to_string(),
@@ -136,6 +134,33 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
                 t.rotation.z.to_bits(),
                 t.rotation.w.to_bits()
             ),
+        });
+    }
+    // Sort by (name, position) — stable canonical ordering independent
+    // of entity iteration order.
+    raw.sort_by(|a, b| (&a.name, &a.pos).cmp(&(&b.name, &b.pos)));
+
+    // Assign occurrence indices from the sorted order.
+    let mut names: std::collections::BTreeMap<String, usize> = Default::default();
+    #[derive(Clone)]
+    struct Row {
+        key: String,
+        pos: [String; 3],
+        rotation: String,
+    }
+    let mut rows: Vec<Row> = vec![];
+    for r in raw {
+        let occ = names.entry(r.name.clone()).or_insert(0);
+        let key = if *occ == 0 {
+            r.name.clone()
+        } else {
+            format!("{}#{}", r.name, occ)
+        };
+        *occ += 1;
+        rows.push(Row {
+            key,
+            pos: r.pos,
+            rotation: r.rotation,
         });
     }
     for row in &rows {
@@ -401,4 +426,39 @@ pub fn check_determinism(
             differing,
         }),
     })
+}
+
+#[cfg(test)]
+mod tests_nhw {
+    use super::*;
+
+    /// nhw: canonical_state keys are assigned via (name, position)
+    /// SORT — two worlds with the same entities iterated in different
+    /// orders must produce identical canonical maps.
+    #[test]
+    fn occurrence_indices_independent_of_iteration_order() {
+        let mut world_a = bevy::ecs::world::World::new();
+        let mut world_b = bevy::ecs::world::World::new();
+        // Same entity set, different insertion (iteration) order.
+        let mk = |x: f32| {
+            (
+                bevy::prelude::Name::new("Enemy"),
+                bevy::prelude::Transform::from_xyz(x, 0.0, 0.0),
+                crate::harness::Gameplay,
+            )
+        };
+        world_b.spawn(mk(5.0)); // B first: different order
+        world_a.spawn(mk(1.0));
+        world_b.spawn(mk(1.0));
+        world_a.spawn(mk(5.0));
+
+        let map_a = canonical_state(&world_a);
+        let map_b = canonical_state(&world_b);
+        let keys_a: std::collections::BTreeSet<_> = map_a.keys().collect();
+        let keys_b: std::collections::BTreeSet<_> = map_b.keys().collect();
+        assert_eq!(keys_a, keys_b, "keys must not depend on iteration order");
+        for k in keys_a {
+            assert_eq!(map_a[k], map_b[k], "value for {k} must match");
+        }
+    }
 }
