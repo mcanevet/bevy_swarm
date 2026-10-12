@@ -64,4 +64,23 @@ pub mod sweep;
 pub mod typed;
 
 #[cfg(test)]
-mod verify;
+mod verify {
+    mod action_log;
+    mod app_config;
+    mod audit;
+    mod branching;
+    mod check_ops;
+    mod ddmin;
+    pub(crate) mod fixtures;
+    mod harness;
+    mod invariants;
+    mod loader;
+    mod minimize;
+    mod oracle_frames;
+    mod persona;
+    mod planner;
+    mod replay;
+    mod scenario;
+    mod test_api_ext;
+    mod validation;
+}
