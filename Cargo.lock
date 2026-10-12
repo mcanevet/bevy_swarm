@@ -1552,6 +1552,10 @@ name = "bevy_swarm"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_audio",
+ "bevy_gilrs",
+ "bevy_render",
+ "bevy_winit",
  "fixture-runner",
  "fixture_regression_pair",
  "fixture_spawner",

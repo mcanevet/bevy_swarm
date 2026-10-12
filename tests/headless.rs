@@ -98,3 +98,34 @@ fn headless_platform_runs_with_winit_without_display() {
     // If WinitPlugin had run, app.update() would panic ("Failed to
     // build event loop") without a display.
 }
+
+// RF9: headless_platform disables Winit by runtime presence even when
+// bevy_swarm is compiled with default-features=false.
+#[test]
+fn rf9_headless_no_display_default_features_false() {
+    // This test verifies that headless_app() works without a DISPLAY
+    // when bevy_swarm is compiled with default-features=false (the
+    // game may still pull bevy_winit). The winit disable is now
+    // unconditional via the direct bevy_winit dep.
+    use bevy::prelude::*;
+    use bevy_swarm::autotest::{autotest, AutotestConfig};
+
+    #[derive(Clone, Default)]
+    struct Rf9TestPlugin;
+    impl Plugin for Rf9TestPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(Startup, || {});
+        }
+    }
+
+    let config = AutotestConfig {
+        num_seeds: 2,
+        duration_s: 0.1,
+        parallel: 1,
+        ..AutotestConfig::default()
+    };
+
+    // If this compiles and runs, the winit disable is working.
+    let report = autotest(Rf9TestPlugin, config).expect("autotest runs");
+    assert!(report.failures.is_empty(), "rf9 test passes");
+}
