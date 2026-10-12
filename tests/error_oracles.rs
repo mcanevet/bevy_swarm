@@ -309,6 +309,31 @@ fn sink_events_dedupe_grouped() {
     );
 }
 
+/// le3.10 (RF6): fps_floor measures WALL-CLOCK fps. A system that
+/// sleeps 40ms per frame yields ~25fps wall — a floor of 55 must fire
+/// even though simulated tps is 60 (the old formula divided frames
+/// by simulated duration and never saw real cost).
+#[test]
+fn fps_floor_measures_wall_clock() {
+    let sc: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.5,"invariants":[{"name":"smooth","rule":"fps_floor","value":55}]}"#,
+    )
+    .unwrap();
+    let mut app = App::new();
+    app.add_plugins(PlaytestPlugin);
+    app.add_systems(bevy::app::Update, || {
+        std::thread::sleep(std::time::Duration::from_millis(40))
+    });
+    let rep = run_scenario(&mut app, &sc).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "fps_floor"),
+        "fps_floor must fire when wall-clock fps ({:.1}) is below the floor",
+        rep.metrics.frame_count as f64 / rep.wall_time_s.max(f64::EPSILON)
+    );
+    // Informational: still a pass.
+    assert_eq!(rep.status, PlaytestStatus::Pass);
+}
+
 /// A1/FX5: fps_floor evaluates post-run as an informational rule
 /// (never gates status, excluded from fingerprints) — a demanding
 /// floor yields an fps_floor violation on a PASS-shaped run.
@@ -331,6 +356,8 @@ fn fps_floor_reports_informational() {
         v.fingerprint.is_none(),
         "informational rules are not fingerprinted"
     );
+    // le3.10 (RF6): informational-only runs are PASS.
+    assert_eq!(rep.status, PlaytestStatus::Pass);
     // Wall-clock frame-time anomaly also informational:
     let rep2 = {
         let sc2: Scenario = serde_json::from_str(

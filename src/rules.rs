@@ -36,6 +36,24 @@ macro_rules! declare_rules {
     };
 }
 
+impl Rule {
+    /// le3.10 (RF6): whether this rule is informational — reported
+    /// but never gating the run status nor fingerprinted. Derived
+    /// from the enum so the registry cannot drift from the list.
+    /// Mirrors Violations::INFORMATIONAL_RULES (tested for parity).
+    pub fn is_informational(self) -> bool {
+        matches!(
+            self,
+            Rule::FrameTimeAnomaly
+                | Rule::FrameTimeP99Below
+                | Rule::FpsFloor
+                | Rule::DeadWidget
+                | Rule::PerfBudgetExceeded
+                | Rule::EntropyUnattributedDraws
+        )
+    }
+}
+
 declare_rules! {
     FrozenWorld => "frozen_world",
     NodesInBounds => "nodes_in_bounds",
@@ -102,6 +120,28 @@ mod tests {
                     .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
                 "Invalid rule name format: {}",
                 name
+            );
+        }
+    }
+
+    /// le3.10 (RF6): Rule::is_informational() parity with
+    /// Violations::INFORMATIONAL_RULES — the string list and the enum
+    /// method must agree exactly (no drift).
+    #[test]
+    fn test_informational_parity() {
+        for &rule in Rule::ALL {
+            let name = rule.name();
+            let in_list = crate::state::Violations::INFORMATIONAL_RULES.contains(&name);
+            let via_enum = rule.is_informational();
+            assert_eq!(
+                in_list, via_enum,
+                "informational drift for {name}: list={in_list} enum={via_enum}"
+            );
+        }
+        for name in crate::state::Violations::INFORMATIONAL_RULES {
+            assert!(
+                Rule::ALL.iter().any(|r| r.name() == *name),
+                "INFORMATIONAL_RULES lists orphan rule '{name}' (never emitted)"
             );
         }
     }
