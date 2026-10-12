@@ -442,16 +442,24 @@ impl Plugin for AgentPlugin {
         // configured (env/config), generate a random one at startup and
         // log it — loopback is not an authentication boundary, so the
         // previous None = "no auth" behavior was a full bypass.
-        let token = self.config.token.clone().unwrap_or_else(|| {
-            let generated =
-                generate_random_token().expect("agent token generation from OS randomness");
-            tracing::warn!(
-                "bevy_swarm agent: no BEVY_SWARM_AGENT_TOKEN configured; \
+        // le3.5 (RF1/qo7.10): an explicitly-configured empty token is
+        // treated as unset — a Some("") must not authenticate
+        // {token:""}.
+        let token = self
+            .config
+            .token
+            .clone()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| {
+                let generated =
+                    generate_random_token().expect("agent token generation from OS randomness");
+                tracing::warn!(
+                    "bevy_swarm agent: no BEVY_SWARM_AGENT_TOKEN configured; \
                  generated a random session token. Set BEVY_SWARM_AGENT_TOKEN \
                  to use the agent programmatically. Token: {generated}"
-            );
-            generated
-        });
+                );
+                generated
+            });
         app.insert_resource(AgentAuthToken(Some(token)));
 
         let (tx, rx) = std::sync::mpsc::channel::<AgentRequest>();
@@ -460,8 +468,22 @@ impl Plugin for AgentPlugin {
             .insert_resource(AgentRequestQueue(std::sync::Mutex::new(rx)))
             .init_resource::<PendingAgentInput>()
             .init_resource::<AgentFrameCounter>()
+            // le3.5 (RF1): agent_flush_system records into ActionLog;
+            // a missing one panicked the app. Init here so the plugin
+            // is standalone-safe (TestConventionsPlugin inserts its
+            // own instance — identical Default value).
+            .init_resource::<crate::contract::ActionLog>()
+            .init_resource::<crate::contract::GameVersion>()
             // Gestures pending for THIS frame (releases, presses).
-            .add_systems(PreUpdate, (agent_flush_system, agent_input_system).chain())
+            .add_systems(
+                PreUpdate,
+                (
+                    agent_method_allowlist_sweep,
+                    agent_flush_system,
+                    agent_input_system,
+                )
+                    .chain(),
+            )
             // FX10: after ALL plugins build, sweep the method tables and
             // remove anything outside the allow-list. Covers methods
             // registered LATER than guarded_remote_plugin() (other
@@ -559,6 +581,16 @@ fn brp_params(world: &World, params: Option<Value>) -> BrpResult<Value> {
             data: None,
         });
     };
+    // le3.5 (RF1/qo7.10): an empty provided token is never valid —
+    // guards the Some("") configured-token edge from config paths
+    // that predate the build-time filter.
+    if provided.is_empty() {
+        return Err(BrpError {
+            code: error_codes::INVALID_REQUEST,
+            message: "invalid or missing token".to_string(),
+            data: None,
+        });
+    }
     if provided.len() > 1024 {
         return Err(BrpError {
             code: error_codes::INVALID_REQUEST,
@@ -662,11 +694,9 @@ fn playtest_intent(In(params): In<Option<Value>>, world: &World) -> BrpResult {
                     "unknown named intent `{}` (known: {})",
                     name,
                     world
-                        .resource::<NamedIntents>()
-                        .0
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
+                        .get_resource::<NamedIntents>()
+                        .map(|n| n.0.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default()
                         .join(", ")
                 ),
                 data: None,
@@ -776,19 +806,36 @@ fn playtest_cheat(In(params): In<Option<Value>>, world: &World) -> BrpResult {
 
 /// Run status.
 fn playtest_state(_params: In<Option<Value>>, world: &World) -> BrpResult {
-    let frame = world.resource::<AgentFrameCounter>().0;
-    let log = world.resource::<ActionLog>();
+    // le3.5 (RF1): token-guard EVERY playtest/* method.
+    brp_params(world, _params.0.clone())?;
+    // le3.5 (RF1): ActionLog/GameVersion are TestConventionsPlugin
+    // resources — absent on apps without it. Missing = 0/default,
+    // NOT a panic (an unauthenticated probe must not crash the app).
+    let frame = world
+        .get_resource::<AgentFrameCounter>()
+        .map(|f| f.0)
+        .unwrap_or(0);
+    let log = world.get_resource::<ActionLog>();
     Ok(json!({
         "frame": frame,
-        "version": world.resource::<crate::contract::GameVersion>().0,
-        "actions": log.entries.len(),
-        "cheats": log.cheat_count(),
+        "version": world
+            .get_resource::<crate::contract::GameVersion>()
+            .map(|v| v.0.clone())
+            .unwrap_or_default(),
+        "actions": log.map(|l| l.entries.len()).unwrap_or(0),
+        "cheats": log.map(|l| l.cheat_count()).unwrap_or(0),
     }))
 }
 
 /// AUDIT: full action log (inputs, intents, cheats) with sources.
 fn playtest_actions(_params: In<Option<Value>>, world: &World) -> BrpResult {
-    let log = world.resource::<ActionLog>();
+    // le3.5 (RF1): token-guard.
+    brp_params(world, _params.0.clone())?;
+    // Absent ActionLog (no TestConventionsPlugin) = empty log, not a
+    // panic.
+    let Some(log) = world.get_resource::<ActionLog>() else {
+        return Ok(json!({ "entries": [] }));
+    };
     let entries: Vec<Value> = log
         .entries
         .iter()
@@ -1135,11 +1182,50 @@ fn viewport_location(
     })
 }
 
+/// le3.5 (RF1): pure screenshot-path sanitizer. Hardened against
+/// Windows escapes: a path is accepted ONLY if every component is
+/// `Component::Normal` (no `..`, no absolute/root/prefix components
+/// — `\Users\x` has a RootDir and `C:x` has a Prefix, both
+/// rejected), contains no `:` or `\` characters, and ends in `.png`.
+/// Result is confined to `screenshots/`.
+fn sanitize_screenshot_path(user: &std::path::Path) -> Result<std::path::PathBuf, BrpError> {
+    let as_str = user.to_string_lossy();
+    if !as_str.ends_with(".png") {
+        return Err(invalid_params("screenshot path must end with '.png'"));
+    }
+    for comp in user.components() {
+        match comp {
+            std::path::Component::Normal(part) => {
+                // Defensive on all platforms: reject Windows drive
+                // prefixes ('C:') and backslash separators smuggled
+                // into a Normal component (possible when the raw
+                // string was 'C:a.png' — parsed as one Normal
+                // component on Unix).
+                let s = part.to_string_lossy();
+                if s.contains(':') || s.contains('\\') {
+                    return Err(invalid_params(
+                        "screenshot path contains forbidden characters",
+                    ));
+                }
+            }
+            _ => {
+                return Err(invalid_params(
+                    "screenshot path must be a plain relative path (no '..', absolute paths, or drive prefixes)",
+                ));
+            }
+        }
+    }
+    Ok(std::path::PathBuf::from("screenshots").join(user))
+}
+
 /// Screenshot capture for visual regression testing.
 /// In windowed mode this captures the real rendered frame (via the
 // native screenshot's native screenshot mechanism); in headless
 /// harness mode it returns window geometry only.
 fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResult {
+    // le3.5 (RF1): token-guard — screenshot is an unauthenticated
+    // disk write otherwise.
+    let params = brp_params(world, params)?;
     let Some(window) = primary_window_read(world) else {
         return Err(invalid_params(
             "no primary window — screenshots need a rendering app",
@@ -1150,31 +1236,13 @@ fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResul
 
     // C1 sandbox: sanitize path — reject .., absolute paths, non-.png suffixes.
     let user_path: Option<std::path::PathBuf> = params
-        .as_ref()
-        .and_then(|p| p.get("path"))
+        .get("path")
         .and_then(Value::as_str)
         .map(std::path::PathBuf::from);
 
-    let path = if let Some(p) = user_path {
-        // Reject absolute paths
-        if p.is_absolute() {
-            return Err(invalid_params("screenshot path must be relative"));
-        }
-        // Reject path traversal
-        if p.components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            return Err(invalid_params("screenshot path must not contain '..'"));
-        }
-        // Require .png suffix
-        let path_str = p.to_string_lossy();
-        if !path_str.ends_with(".png") {
-            return Err(invalid_params("screenshot path must end with '.png'"));
-        }
-        // Confine to screenshots/ subdirectory
-        std::path::PathBuf::from("screenshots").join(p)
-    } else {
-        std::path::PathBuf::from(format!("screenshots/screenshot-{}.png", frame))
+    let path = match user_path {
+        Some(p) => sanitize_screenshot_path(&p)?,
+        None => std::path::PathBuf::from(format!("screenshots/screenshot-{frame}.png")),
     };
 
     send_request(world, AgentRequest::Screenshot { path: path.clone() })?;
@@ -1183,6 +1251,9 @@ fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResul
 
 /// Contract diagnostics over BRP: detect contract pieces, report gaps.
 fn playtest_diagnostics(_params: In<Option<Value>>, world: &World) -> BrpResult {
+    // le3.5 (RF1): token-guard — diagnostics leak reflected resource
+    // paths.
+    brp_params(world, _params.0.clone())?;
     let report = crate::harness::contract_diagnostics(world);
     let mut v = serde_json::to_value(report).unwrap_or(Value::Null);
     // Zero-contract observation: auto-enumerated reflected-resource paths.
@@ -1291,40 +1362,47 @@ mod tests {
 
     #[test]
     fn screenshot_path_sandbox_rejects_traversal() {
-        // C1: reject .., absolute paths, non-.png suffixes.
-        let reject = |path: &str| {
-            let val = Value::String(path.to_string());
-            let params = json!({"path": val});
-            let world = World::new();
-            // Minimal setup for playtest_screenshot to run (no window needed,
-            // we're testing path validation before window check).
-            let res = playtest_screenshot(In(Some(params)), &world);
-            res.is_err()
-        };
-
+        // le3.5 (RF1): the OLD test called playtest_screenshot on
+        // World::new() — the window error fired BEFORE path
+        // validation, so every assertion was vacuous. Now tests the
+        // pure sanitizer directly (mutation-proof: disabling any
+        // check in sanitize_screenshot_path fails this test).
+        let reject = |path: &str| sanitize_screenshot_path(std::path::Path::new(path)).is_err();
+        // traversal / absolute / prefixes
         assert!(reject("../etc/passwd.png"));
         assert!(reject("/absolute/path.png"));
         assert!(reject("foo/../bar.png"));
+        assert!(reject("..\\..\\evil.png"));
+        // Windows root-relative and drive prefixes
+        assert!(reject("\\Users\\victim\\x.png"));
+        assert!(reject("C:evil.png"));
+        assert!(reject("C:\\evil.png"));
+        // wrong suffix
         assert!(reject("foo.txt"));
         assert!(reject("screenshot.jpg"));
         assert!(reject("foo/bar.baz"));
+        // empty / dot-only components
+        assert!(reject("."));
+        assert!(reject(""));
     }
 
     #[test]
     fn screenshot_path_sandbox_accepts_valid_relative_png() {
-        let valid = |path: &str| {
-            let val = Value::String(path.to_string());
-            let params = json!({"path": val});
-            let world = World::new();
-            let res = playtest_screenshot(In(Some(params)), &world);
-            // Should fail on missing window, NOT on path validation
-            res.err()
-                .is_some_and(|e| e.message.contains("no primary window"))
+        // le3.5 (RF1): accept check on the pure sanitizer — asserts
+        // the RESULT (confined under screenshots/), not just Ok.
+        let accept = |path: &str| {
+            sanitize_screenshot_path(std::path::Path::new(path))
+                .ok()
+                .filter(|p| p.starts_with("screenshots"))
         };
-
-        assert!(valid("screenshot-1.png"));
-        assert!(valid("screenshots/foo.png"));
-        assert!(valid("a/b/c.png"));
+        assert!(accept("screenshot-1.png").is_some());
+        assert!(accept("a/b/c.png").is_some());
+        assert!(accept("deep/nested/dir/shot.png").is_some());
+        // result confinement
+        assert_eq!(
+            sanitize_screenshot_path(std::path::Path::new("x.png")).unwrap(),
+            std::path::PathBuf::from("screenshots/x.png")
+        );
     }
 }
 

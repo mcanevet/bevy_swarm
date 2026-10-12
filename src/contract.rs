@@ -365,12 +365,18 @@ impl NamedIntents {
     /// Static dispatch helper that avoids double-borrow of the world
     /// (takes the handler out, runs it, puts it back).
     pub fn dispatch(world: &mut World, name: &str) -> bool {
-        let handler = world.resource_mut::<NamedIntents>().0.remove(name);
+        // le3.5 (RF1): no registry (custom-TestApi game without
+        // TestConventionsPlugin) = nothing to dispatch, NOT a panic.
+        let Some(mut registry) = world.get_resource_mut::<NamedIntents>() else {
+            return false;
+        };
+        let handler = registry.0.remove(name);
         match handler {
             Some(h) => {
                 h(world);
                 world
-                    .resource_mut::<NamedIntents>()
+                    .get_resource_mut::<NamedIntents>()
+                    .expect("present above")
                     .0
                     .insert(name.to_string(), h);
                 true
