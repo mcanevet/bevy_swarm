@@ -808,8 +808,13 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     .scale
                     .unwrap_or_else(|| crate::robustness::default_scale(thr));
                 let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
-                if inv.eventually_s.is_some() {
-                    tracker.observe_max(&inv.name, frame, margin, scale);
+                if let Some(deadline) = inv.eventually_s {
+                    // le3.9 (RF5): cap the max-margin window at the
+                    // deadline (post-deadline success must not mask
+                    // the deadline violation in overall).
+                    if elapsed_s <= deadline {
+                        tracker.observe_max(&inv.name, frame, margin, scale);
+                    }
                 } else {
                     tracker.observe(&inv.name, frame, margin, scale);
                 }
@@ -922,7 +927,23 @@ pub(crate) fn check_custom_system(world: &mut World) {
         }
 
         // FX5 C1: string comparison respects inv.check (Equals/Ne only).
-        if let (Some(sv), Some(serde_json::Value::String(expect))) = (&string_val, &inv.value) {
+        // le3.9 (RF5): an expert rule (requires_path set) must NOT run
+        // its WHEN clause as a standalone text invariant — that
+        // inverted the semantics (WHEN false reported a violation,
+        // and the requires section was never reached). The text WHEN
+        // guard is evaluated in the expert-rule section below.
+        let text_expert_rule = inv.requires_path.is_some()
+            && string_val.is_some()
+            && inv.value.as_ref().is_some_and(|v| v.is_string());
+        let text_standalone = matches!(
+            (&string_val, &inv.value),
+            (Some(_), Some(serde_json::Value::String(_)))
+        ) && !text_expert_rule;
+        if text_standalone {
+            let (Some(sv), Some(serde_json::Value::String(expect))) = (&string_val, &inv.value)
+            else {
+                unreachable!("text_standalone implies string pair")
+            };
             let check = inv.check.unwrap_or(crate::enums::CheckOp::Equals);
             let holds = check.holds_text(sv, expect).unwrap_or(false);
             // Text robustness lifts the boolean to ±1 (unit scale): a
@@ -931,8 +952,14 @@ pub(crate) fn check_custom_system(world: &mut World) {
             {
                 let rho_text = if holds { 1.0 } else { -1.0 };
                 let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
-                if inv.eventually_s.is_some() {
-                    tracker.observe_max(&inv.name, frame, rho_text, 1.0);
+                if let Some(deadline) = inv.eventually_s {
+                    // le3.9 (RF5): the max-margin for eventually rules
+                    // is only meaningful for t <= deadline — meeting
+                    // the target AFTER the deadline must not flip
+                    // overall positive alongside a deadline violation.
+                    if elapsed_s <= deadline {
+                        tracker.observe_max(&inv.name, frame, rho_text, 1.0);
+                    }
                 } else {
                     tracker.observe(&inv.name, frame, rho_text, 1.0);
                 }
@@ -999,8 +1026,13 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 .unwrap_or_else(|| crate::robustness::default_scale(thr));
             if !is_expert_rule {
                 let mut tracker = world.resource_mut::<crate::robustness::RobustnessTracker>();
-                if inv.eventually_s.is_some() {
-                    tracker.observe_max(&inv.name, frame, margin, scale);
+                if let Some(deadline) = inv.eventually_s {
+                    // le3.9 (RF5): cap the max-margin window at the
+                    // deadline (post-deadline success must not mask
+                    // the deadline violation in overall).
+                    if elapsed_s <= deadline {
+                        tracker.observe_max(&inv.name, frame, margin, scale);
+                    }
                 } else {
                     tracker.observe(&inv.name, frame, margin, scale);
                 }
@@ -1203,7 +1235,12 @@ pub(crate) fn check_custom_system(world: &mut World) {
                             -1.0
                         }
                     }
-                    _ => 0.0, // unconditional guard: vacuously true
+                    // le3.9 (RF5): unconditional guard is VACUOUSLY
+                    // TRUE with infinite margin — the implication
+                    // reduces to rho_R. The old hard-coded 0.0 made
+                    // rho = max(-0, rho_R) >= 0 even when the policy
+                    // was violated (overall<0 iff fail broken).
+                    _ => f64::INFINITY, // unconditional guard: vacuously true
                 };
                 let rho_r = crate::robustness::threshold_margin(*req_check, rc, r_thr);
                 let rho_implication = (-rho_w).max(rho_r);
@@ -1213,6 +1250,16 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 world
                     .resource_mut::<crate::robustness::RobustnessTracker>()
                     .observe(&inv.name, frame, rho_implication, scale);
+            } else if let (Some(rs), Some(rexp)) = (req_str.as_deref(), req_value.as_str()) {
+                // le3.9 (RF5): text REQUIRE — boolean ±1 robustness, so
+                // overall<0 iff the run fails on a text policy rule.
+                let holds = req_check.holds_text(rs, rexp).unwrap_or(false);
+                let rho_w_text = if when_holds { 0.0 } else { f64::INFINITY };
+                let rho_text = if holds { 1.0 } else { -1.0 };
+                let rho_implication = (-rho_w_text).max(rho_text);
+                world
+                    .resource_mut::<crate::robustness::RobustnessTracker>()
+                    .observe(&inv.name, frame, rho_implication, 1.0);
             }
             world
                 .resource_mut::<PlaytestState>()

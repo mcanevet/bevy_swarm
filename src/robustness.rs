@@ -104,11 +104,28 @@ fn normalized(scale: f64) -> f64 {
 
 /// Signed margin for a threshold check. le/lt: thr - v; ge/gt: v - thr;
 /// equals: -(distance) (0 when equal); ne: +distance.
+// le3.9 (RF5): strict ops at boundary return -EPSILON so that
+// violations give rho<0 (overall<0 iff fail property).
+const EPSILON: f64 = 1e-9;
 pub fn threshold_margin(check: crate::enums::CheckOp, value: f64, thr: f64) -> f64 {
     use crate::enums::CheckOp::*;
     match check {
-        Le | Lt => thr - value,
-        Ge | Gt => value - thr,
+        Le | Lt => {
+            let m = thr - value;
+            if matches!(check, Lt) && m.abs() < EPSILON {
+                -EPSILON
+            } else {
+                m
+            }
+        }
+        Ge | Gt => {
+            let m = value - thr;
+            if matches!(check, Gt) && m.abs() < EPSILON {
+                -EPSILON
+            } else {
+                m
+            }
+        }
         Equals => {
             let d = (value - thr).abs();
             if d == 0.0 {
