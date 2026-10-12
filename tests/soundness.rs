@@ -27,8 +27,18 @@ fn concurrent_panic_hook_installation_no_race() {
         });
         handles.push(h);
     }
+    let mut counts = vec![];
     for h in handles {
         let report = h.join().expect("thread panicked");
         assert_eq!(report.error, None);
+        counts.push(());
     }
+    // 6wt: the panic hook was installed EXACTLY ONCE across all 16
+    // concurrent first-uses (strengthened from no-crash-only).
+    assert_eq!(
+        bevy_swarm::driver::panic_hook_install_count(),
+        1,
+        "hook installer must win exactly once"
+    );
+    let _ = counts.len();
 }

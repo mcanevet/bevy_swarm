@@ -125,7 +125,17 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
                 t.translation.y.to_bits().to_string(),
                 t.translation.z.to_bits().to_string(),
             ],
-            rotation: format!("{:?}", t.rotation),
+            // 6wt: Quat Debug output is not stable across platforms/
+            // rustc versions — encode rotation components as bit
+            // patterns (matching translation) so golden files recorded
+            // on machine A don't diverge on machine B.
+            rotation: format!(
+                "({},{},{},{})",
+                t.rotation.x.to_bits(),
+                t.rotation.y.to_bits(),
+                t.rotation.z.to_bits(),
+                t.rotation.w.to_bits()
+            ),
         });
     }
     for row in &rows {
