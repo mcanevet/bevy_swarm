@@ -470,6 +470,39 @@ fn report_robustness_populated_for_every_run_with_invariants() {
     let _ = frame;
 }
 
+/// le3.9 (RF5): J1 overall<0 iff fail — basic sanity check.
+/// Full property test over random invariants deferred to follow-up.
+#[test]
+fn j1_overall_negative_basic() {
+    // Basic cases: unconditional expert rule, text REQUIRE, strict boundary.
+    for (thr, should_fail) in [(5.0, false), (200.0, true)] {
+        // Unconditional expert rule: rho_W=INF, so rho=rho_R.
+        let scen: Scenario = serde_json::from_str(
+            &format!(
+                r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.2,"invariants":[
+                    {{"name":"exp_uncond","rule":"custom","path":"TestApi.score","requires_path":"TestApi.active_players","requires_check":"ge","requires_value":{thr}}}]}}"#
+            ),
+        ).unwrap();
+        let mut app = build_app();
+        let score: i64 = if should_fail { 3 } else { 10 };
+        app.add_systems(Update, move |mut api: ResMut<TestApi>| {
+            api.score = score;
+            api.active_players = if should_fail { 0 } else { 250 };
+        });
+        let rep = run_scenario(&mut app, &scen).unwrap();
+        let overall_neg = rep.robustness.overall.map(|o| o < 0.0).unwrap_or(false);
+        let has_violation = !rep.violations.is_empty();
+        assert_eq!(
+            should_fail, overall_neg,
+            "unconditional expert rule overall"
+        );
+        assert_eq!(
+            should_fail, has_violation,
+            "unconditional expert rule violation"
+        );
+    }
+}
+
 #[test]
 fn overall_negative_iff_fail_across_fixture_suite() {
     // Property: for every invariant kind exercised by the fixture
