@@ -485,7 +485,7 @@ pub fn generate_invariants_from_calibration(snapshot: &CalibrationSnapshot) -> S
                 "name": format!("{}_non_negative", sanitize_name(name)),
                 "rule": "custom",
                 "path": format!("{}.score", name),
-                "check": "above",
+                "check": "ge",
                 "value": -0.5,
                 "eventually_s": null
             }));
