@@ -6,6 +6,11 @@
   ],
   "duration_s": 6.0,
   "must_not_report": [],
-  "status": "pass",
-  "must_report": []
+  "status": "fail",
+  "must_report": [
+    {
+      "rule": "select_no_effect"
+    }
+  ],
+  "pending": "swarm-716.24"
 }

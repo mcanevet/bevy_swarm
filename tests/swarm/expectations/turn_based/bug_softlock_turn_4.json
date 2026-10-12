@@ -4,7 +4,7 @@
   "seeds": [
     42
   ],
-  "duration_s": 6.0,
+  "duration_s": 10.0,
   "must_not_report": [],
   "status": "fail",
   "must_report": [

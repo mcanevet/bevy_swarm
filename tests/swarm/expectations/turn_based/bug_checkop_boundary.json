@@ -10,7 +10,7 @@
     {
       "name": "score_is_fifty",
       "rule": "custom",
-      "check": "ne",
+      "check": "eq",
       "value": 50.0,
       "path": "TestApi.score"
     }
@@ -18,7 +18,8 @@
   "must_report": [
     {
       "rule": "score_is_fifty",
-      "detail_contains": "50"
+      "detail_contains": "50",
+      "min_count": 2
     }
   ],
   "must_not_report": [],

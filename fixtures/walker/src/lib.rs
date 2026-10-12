@@ -31,6 +31,32 @@ fn setup(mut commands: Commands) {
 
 /// Tier-0 input: translate keyboard state (ButtonInput<KeyCode>) into
 /// MoveEvents. Plain Bevy — a zero-contract run can drive this game.
+/// Select gesture: the game's own selection message.
+#[derive(Message, Clone, Debug)]
+pub struct SelectEvent {
+    pub target: bevy::ecs::entity::Entity,
+}
+
+/// CLEAN: consume SelectEvent and record the selection.
+#[derive(Resource, Default)]
+pub struct Selection {
+    pub selected: Option<bevy::ecs::entity::Entity>,
+}
+
+fn select_system_clean(mut events: MessageReader<SelectEvent>, mut selection: ResMut<Selection>) {
+    for ev in events.read() {
+        selection.selected = Some(ev.target);
+    }
+}
+
+/// BUGGY (select_unnamed): the message is WRITTEN by the adapter
+/// path but no system ever READS it — the select verb is dead and
+/// the selection never updates.
+fn select_write_only(mut _events: MessageWriter<SelectEvent>) {
+    // Deliberately writes nothing on its own; the adapter's Select
+    // intents land in a queue nobody drains.
+}
+
 fn keyboard_system(keys: Res<ButtonInput<KeyCode>>, mut events: MessageWriter<MoveEvent>) {
     let mut dir = Vec2::ZERO;
     if keys.pressed(KeyCode::ArrowUp) || keys.pressed(KeyCode::KeyW) {
@@ -136,7 +162,13 @@ fn move_system_stuck_corner(
         for (mut t, mut lp) in &mut q {
             let dist = t.translation.length();
             let diagonal = ev.dir.x != 0.0 && ev.dir.y != 0.0;
-            let away_from_origin = (ev.dir.x * t.translation.x + ev.dir.y * t.translation.y) > 0.0;
+            // le3.7 (RF3): the original condition (> 0.0) never
+            // fired at the spawn origin (translation is exactly
+            // zero, so the dot product is 0) — the bug was a no-op
+            // and the old frozen_world detection was vacuous. A
+            // zero-or-positive dot product with dist < 1 wedges the
+            // player AT the origin from the first diagonal intent.
+            let away_from_origin = (ev.dir.x * t.translation.x + ev.dir.y * t.translation.y) >= 0.0;
             if dist < 1.0 && diagonal && away_from_origin {
                 continue; // stuck at corner (origin) — input swallowed
             }
@@ -211,9 +243,11 @@ impl Plugin for WalkerGamePlugin {
         let bug = std::env::var("FIXTURE_BUG").ok().map(|s| s.to_lowercase());
 
         app.add_message::<MoveEvent>();
+        app.add_message::<SelectEvent>();
+        app.init_resource::<Selection>();
         app.add_systems(Startup, setup);
-        // Clean: keyboard drives MoveEvents.
-        app.add_systems(Update, keyboard_system);
+        // Clean: keyboard drives MoveEvents; SelectEvent updates selection.
+        app.add_systems(Update, (keyboard_system, select_system_clean).chain());
 
         known_bug(
             &bug,
@@ -275,7 +309,15 @@ impl Plugin for WalkerGamePlugin {
                 app.add_systems(Startup, panic_on_load_setup);
             }
             Some("select_unnamed") => {
-                app.add_systems(Update, move_system_clean);
+                // BUG: SelectEvent is written but NEVER consumed —
+                // no system updates the selection, so the select verb
+                // is dead. Awaits the S1 unconsumed-message oracle
+                // (swarm-716.24) to be detectable.
+                app.add_systems(Startup, |mut commands: Commands| {
+                    // The unnamed selectable target (no Name).
+                    commands.spawn_empty();
+                });
+                app.add_systems(Update, (keyboard_system, select_write_only).chain());
             }
             Some("dangling_target") => {
                 app.add_systems(Startup, dangling_target_setup);

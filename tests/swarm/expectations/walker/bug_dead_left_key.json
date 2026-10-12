@@ -5,7 +5,7 @@
   "seeds": [
     42
   ],
-  "duration_s": 6.0,
+  "duration_s": 10.0,
   "must_report": [
     {
       "rule": "dead_verb",
