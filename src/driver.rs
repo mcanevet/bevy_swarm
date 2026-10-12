@@ -757,7 +757,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // Pre-run snapshot for code-aware (system) coverage — see
     // `system_coverage`. Must happen after finish/cleanup so schedules
     // are initialized and enumerable.
-    let systems_before = snapshot_systems(app.world_mut());
+    let systems_before = crate::state::snapshot_systems_with_tick(app.world_mut());
 
     // Names of FrameTimeAnomaly invariants armed by this scenario; the
     // wall-clock oracle only records/reports when at least one is armed.
@@ -1222,7 +1222,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         cheat_count,
         unreplayable_actions,
         warnings,
-        system_coverage: system_coverage(&systems_before, app.world_mut()),
+        system_coverage: crate::state::system_coverage_from_snapshots(
+            &systems_before,
+            app.world_mut(),
+        ),
         state_trace: app
             .world_mut()
             .remove_resource::<crate::determinism::StateTrace>()

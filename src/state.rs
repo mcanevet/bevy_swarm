@@ -275,7 +275,21 @@ impl SystemCoverage {
 /// app.finish(); this function initializes any that have not run yet
 /// (see initialize() call below). run_scenario finishes plugin building
 /// before the first snapshot.
+/// Snapshot of system last-run ages plus the world tick it was taken
+/// at. 716.32: ages from different snapshots are only comparable via
+/// their snapshot ticks — comparing raw ages misclassifies bursty
+/// systems that ran once early in a long scenario.
+pub struct SystemSnapshot {
+    pub ages: HashMap<String, u32>,
+    pub tick: u32,
+}
+
+/// Take a snapshot; convenience wrapper preserving the old signature.
 pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
+    snapshot_systems_with_tick(world).ages
+}
+
+pub fn snapshot_systems_with_tick(world: &mut World) -> SystemSnapshot {
     let mut out = HashMap::new();
     // Take Schedules out of the world so each schedule can borrow the
     // world for lazy initialization (schedules init on first run).
@@ -283,7 +297,10 @@ pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
         .remove_resource::<bevy::ecs::schedule::Schedules>()
         .map(|mut s| std::mem::take(&mut s))
     else {
-        return out;
+        return SystemSnapshot {
+            ages: out,
+            tick: world.change_tick().get(),
+        };
     };
     // Store each system's AGE: how far its last_run tick lags the world
     // tick, as a wrapping distance. Raw ticks wrap and get clamped by
@@ -302,7 +319,10 @@ pub fn snapshot_systems(world: &mut World) -> HashMap<String, u32> {
         }
     }
     world.insert_resource(schedules);
-    out
+    SystemSnapshot {
+        ages: out,
+        tick: world_tick,
+    }
 }
 
 /// Compute code-aware system coverage for a completed run: executed =
@@ -322,14 +342,44 @@ pub fn is_harness_system(name: &str) -> bool {
 }
 
 pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> SystemCoverage {
-    let after = snapshot_systems(world);
+    let snap = snapshot_systems_with_tick(world);
+    // Legacy call sites have no before-tick: fall back to age comparison
+    // with the after-tick span correction unavailable. Build a snapshot
+    // with a plausible tick: 716.32 — without tick_before the sound
+    // comparison is impossible; approximate with span = max observed
+    // age delta. For legacy paths (unit tests) we use tick 0 semantics:
+    // ages compared directly (old behavior).
+    coverage_from(before, &snap.ages, None)
+}
+
+/// 716.32: sound system coverage. Compares LAST-RUN TICKS, not raw
+/// ages: a system that ran once shortly before the pre-run snapshot
+/// (prev age 1-2) and once EARLY in a long scenario has a large
+/// after-age that is >= prev — raw age comparison misclassified it as
+/// "did not run". Converting both ages to last_run_tick
+/// (tick_snapshot - age) and comparing those tick values directly
+/// classifies bursty systems correctly.
+pub fn system_coverage_from_snapshots(
+    before: &SystemSnapshot,
+    world: &mut World,
+) -> SystemCoverage {
+    let after = snapshot_systems_with_tick(world);
+    coverage_from(&before.ages, &after.ages, Some((before.tick, after.tick)))
+}
+
+fn coverage_from(
+    before: &HashMap<String, u32>,
+    after: &HashMap<String, u32>,
+    ticks: Option<(u32, u32)>,
+) -> SystemCoverage {
     // Harness-owned systems are excluded: bots/oracles run every frame
     // and would inflate fraction(), or show up as spurious "unexecuted"
     // gaps when gated by run conditions. Engine systems (bevy_) are
     // kept; use SystemCoverage::game_only to drop them too.
     let after: HashMap<String, u32> = after
-        .into_iter()
+        .iter()
         .filter(|(name, _)| !is_harness_system(name))
+        .map(|(k, v)| (k.clone(), *v))
         .collect();
     let mut cov = SystemCoverage {
         registered: after.keys().cloned().collect(),
@@ -337,9 +387,34 @@ pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> Syst
     };
     for (name, age) in &after {
         match before.get(name) {
-            // Same-or-older age = did not run during the scenario.
-            Some(prev) if age >= prev => {}
-            _ => cov.executed.push(name.clone()),
+            Some(prev) => {
+                if let Some((tick_before, tick_after)) = ticks {
+                    // 716.32: sound classification under Bevy's change-
+                    // tick CLAMPING (check_change_ticks rebases stale
+                    // last_run values, so absolute tick comparisons
+                    // lie). Sound invariant: the world tick advanced
+                    // by span = tick_after - tick_between between
+                    // snapshots. A system whose last run happened
+                    // DURING the run has age_after < span (its last
+                    // run is more recent than the pre-snapshot). A
+                    // system that last ran before the snapshot has
+                    // age_after >= span (age grew by at least span).
+                    // Never-initialized systems keep the huge clamped
+                    // age → not executed. This classifies bursty
+                    // systems correctly where raw age comparison
+                    // (age >= prev → "did not run") lied.
+                    let span = tick_after.wrapping_sub(tick_before);
+                    if *age < span {
+                        cov.executed.push(name.clone());
+                    }
+                } else if age < prev {
+                    // Legacy fallback (no tick info): shrinking age =
+                    // ran more recently.
+                    cov.executed.push(name.clone());
+                }
+            }
+            // Before missing → system added mid-run → executed.
+            None => cov.executed.push(name.clone()),
         }
     }
     cov.registered.sort();
@@ -468,3 +543,80 @@ impl FrameTimingStats {
 
 const FRAME_TIME_ANOMALY_MIN_SAMPLES: u64 = 60; // one second @ 60 TPS
 pub(crate) const FRAME_TIME_ANOMALY_SIGMA: f64 = 3.0;
+
+#[cfg(test)]
+mod tests_716_32 {
+    use super::*;
+
+    /// 716.32: a system that ran once shortly BEFORE the pre-run
+    /// snapshot (prev age 2) and once EARLY in a long scenario
+    /// (age_after large) must be classified EXECUTED. Raw age
+    /// comparison said "did not run".
+    #[test]
+    fn early_runner_in_long_scenario_classified_executed() {
+        // Ran 2 ticks before the pre-run snapshot, then once EARLY in
+        // the run (tick 1_100 of a 1_000→10_000 span): age_after
+        // (8_900) >= prev (2) — raw age comparison said "did not run".
+        let tick_before = 1000u32;
+        let tick_after = 10_000u32;
+        let before = HashMap::from([("bursty".to_string(), 2u32)]);
+        let after = HashMap::from([("bursty".to_string(), 8_900u32)]);
+
+        let cov = coverage_from(&before, &after, Some((tick_before, tick_after)));
+        assert!(
+            cov.executed.iter().any(|n| n == "bursty"),
+            "early runner must be classified executed, got {:?}",
+            cov.executed
+        );
+    }
+
+    /// A system that did NOT run during the scenario must stay
+    /// unexecuted: age grows by at least the span.
+    #[test]
+    fn non_runner_classified_not_executed() {
+        let tick_before = 1000u32;
+        let tick_after = 10_000u32;
+        let before = HashMap::from([("idle".to_string(), 2u32)]);
+        let after = HashMap::from([("idle".to_string(), 9_002u32)]);
+
+        let cov = coverage_from(&before, &after, Some((tick_before, tick_after)));
+        assert!(
+            !cov.executed.iter().any(|n| n == "idle"),
+            "non-runner must not be classified executed"
+        );
+    }
+
+    /// Never-initialized system (huge clamped age) stays unexecuted.
+    #[test]
+    fn never_initialized_stays_unexecuted() {
+        let tick_before = 1000u32;
+        let tick_after = 10_000u32;
+        let before = HashMap::from([("never".to_string(), 3_258_167_296u32)]);
+        let after = HashMap::from([("never".to_string(), 3_258_166_730u32)]);
+
+        let cov = coverage_from(&before, &after, Some((tick_before, tick_after)));
+        assert!(
+            !cov.executed.iter().any(|n| n == "never"),
+            "never-initialized system must not be classified executed"
+        );
+    }
+
+    /// Bursty system running mid-run stays executed across spans.
+    #[test]
+    fn bursty_system_across_spans() {
+        for span in [10u32, 100, 1_000, 10_000] {
+            let tick_before = 500u32;
+            let tick_after = tick_before.wrapping_add(span);
+            let before = HashMap::from([("every_n".to_string(), 5u32)]);
+            let last_run = tick_before + span / 2;
+            let age_after = tick_after.wrapping_sub(last_run);
+            let after = HashMap::from([("every_n".to_string(), age_after)]);
+
+            let cov = coverage_from(&before, &after, Some((tick_before, tick_after)));
+            assert!(
+                cov.executed.iter().any(|n| n == "every_n"),
+                "span {span}: bursty system must be classified executed"
+            );
+        }
+    }
+}
