@@ -111,9 +111,10 @@ impl Violations {
     }
 
     /// Wall-clock/informational rules excluded from fingerprint gating.
+    /// le3.10 (RF6): kept in parity with Rule::is_informational()
+    /// (tested); orphan entries frame_time_p99/frame_time_worst
+    /// (never emitted by any rule) dropped.
     pub const INFORMATIONAL_RULES: &[&str] = &[
-        "frame_time_p99",
-        "frame_time_worst",
         "frame_time_anomaly",
         "frame_time_p99_below",
         "fps_floor",

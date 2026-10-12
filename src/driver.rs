@@ -1089,6 +1089,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     {
         let norm = crate::fingerprint::config_normalizer();
         for e in &mut snap {
+            // le3.10 (RF6): informational rules are never fingerprinted
+            // (Violations::snapshot already leaves them unfingerprinted;
+            // this loop previously stamped frame_time_anomaly anyway).
+            if crate::state::Violations::INFORMATIONAL_RULES.contains(&e.rule.as_str()) {
+                e.fingerprint = None;
+                e.fingerprint_scheme = 1;
+                continue;
+            }
             if e.fingerprint.is_none() {
                 let raw_detail = e
                     .detail
@@ -1124,7 +1132,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // reported under their dedicated informational rules (excluded
     // from fingerprints/digests, per U1 rule 9).
     if !crash_detected {
-        let measured_fps = state.frame as f64 / scenario.duration_s.max(f32::EPSILON) as f64;
+        // le3.10 (RF6): fps_floor uses WALL-CLOCK fps, not simulated tps.
+        // The old formula always equaled tps (frame/duration_s) and never
+        // responded to real frame cost. Use the WALL_TIMER which tracks
+        // actual elapsed time of the run.
+        let wall = crate::driver::WALL_TIMER
+            .with(|t| t.borrow().unwrap_or(0.0))
+            .max(f64::EPSILON);
+        let measured_fps = state.frame as f64 / wall;
         for inv in &scenario.invariants {
             match inv.rule {
                 crate::enums::InvariantRule::FpsFloor => {
@@ -1177,9 +1192,17 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             }
         }
     }
+    // le3.10 (RF6): informational rules NEVER gate the run status.
+    // A run whose only violations are informational (fps_floor,
+    // frame_time_*, dead_widget, perf_budget, entropy_unattributed)
+    // is Pass.
+    let gating = snap
+        .iter()
+        .filter(|e| !crate::state::Violations::INFORMATIONAL_RULES.contains(&e.rule.as_str()))
+        .count();
     let status = if crash_detected {
         crate::enums::PlaytestStatus::Crash
-    } else if snap.is_empty() {
+    } else if gating == 0 {
         crate::enums::PlaytestStatus::Pass
     } else {
         crate::enums::PlaytestStatus::Fail
