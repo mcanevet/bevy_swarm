@@ -85,7 +85,15 @@ pub(crate) fn check_transform_desync_system(world: &mut World) {
                     };
                     let rendered = bevy::math::Vec2::new(tr.translation.x, tr.translation.y);
                     let diff = (rendered - *v2).length();
-                    if diff > 0.01 {
+                    // qa8.16: desync threshold in WORLD UNITS (1cm at
+                    // 1unit=1m scale). Configurable via env var for
+                    // games with different unit conventions; documented
+                    // as world-units, not pixels.
+                    let threshold = std::env::var("SWARM_TRANSFORM_DESYNC_TOL")
+                        .ok()
+                        .and_then(|s| s.parse::<f32>().ok())
+                        .unwrap_or(0.01);
+                    if diff > threshold {
                         found.push((
                             "entity:transform".to_string(),
                             format!(
@@ -661,8 +669,7 @@ fn eval_reflect_field(
     reflect: &bevy::ecs::reflect::ReflectComponent,
     parsed_path: &bevy::reflect::ParsedPath,
 ) -> Option<(Option<f64>, Option<String>)> {
-    let _ = registry;
-    let _ = registry;
+    let _ = registry; // 6wt: keep signature unchanged (future use), but only suppress the warning once.
     let resource_entity = world
         .resource_entities()
         .iter()

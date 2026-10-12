@@ -445,10 +445,17 @@ pub fn diff_states(
         })
         .filter(|(_, va, vb)| {
             if let (Ok(a), Ok(b)) = (va.parse::<f64>(), vb.parse::<f64>()) {
-                let abs_diff = (a - b).abs();
-                let scale = a.abs().max(b.abs());
-                !(abs_diff <= tolerance.abs_tol
-                    || (scale > 0.0 && abs_diff <= tolerance.rel_tol * scale))
+                // qa8.16: NaN parses OK but compares weirdly —
+                // both-NaN counts as equal, one-NaN as diverged.
+                // (-0.0 == 0.0 numerically; no special case needed.)
+                if a.is_nan() || b.is_nan() {
+                    !(a.is_nan() && b.is_nan())
+                } else {
+                    let abs_diff = (a - b).abs();
+                    let scale = a.abs().max(b.abs());
+                    !(abs_diff <= tolerance.abs_tol
+                        || (scale > 0.0 && abs_diff <= tolerance.rel_tol * scale))
+                }
             } else {
                 va != vb
             }
