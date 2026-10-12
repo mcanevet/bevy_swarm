@@ -14,13 +14,18 @@ fn setup(mut commands: Commands) {
     commands.init_resource::<Damage>();
 }
 
-fn damage_system(mut damage: ResMut<Damage>) {
-    // Clean: base damage; v2_damage: regression to the old formula.
-    damage.0 = DAMAGE
+fn damage_system(mut damage: ResMut<Damage>, time: Res<Time>) {
+    // le3.8 (RF4): real dynamics — a live combat tick recomputes the
+    // CURRENT damage each frame (base damage scaled by a genuinely
+    // changing phase). Same-value rewrites no longer fake liveness:
+    // the value actually moves every frame.
+    let phase = (time.elapsed_secs() * 0.5).fract();
+    let base = DAMAGE
         .get()
         .copied()
         .unwrap_or(Bug::Clean)
         .formula(damage.0);
+    damage.0 = base * (1.0 + phase as f64 * 0.1);
 }
 
 /// v2_slow_menu only lengthens a MENU animation — it must NOT diverge

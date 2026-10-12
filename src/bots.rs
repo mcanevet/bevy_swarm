@@ -547,20 +547,30 @@ pub(crate) fn pursuit_bot_system(
 
 pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
     let tick = world.read_change_tick().get();
+    let liveness_cap = world
+        .get_resource::<ScenarioResource>()
+        .map(|s| {
+            let timeout_frames = (s.0.liveness.timeout_s * 60.0) as usize;
+            timeout_frames.saturating_mul(2).max(600)
+        })
+        .unwrap_or(600);
     let mut state = world.resource_mut::<PlaytestState>();
     state.frame += 1;
     state.metrics.frame_count += 1;
     // FX1: snapshot the change tick BEFORE any schedule runs this frame.
     // The liveness oracle compares against the tick from N FRAMES ago,
     // not N ticks ago (the tick counter advances per system run).
+    // le3.8 (RF4): cap scales with the liveness timeout so long
+    // timeouts (timeout_s*tps > 600) don't silently disable
+    // frozen_world via the warmup fallback.
     state.frame_start_ticks.push_back(tick);
-    if state.frame_start_ticks.len() > 600 {
+    if state.frame_start_ticks.len() > liveness_cap {
         state.frame_start_ticks.pop_front();
     }
     // FX1: also snapshot for effect windows (I5).
     let frame_now = state.frame;
     state.effect_window_snapshots.push((frame_now, tick));
-    if state.effect_window_snapshots.len() > 600 {
+    if state.effect_window_snapshots.len() > liveness_cap {
         state.effect_window_snapshots.remove(0);
     }
 }

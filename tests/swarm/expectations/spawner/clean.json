@@ -22,6 +22,9 @@
   "must_report": [],
   "must_not_report": [],
   "liveness": {
-    "mode": "off"
+    "mode": "real_time",
+    "watch": [
+      "IdlePhase"
+    ]
   }
 }
