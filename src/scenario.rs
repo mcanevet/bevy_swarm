@@ -285,8 +285,11 @@ impl Default for RawSurface {
     fn default() -> Self {
         // FX4.4: non-empty default surface for tier-0 chaos. When no
         // IntentSurface exists, chaos samples these raw inputs into
-        // RawActionQueue. Standard set: arrows, WASD, space, enter,
-        // escape, mouse left, gamepad south/dpad.
+        // RawActionQueue. Standard set: arrows + WASD (keyboard only).
+        // RF8: keys here are a GUESS — an unbound key is reported as
+        // informational unused_input, never dead_verb (unless a
+        // sibling in its verb family works). Mouse/gamepad stay
+        // opt-in.
         Self {
             keys: vec![
                 "KeyW".into(),

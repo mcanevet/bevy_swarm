@@ -270,3 +270,148 @@ impl Drop for FixtureBugGuard {
         }
     }
 }
+
+// ---- RF8 (swarm-m2h.22): autotest false positives --------------------
+
+#[derive(Resource, Default)]
+struct Rf8Position {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Default)]
+struct ArrowsOnlyPlugin;
+
+impl Plugin for ArrowsOnlyPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Rf8Position>().add_systems(
+            Update,
+            |keys: Res<ButtonInput<KeyCode>>, mut pos: ResMut<Rf8Position>| {
+                if keys.pressed(KeyCode::ArrowUp) {
+                    pos.y += 1.0;
+                }
+                if keys.pressed(KeyCode::ArrowDown) {
+                    pos.y -= 1.0;
+                }
+                if keys.pressed(KeyCode::ArrowLeft) {
+                    pos.x -= 1.0;
+                }
+                if keys.pressed(KeyCode::ArrowRight) {
+                    pos.x += 1.0;
+                }
+            },
+        );
+    }
+}
+
+/// RF8 critical: an arrows-only clean game must PASS the default
+/// autotest — unbound default-surface keys (WASD) are informational
+/// unused_input, not dead_verb.
+#[test]
+#[serial]
+fn rf8_arrows_only_passes_default_surface() {
+    let config = AutotestConfig {
+        num_seeds: 8,
+        duration_s: 2.0,
+        parallel: 2,
+        ..AutotestConfig::default()
+    };
+    let report = autotest(ArrowsOnlyPlugin, config).expect("autotest runs");
+    assert!(
+        !report.failures.iter().any(|f| f.rule == "dead_verb"),
+        "no dead_verb on unused WASD keys; failures: {:?}",
+        report.failures.iter().map(|f| &f.rule).collect::<Vec<_>>()
+    );
+    assert!(
+        report.failures.is_empty(),
+        "arrows-only game passes default autotest"
+    );
+}
+
+/// RF8 moderate: a static/undrivable game must not report frozen_world
+/// (Major) — the tier-0 surface was a guess, so the game is
+/// undrivable-game territory (informational), not a gameplay bug.
+#[test]
+#[serial]
+fn rf8_static_game_undrivable_not_frozen() {
+    #[derive(Clone, Default)]
+    struct StaticPlugin;
+    impl Plugin for StaticPlugin {
+        fn build(&self, _app: &mut App) {}
+    }
+    let config = AutotestConfig {
+        num_seeds: 4,
+        duration_s: 3.0,
+        parallel: 2,
+        ..AutotestConfig::default()
+    };
+    let report = autotest(StaticPlugin, config).expect("autotest runs");
+    assert!(
+        !report.failures.iter().any(|f| f.rule == "frozen_world"),
+        "static game should not report frozen_world as Major"
+    );
+}
+
+/// RF8 moderate: non-Clone plugins work via autotest_factory (no
+/// Clone bound, game-type inference preserved).
+#[test]
+#[serial]
+fn rf8_non_clone_plugin_via_factory() {
+    use bevy_swarm::autotest::autotest_factory;
+
+    struct NonClonePlugin {
+        _data: std::sync::Mutex<Vec<u8>>,
+    }
+    impl Plugin for NonClonePlugin {
+        fn build(&self, app: &mut App) {
+            app.init_resource::<Rf8Position>().add_systems(
+                Update,
+                |keys: Res<ButtonInput<KeyCode>>, mut pos: ResMut<Rf8Position>| {
+                    if keys.pressed(KeyCode::ArrowUp) {
+                        pos.y += 1.0;
+                    }
+                },
+            );
+        }
+    }
+
+    let config = AutotestConfig {
+        num_seeds: 2,
+        duration_s: 1.0,
+        parallel: 1,
+        ..AutotestConfig::default()
+    };
+    let report = autotest_factory(
+        || NonClonePlugin {
+            _data: std::sync::Mutex::new(Vec::new()),
+        },
+        config,
+    )
+    .expect("autotest_factory runs");
+    assert!(report.failures.is_empty(), "non-Clone plugin autotests");
+}
+
+/// RF8 moderate: coverage is serialized into report.json (was
+/// #[serde(skip)]).
+#[test]
+#[serial]
+fn rf8_coverage_serialized_in_report() {
+    // Unique output dir so parallel/serial tests don't race.
+    let config = AutotestConfig {
+        num_seeds: 2,
+        duration_s: 0.1,
+        parallel: 1,
+        output_dir: std::path::PathBuf::from("rf8-coverage-test"),
+        ..AutotestConfig::default()
+    };
+    let report = autotest(ArrowsOnlyPlugin, config).expect("autotest runs");
+    let json = serde_json::to_value(&report).expect("serialize report");
+    assert!(
+        json["coverage"].is_object(),
+        "coverage serialized in report"
+    );
+    assert!(
+        json["coverage"].get("intents_emitted").is_some(),
+        "intents_emitted present in coverage"
+    );
+}

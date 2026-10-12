@@ -123,6 +123,18 @@ pub fn headless_platform() -> PluginGroupBuilder {
 pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
     game_plugin: P,
 ) -> impl Fn() -> App + Send + Sync + 'static {
+    headless_app_factory(move || game_plugin.clone())
+}
+
+/// RF8: factory-based variant — games without a `Clone` plugin (the
+/// common case for game plugins holding non-Clone state) can pass a
+/// constructor closure instead. Game-type inference uses the type the
+/// FACTORY constructs, so wrapping the plugin no longer breaks Z6.
+pub fn headless_app_factory<P, F>(make_plugin: F) -> impl Fn() -> App + Send + Sync + 'static
+where
+    P: Plugin + Send + Sync + 'static,
+    F: Fn() -> P + Send + Sync + 'static,
+{
     move || {
         let mut app = App::new();
         let platform = headless_platform();
@@ -146,7 +158,8 @@ pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
             );
         }
 
-        app.add_plugins(game_plugin.clone());
+        let plugin = make_plugin();
+        app.add_plugins(plugin);
         // le3.11 (RF7): install LogPlugin with the swarm capture layer
         // as custom_layer — integrates with the game's logging while
         // ensuring our capture layer sees all events.

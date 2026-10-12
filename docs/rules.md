@@ -6,6 +6,7 @@ Expectation files (X2) reference only these names.
 | Rule name | Kind |
 |---|---|
 | `frozen_world` | major |
+| `undrivable_game` | informational |
 | `bevy_error` | major |
 | `bevy_warning` | major |
 | `log_error` | major |
@@ -24,6 +25,7 @@ Expectation files (X2) reference only these names.
 | `golden_diverged` | major |
 | `dead_widget` | informational |
 | `dead_verb` | major |
+| `unused_input` | informational |
 | `transform_desync` | major |
 | `perf_budget_exceeded` | informational |
 | `stuck_after_intent` | major |
