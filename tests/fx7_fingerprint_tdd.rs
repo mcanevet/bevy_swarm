@@ -148,7 +148,7 @@ fn fx7_e2e_walker_panic_on_edge_one_fingerprint_across_seeds() {
     use bevy_swarm::branch::ScenarioRunner;
     use bevy_swarm::scenario::Scenario;
 
-    std::env::set_var("FIXTURE_BUG", "panic_on_edge");
+    let _fixture_bug_guard = FixtureBugGuard::set(Some("panic_on_edge"));
 
     let mut fps: Vec<bevy_swarm::fingerprint::Fingerprint> = vec![];
     let mut saw_panic = false;
@@ -169,7 +169,6 @@ fn fx7_e2e_walker_panic_on_edge_one_fingerprint_across_seeds() {
             }
         }
     }
-    std::env::remove_var("FIXTURE_BUG");
 
     assert!(saw_panic, "panic_on_edge must fire (seed-dependent)");
     assert!(!fps.is_empty(), "panic violations must carry fingerprints");
@@ -189,7 +188,7 @@ fn fx7_e2e_spawner_leak_two_entity_counts_one_fingerprint() {
     use bevy_swarm::branch::ScenarioRunner;
     use bevy_swarm::scenario::Scenario;
 
-    std::env::set_var("FIXTURE_BUG", "leak");
+    let _fixture_bug_guard = FixtureBugGuard::set(Some("leak"));
 
     let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":42,"input_rate_hz":10},"duration_s":2.0,
@@ -227,7 +226,6 @@ fn fx7_e2e_spawner_leak_two_entity_counts_one_fingerprint() {
             );
         }
     }
-    std::env::remove_var("FIXTURE_BUG");
 
     assert!(
         !leak_fps.is_empty(),
@@ -240,4 +238,72 @@ fn fx7_e2e_spawner_leak_two_entity_counts_one_fingerprint() {
         1,
         "one leak bug → exactly 1 fingerprint, got {uniq:?}"
     );
+}
+
+/// le3.2: RAII guard that saves/restores FIXTURE_BUG on scope exit,
+/// including panics mid-test (which would otherwise leak a set env
+/// var into subsequent tests in this binary). Panics are caught via
+/// Drop. Combined with #[serial], mutations are exception-safe and
+/// serialized within the test binary.
+struct FixtureBugGuard {
+    prev: Option<String>,
+}
+
+impl FixtureBugGuard {
+    fn set(env_bug: Option<&str>) -> Self {
+        let prev = std::env::var("FIXTURE_BUG").ok();
+        match env_bug {
+            Some(b) => std::env::set_var("FIXTURE_BUG", b),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+        Self { prev }
+    }
+}
+
+impl Drop for FixtureBugGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(p) => std::env::set_var("FIXTURE_BUG", p),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+    }
+}
+
+/// le3.2: exception safety — a panic while FIXTURE_BUG is held under
+/// the guard must NOT leak the setting into subsequent tests.
+#[test]
+#[serial_test::serial]
+fn fixture_bug_guard_restores_after_panic() {
+    // Ensure clean baseline.
+    std::env::remove_var("FIXTURE_BUG");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = FixtureBugGuard::set(Some("leak"));
+        assert!(std::env::var("FIXTURE_BUG").ok().as_deref() == Some("leak"));
+        panic!("deliberate mid-guard panic");
+    }));
+    assert!(result.is_err(), "precondition: inner panic happened");
+    assert!(
+        std::env::var("FIXTURE_BUG").is_err(),
+        "guard must restore (unset) FIXTURE_BUG after a panic"
+    );
+}
+
+/// le3.2: nesting — inner guard restores the OUTER value, not unset.
+#[test]
+#[serial_test::serial]
+fn fixture_bug_guard_nests_correctly() {
+    std::env::remove_var("FIXTURE_BUG");
+    {
+        let _outer = FixtureBugGuard::set(Some("leak"));
+        {
+            let _inner = FixtureBugGuard::set(Some("panic_on_edge"));
+            assert_eq!(std::env::var("FIXTURE_BUG").unwrap(), "panic_on_edge");
+        }
+        assert_eq!(
+            std::env::var("FIXTURE_BUG").unwrap(),
+            "leak",
+            "inner drop must restore the outer value"
+        );
+    }
+    assert!(std::env::var("FIXTURE_BUG").is_err());
 }
