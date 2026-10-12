@@ -353,7 +353,7 @@ pub fn raw_input_preupdate_system(
             }
             #[cfg_attr(not(feature = "gamepad"), allow(unused_variables))]
             RawAction::GamepadButton {
-                button,
+                ref button,
                 hold_frames,
             } => {
                 #[cfg(feature = "gamepad")]
@@ -370,6 +370,9 @@ pub fn raw_input_preupdate_system(
                         &mut holds.gamepad_buttons,
                     );
                     action_effects.record(&format!("raw:gamepad:{}", button), frame);
+                    // RF16: audit so gamepad chaos is replayable and
+                    // minimizable.
+                    audit(&format!("raw:gamepad:{}", button), &action);
                 }
             }
             RawAction::GamepadAxis {

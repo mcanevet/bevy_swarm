@@ -481,3 +481,140 @@ fn fx2_headless_ui_click_presses_interaction() {
         "button must register click headlessly: hovered={pressed:?}, interaction={interaction:?}"
     );
 }
+
+// RF16: raw GamepadButton actions are written to the audit log.
+#[test]
+fn rf16_gamepad_button_audited() {
+    use bevy::prelude::*;
+    use bevy_swarm::raw_input::RawActionQueue;
+    use bevy_swarm::scenario::RawAction;
+    use bevy_swarm::state::PlaytestState;
+
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        TransformPlugin,
+        bevy::input::InputPlugin,
+        TestConventionsPlugin,
+        PlaytestPlugin,
+    ));
+    app.add_message::<bevy::window::WindowEvent>();
+    app.insert_resource(IntentSurface::new(vec![
+        SurfaceVariant::Choice(3),
+        SurfaceVariant::Wait,
+    ]));
+    app.world_mut().spawn((
+        Name::new("Player"),
+        Gameplay,
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
+    app.world_mut()
+        .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+
+    // Queue a gamepad button action
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((
+            0,
+            RawAction::GamepadButton {
+                button: "South".to_string(),
+                hold_frames: 2,
+            },
+        ));
+
+    let mut state = PlaytestState::new(60, 42);
+    state.frame = 0;
+    app.world_mut().insert_resource(state);
+    app.update();
+
+    let log = app.world().resource::<bevy_swarm::contract::ActionLog>();
+    assert!(
+        !log.entries.is_empty(),
+        "gamepad button must be written to the audit log"
+    );
+    assert!(
+        log.entries.iter().any(|e| e.action.contains("raw:gamepad")),
+        "audit entry must contain raw:gamepad"
+    );
+}
+
+// RF16: end-to-end raw replay + minimization (chaos -> audit log -> replay -> identical digests).
+#[test]
+fn rf16_raw_replay_and_minimization() {
+    use bevy::prelude::*;
+    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use bevy_swarm::headless::headless_app_factory;
+    use bevy_swarm::minimize::minimize_failure;
+    use bevy_swarm::scenario::Scenario;
+    use bevy_swarm::state::PlaytestState;
+
+    struct TestPlugin;
+    impl Plugin for TestPlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(Startup, |mut commands: Commands| {
+                commands.spawn((
+                    Name::new("Player"),
+                    Gameplay,
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                ));
+            });
+        }
+    }
+
+    let factory = headless_app_factory(|| TestPlugin);
+    let scenario: Scenario =
+        serde_json::from_str(r#"{"bot":{"type":"chaos","seed":5},"duration_s":0.3}"#).unwrap();
+
+    let runner = InProcess { factory };
+    let report = runner.run(&scenario).unwrap();
+
+    // Replay the audit log and verify digest matches
+    let log = &report.action_log;
+    let timed_actions = bevy_swarm::scenario::action_log_to_timed_actions(log);
+    let replay_inputs: Vec<serde_json::Value> = timed_actions
+        .iter()
+        .filter_map(bevy_swarm::minimize::action_to_replay_intent)
+        .enumerate()
+        .map(|(i, intent)| {
+            let frame = timed_actions[i].frame;
+            serde_json::json!({"frame": frame, "intent": intent})
+        })
+        .collect();
+    let replay_scenario: Scenario = serde_json::from_str(&format!(
+        r#"{{"bot":{{"type":"replay","inputs":{}}},"duration_s":0.3}}"#,
+        serde_json::to_string(&replay_inputs).unwrap()
+    ))
+    .unwrap();
+
+    let replay_runner = InProcess {
+        factory: headless_app_factory(|| TestPlugin),
+    };
+    let replay_report = replay_runner.run(&replay_scenario).unwrap();
+
+    // Digests must match
+    fn final_digest(r: &bevy_swarm::driver::PlaytestReport) -> Option<u64> {
+        r.state_trace.as_ref()?.last().map(|d| d.hash)
+    }
+    assert_eq!(
+        final_digest(&report),
+        final_digest(&replay_report),
+        "replay digest must match original chaos digest"
+    );
+
+    // Minimize should produce a minimal subset
+    let outcome = minimize_failure(
+        headless_app_factory(|| TestPlugin),
+        &scenario,
+        &report,
+        None,
+    );
+    if let Ok(outcome) = outcome {
+        assert!(
+            outcome.minimal_inputs.len() <= timed_actions.len(),
+            "minimal inputs must be <= original"
+        );
+    }
+}

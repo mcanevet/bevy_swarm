@@ -457,18 +457,29 @@ where
             });
             let outcome = crate::minimize::minimize_failure(factory, base_scen, rep, None);
             if let Ok(out) = outcome {
-                let fp = rep
-                    .violations
-                    .first()
-                    .and_then(|v| v.fingerprint.clone())
-                    .unwrap_or_else(|| Fingerprint(String::new()));
+                // RF16: derive the rule from the minimizer's
+                // FailureSignature (violations.first() reports
+                // 'bevy_error' for a Crash signature).
+                let (fp, rule) = match &out.signature {
+                    crate::minimize::FailureSignature::Crash => (
+                        rep.violations
+                            .first()
+                            .and_then(|v| v.fingerprint.clone())
+                            .unwrap_or_else(|| Fingerprint(String::new())),
+                        "crash".to_string(),
+                    ),
+                    crate::minimize::FailureSignature::Violation { rule, .. } => (
+                        rep.violations
+                            .iter()
+                            .find(|v| v.rule == *rule)
+                            .and_then(|v| v.fingerprint.clone())
+                            .unwrap_or_else(|| Fingerprint(String::new())),
+                        rule.clone(),
+                    ),
+                };
                 minimized.push(MinimizedFailureSummary {
                     fingerprint: fp,
-                    rule: rep
-                        .violations
-                        .first()
-                        .map(|v| v.rule.clone())
-                        .unwrap_or_default(),
+                    rule,
                     seed: *seed,
                     minimal_inputs_len: out.minimal_inputs.len(),
                 });
