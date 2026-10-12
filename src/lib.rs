@@ -50,6 +50,7 @@ pub mod golden;
 pub mod harness;
 pub mod headless;
 pub mod identity;
+pub mod junit;
 pub mod liveness;
 pub mod minimize;
 pub mod oracles;

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### E2: JUnit XML output (swarm-cj8.14)
+
+- `PlaytestReport::to_junit_testcase(name, classname)` — one `<testcase>`; Fail -> `<failure>` (rule/target/frames/count/detail), Crash -> `<error>`; full report JSON in `<system-out>` CDATA (with `]]>` splitting).
+- `BranchMatrixReport::to_junit(suite_name)` — full document; failures/errors tallied from statuses.
+- `AutotestReport::to_junit(suite_name)` — one `<testcase>` per seed run; written automatically to `runs/<run-id>/junit.xml` (U1 convention).
+- `PlaytestReport.wall_time_s` — wall-clock run-loop duration measured in the driver (used for `<testcase time>`, falling back to simulated time).
+- `BranchOutcome::is_fail/is_crash/report_time` helpers.
+- Hand-written XML with full escaping (`&<>` quotes, control chars) — no new dependencies.
+- README: CI snippet writing `matrix.to_junit("swarm")` to `target/swarm-junit.xml` and uploading as an artifact.
+
 ### FX2: Acceptance Harness Integrity (swarm-qo7.2)
 
 - **FX2.1**: `fixture-runner --out <path>` for unique report paths per case; fatal errors on write failure.

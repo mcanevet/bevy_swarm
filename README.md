@@ -118,6 +118,18 @@ round-trip guaranteed by test.
 **experimental**: usable, but expect breaking changes without a major
 version bump; the JSON DSL is the stable surface for v0.1.
 
+## CI integration (JUnit XML)
+
+Emit JUnit XML for CI test reporters (GitHub Actions, GitLab, Jenkins):
+
+```rust,no_run
+let matrix = run_branch_matrix(build_app, vec![variant_a, variant_b])?;
+std::fs::write("target/swarm-junit.xml", matrix.to_junit("swarm"))?;
+```
+
+Upload `target/swarm-junit.xml` as a CI artifact; autotest runs also
+write `runs/<run-id>/junit.xml` automatically.
+
 ## Testing
 
 Two loops (see docs/conventions.md):

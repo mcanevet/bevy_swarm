@@ -51,6 +51,11 @@
       "minimum": 0,
       "description": "Simulated duration in seconds (frame_count / tps) (A1)."
     },
+    "wall_time_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Wall-clock duration of the run loop in seconds (E2; used for JUnit testcase time)."
+    },
     "error": {
       "type": [
         "string",
