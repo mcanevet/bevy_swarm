@@ -184,6 +184,58 @@ pub struct MinimizedFailureSummary {
 }
 
 impl AutotestReport {
+    /// cj8.14 (E2): JUnit XML document for CI dashboards. One
+    /// <testcase> per seed run; failures/errors counted from statuses.
+    pub fn to_junit(&self, suite_name: &str) -> String {
+        let esc = crate::junit::xml_escape;
+        let tests = self.runs.len();
+        let failures = self.runs.iter().filter(|r| r.status == "fail").count();
+        let errors = self.runs.iter().filter(|r| r.status == "crash").count();
+        let time: f64 = self
+            .runs
+            .iter()
+            .map(|r| r.duration_ms as f64 / 1000.0)
+            .sum();
+        let mut out = String::new();
+        out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        out.push_str("<testsuites>\n");
+        out.push_str(&format!(
+            "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"{}\" time=\"{:.3}\">\n",
+            esc(suite_name),
+            tests,
+            failures,
+            errors,
+            time
+        ));
+        for r in &self.runs {
+            out.push_str(&format!(
+                "      <testcase name=\"seed-{}\" classname=\"{}\" time=\"{:.3}\">\n",
+                r.seed,
+                esc(suite_name),
+                r.duration_ms as f64 / 1000.0
+            ));
+            match r.status.as_str() {
+                "fail" => {
+                    out.push_str(&format!(
+                        "        <failure message=\"{} violations\" type=\"assertion\">seed {}\n</failure>\n",
+                        r.violations_count, r.seed
+                    ));
+                }
+                "crash" => {
+                    out.push_str(&format!(
+                        "        <error message=\"crashed after {} frames\" type=\"crash\">seed {}\n</error>\n",
+                        r.frame_count, r.seed
+                    ));
+                }
+                _ => {}
+            }
+            out.push_str("      </testcase>\n");
+        }
+        out.push_str("  </testsuite>\n");
+        out.push_str("</testsuites>\n");
+        out
+    }
+
     /// Human-readable summary line.
     pub fn summary(&self) -> String {
         format!(
@@ -452,6 +504,11 @@ fn write_report(
     let report_path = run_dir.join("report.json");
     let json = serde_json::to_string_pretty(report)?;
     std::fs::write(&report_path, json)?;
+
+    // cj8.14 (E2): JUnit XML for CI dashboards, per U1 convention
+    // runs/<run-id>/junit.xml.
+    let junit = report.to_junit("bevy_swarm.autotest");
+    std::fs::write(run_dir.join("junit.xml"), junit)?;
 
     // Conventions §2: write a `last` pointer to the latest run.
     let last_pointer = target_dir.join(output_dir).join("last");

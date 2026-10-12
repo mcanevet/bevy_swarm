@@ -236,6 +236,10 @@ pub struct PlaytestReport {
     pub tps: u64,
     /// FX12 (A1): simulated duration in seconds = frame_count / tps.
     pub simulated_duration_s: f64,
+    /// cj8.14 (E2): wall-clock duration of the run loop, seconds.
+    /// Used by JUnit output for the <testcase time> attribute when
+    /// present (falls back to simulated time).
+    pub wall_time_s: f64,
     /// Frames spent waiting for GameReady before the scenario began.
     pub pre_ready_frames: u64,
     pub error: Option<String>,
@@ -288,6 +292,7 @@ impl PlaytestReport {
             metrics: Default::default(),
             coverage: Default::default(),
             frame_count: 0,
+            wall_time_s: 0.0,
             tps: 0,
             simulated_duration_s: 0.0,
             pre_ready_frames: 0,
@@ -417,6 +422,12 @@ pub(crate) fn finish_plugins(app: &mut App) {
         app.finish();
         app.cleanup();
     }
+}
+
+// cj8.14 (E2): wall-clock elapsed of the most recent run loop on
+// this thread (drained into PlaytestReport.wall_time_s).
+thread_local! {
+    static WALL_TIMER: std::cell::RefCell<Option<f64>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
@@ -833,6 +844,8 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             state.frozen_frames = 0;
             state.eventually_state.clear();
         }
+        let junit_wall_start = std::time::Instant::now();
+        WALL_TIMER.with(|t| *t.borrow_mut() = Some(junit_wall_start.elapsed().as_secs_f64()));
         for frame_idx in 0..total_ticks {
             let t0 = std::time::Instant::now();
             // FX5 Z7: expose the current frame to the error/log sinks
@@ -840,6 +853,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             crate::sinks::set_current_frame(frame_idx);
             app.update();
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            WALL_TIMER.with(|t| *t.borrow_mut() = Some(junit_wall_start.elapsed().as_secs_f64()));
             // Wall-clock frame timing (simulated time makes Time.delta()
             // constant; oracles need the actual wall duration). Opt-in via
             // a FrameTimeAnomaly invariant, reported under inv.name.
@@ -1235,6 +1249,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         } else {
             state.frame as f64 / state.tps as f64
         },
+        wall_time_s: WALL_TIMER.with(|t| t.borrow_mut().take()).unwrap_or(0.0),
         pre_ready_frames: state.pre_ready_frames,
         error: result.err().map(|payload| {
             payload
