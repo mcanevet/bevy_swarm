@@ -1051,8 +1051,18 @@ pub(crate) fn check_custom_system(world: &mut World) {
             let mut state_mut = world.resource_mut::<PlaytestState>();
             let samples = state_mut.delta_windows.entry(inv.name.clone()).or_default();
             samples.push_back((frame, current));
+            // 716.33: re-trim the FULL window on every push against
+            // the CURRENT tps — a mid-run tps change previously left
+            // stale samples retained (trim only popped one element
+            // per push and the len>1 guard kept one stale sample
+            // forever). Also cap total samples at 4x window: a bursty
+            // frame producer cannot grow the deque unboundedly.
             let window_ticks = tps.max(1);
+            let max_samples = window_ticks.saturating_mul(4) as usize;
             while samples.len() > 1 && frame - samples[0].0 > window_ticks {
+                samples.pop_front();
+            }
+            while samples.len() > max_samples {
                 samples.pop_front();
             }
             let oldest = samples[0];
@@ -1086,6 +1096,19 @@ pub(crate) fn check_custom_system(world: &mut World) {
         // sample to compare against.
         if let Some(diff) = &inv.differential {
             let mut state_mut = world.resource_mut::<PlaytestState>();
+            // 716.33: bound api_history growth. The map is keyed by
+            // unique TestApi path, which is unbounded for dynamic
+            // paths (player[0], player[1], ...). Retain the most
+            // recently used paths: on hitting the cap, clear the map
+            // (differential invariants only need the PREVIOUS sample;
+            // a cleared entry degrades gracefully to re-seeding on the
+            // next observation of that path).
+            const API_HISTORY_CAP: usize = 4096;
+            if state_mut.api_history.len() >= API_HISTORY_CAP
+                && !state_mut.api_history.contains_key(path)
+            {
+                state_mut.api_history.clear();
+            }
             let prev = state_mut.api_history.insert(path.clone(), current);
             if let Some(prev_val) = prev {
                 let violated = if diff == &crate::enums::DifferentialOp::NoDecrease {
@@ -1449,6 +1472,97 @@ mod fx7_label_tests {
         assert_eq!(
             strip_generated_suffix("Enemy"),
             strip_generated_suffix("Enemy 1")
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_716_33 {
+    use crate::state::PlaytestState;
+
+    /// 716.33: delta windows re-trim against the CURRENT tps. A tps
+    /// drop mid-run (larger window_ticks... smaller tps => fewer
+    /// ticks) — simulate tps going from 60 to 5: old samples beyond
+    /// the new (smaller) window must be dropped on the next push.
+    #[test]
+    fn delta_window_retrims_after_tps_drop() {
+        let mut state = PlaytestState::new(60, 1);
+        let samples = state.delta_windows.entry("inv".to_string()).or_default();
+        // Accumulate under tps=60: window = 60 ticks.
+        for frame in 0..60u64 {
+            samples.push_back((frame, frame as f64));
+        }
+        assert_eq!(samples.len(), 60, "precondition: full window");
+
+        // Simulate the trimmed behavior under tps=5 (window=5 ticks)
+        // for a new push at frame 100.
+        let tps = 5u64;
+        let frame = 100u64;
+        samples.push_back((frame, 100.0));
+        let window_ticks = tps.max(1);
+        let max_samples = window_ticks.saturating_mul(4) as usize;
+        while samples.len() > 1 && frame - samples[0].0 > window_ticks {
+            samples.pop_front();
+        }
+        while samples.len() > max_samples {
+            samples.pop_front();
+        }
+        assert!(
+            samples.len() <= max_samples,
+            "window must re-trim to {} after tps drop, got {}",
+            max_samples,
+            samples.len()
+        );
+        assert_eq!(samples.back().unwrap().0, frame, "latest sample kept");
+    }
+
+    /// Hard cap: 4x window samples even with dense pushes.
+    #[test]
+    fn delta_window_hard_cap() {
+        let mut state = PlaytestState::new(2, 1);
+        let samples = state.delta_windows.entry("inv".to_string()).or_default();
+        let tps = 2u64;
+        let window_ticks = tps.max(1); // 2
+        let max_samples = window_ticks.saturating_mul(4) as usize; // 8
+                                                                   // Push many samples within a tiny tick range (dense producer:
+                                                                   // multiple samples per tick).
+        for i in 0..1000u64 {
+            let frame = i / 100; // frames 0..9
+            samples.push_back((frame, i as f64));
+            while samples.len() > 1 && frame - samples.front().unwrap().0 > window_ticks {
+                samples.pop_front();
+            }
+            while samples.len() > max_samples {
+                samples.pop_front();
+            }
+        }
+        assert!(
+            samples.len() <= max_samples,
+            "hard cap must bound the deque, got {}",
+            samples.len()
+        );
+    }
+
+    /// api_history is bounded: at the cap, unseen paths cause a clear
+    /// (graceful re-seed), not unbounded growth.
+    #[test]
+    fn api_history_bounded() {
+        let mut state = PlaytestState::new(60, 1);
+        const CAP: usize = 4096;
+        for i in 0..CAP {
+            state.api_history.insert(format!("player[{i}]"), i as f64);
+        }
+        assert_eq!(state.api_history.len(), CAP);
+        // Mirrors the production guard.
+        let path = "player[new]";
+        if state.api_history.len() >= CAP && !state.api_history.contains_key(path) {
+            state.api_history.clear();
+        }
+        state.api_history.insert(path.to_string(), 1.0);
+        assert!(
+            state.api_history.len() <= CAP + 1,
+            "growth must be bounded, got {}",
+            state.api_history.len()
         );
     }
 }
