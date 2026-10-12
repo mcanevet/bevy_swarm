@@ -432,6 +432,9 @@ pub fn raw_input_preupdate_system(
 
 #[allow(clippy::too_many_arguments)]
 /// Handle ClickEntity actions in Update (after cursor moves, before mouse press).
+/// RF11: complex entity query supports both world-space entities
+/// (GlobalTransform) and UI nodes (ComputedNode + UiGlobalTransform).
+#[allow(clippy::type_complexity)]
 pub fn raw_input_click_entity_system(
     queue: ResMut<RawActionQueue>,
     mut holds: ResMut<InputHolds>,
