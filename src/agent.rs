@@ -875,7 +875,7 @@ fn agent_flush_system(world: &mut World) {
     // Take all pending requests without holding the lock across world access.
     let requests: Vec<AgentRequest> = {
         let queue = world.resource::<AgentRequestQueue>();
-        let rx = queue.0.lock().unwrap();
+        let rx = queue.0.lock().unwrap_or_else(|e| e.into_inner());
         let mut buf = Vec::new();
         loop {
             match rx.try_recv() {
@@ -1435,5 +1435,52 @@ mod tests_716_31 {
         let n = world.resource::<Count>().0;
         world.remove_resource::<Count>().unwrap();
         n
+    }
+}
+
+#[cfg(test)]
+mod tests_b2e_1 {
+    use super::*;
+
+    #[test]
+    fn poisoned_queue_mutex_recovers_next_frame() {
+        // b2e.1: poison the AgentRequestQueue mutex (panic while
+        // holding), then verify agent_flush_system does NOT panic on
+        // the next frame — it recovers the guard via
+        // unwrap_or_else(|e| e.into_inner()).
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActionLog>();
+        app.insert_resource(crate::agent::AgentFrameCounter(0));
+        app.init_resource::<PendingAgentInput>();
+
+        let (tx, rx) = std::sync::mpsc::channel::<AgentRequest>();
+        tx.send(AgentRequest::Reset("k".to_string())).ok();
+        app.insert_resource(crate::agent::AgentRequestQueue(std::sync::Mutex::new(rx)));
+
+        // Poison: panic while holding the lock.
+        {
+            let queue = app.world().resource::<crate::agent::AgentRequestQueue>();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _g = queue.0.lock().unwrap();
+                panic!("deliberate poison");
+            }));
+        }
+        assert!(
+            app.world()
+                .resource::<crate::agent::AgentRequestQueue>()
+                .0
+                .is_poisoned(),
+            "precondition: mutex must be poisoned"
+        );
+
+        // Next frame: must NOT panic (poison recovered gracefully).
+        let flushed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::agent::agent_flush_system(app.world_mut());
+        }));
+        assert!(
+            flushed.is_ok(),
+            "agent_flush_system must survive a poisoned queue mutex"
+        );
     }
 }
