@@ -25,6 +25,20 @@ fn setup(mut commands: Commands) {
     commands.init_resource::<Score>();
 }
 
+/// BUGGY (unconsumed_event): this message is WRITTEN but never
+/// CONSUMED — the adapter path produces it, but no system drains it.
+#[derive(Message, Clone, Debug)]
+pub struct UnconsumedLog {
+    pub card_id: String,
+}
+
+fn write_unconsumed_only(mut events: MessageWriter<UnconsumedLog>) {
+    // Deliberately writes to a message nobody reads.
+    events.write(UnconsumedLog {
+        card_id: "orphan".into(),
+    });
+}
+
 fn card_played_system(mut events: MessageReader<CardPlayed>, mut score: ResMut<Score>) {
     for _ev in events.read() {
         // Each card adds 10 points
@@ -94,8 +108,11 @@ impl Plugin for TurnBasedGamePlugin {
                 app.add_systems(Update, card_played_hashmap_order_system);
             }
             Some("unconsumed_event") => {
-                // Pending (swarm-716.24): unconsumed_message oracle.
-                app.add_systems(Update, card_played_system);
+                // BUG: the adapter writes CardPlayed events, but a
+                // secondary "log" message is written and NEVER read.
+                // Awaits the S1 unconsumed-message oracle.
+                app.add_message::<UnconsumedLog>();
+                app.add_systems(Update, (card_played_system, write_unconsumed_only).chain());
             }
             _ => {
                 app.add_systems(Update, card_played_system);

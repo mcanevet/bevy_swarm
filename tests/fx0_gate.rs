@@ -32,7 +32,10 @@ use fixture_spawner::SpawnerGamePlugin;
 use fixture_turn_based::TurnBasedGamePlugin;
 use fixture_walker::WalkerGamePlugin;
 
-const SEEDS: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8];
+const SEEDS: &[u64] = &[
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 29, 30, 31, 32,
+];
 const DUR_S: f64 = 6.0;
 
 fn expectations_dir() -> PathBuf {
@@ -362,10 +365,7 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
         }
     }
     total_errors.extend(rate_errors);
-    // Known gap: walker/bug_dead_left_key seed 5 (swarm-lgn) —
-    // the chaos bot path on seed 5 doesn't trigger the bug.
-    // Remove it from errors; follow-up bead tracks the detection gap.
-    total_errors.retain(|e| !e.contains("dead_verb") || !e.contains("seed 5"));
+
     assert!(
         total_errors.is_empty(),
         "bug fixture signal failures:\n{}",
@@ -396,28 +396,44 @@ fn fx0_bug_signals_do_not_fire_with_bug_disabled() {
             if exp.get("pending").is_some() {
                 continue;
             }
-            let must: Vec<String> = exp
+            let must: Vec<(String, Option<u64>)> = exp
                 .get("must_report")
                 .and_then(|m| m.as_array())
                 .map(|a| {
                     a.iter()
-                        .filter_map(|e| e.get("rule").and_then(|r| r.as_str()))
-                        .map(String::from)
+                        .filter_map(|e| {
+                            let rule = e.get("rule")?.as_str()?;
+                            let min_count = e.get("min_count").and_then(|m| m.as_u64());
+                            Some((rule.to_string(), min_count))
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
             if must.is_empty() {
                 continue;
             }
-            let scenario = build_scenario_json(&fixture, "clean", 42);
-            let report = run_fixture(&fixture, &variant, &scenario, false);
-            let fired = violation_rules(&report);
-            for rule in must {
-                if fired.iter().any(|f| f == &rule) {
-                    total_errors.push(format!(
-                        "{}/{}: rule '{}' fired with bug disabled",
-                        fixture, variant, rule
-                    ));
+            // le3.7 (RF3): guard must use the BUG VARIANT'S OWN
+            // scenario (invariants, bot override, liveness timeout,
+            // check_determinism) with FIXTURE_BUG unset, across seeds
+            // 1..32. If the bug's invariants fire on clean, the bug is
+            // vacuous (clean == bug).
+            for seed in SEEDS {
+                let scenario = build_scenario_json(&fixture, &variant, *seed);
+                let report = run_fixture(&fixture, &variant, &scenario, false);
+                let fired = violation_rules(&report);
+                for (rule, min_count) in &must {
+                    let occurrences = fired.iter().filter(|f| f.as_str() == rule.as_str()).count();
+                    // le3.7 (RF3): honor min_count — a rule that fires
+                    // FEWER than min_count times on clean is fine (the
+                    // bug pushes it over); must_report entries are
+                    // checked with the same semantics in acceptance.
+                    let allowed_on_clean = min_count.unwrap_or(1);
+                    if occurrences >= allowed_on_clean as usize {
+                        total_errors.push(format!(
+                            "{}/{}/{}: rule '{}' fired {}x with bug disabled (>= {allowed_on_clean})",
+                            fixture, variant, seed, rule, occurrences
+                        ));
+                    }
                 }
             }
         }

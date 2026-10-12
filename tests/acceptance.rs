@@ -81,20 +81,11 @@ fn fixture_runner_bin() -> std::path::PathBuf {
         } else {
             "release"
         };
-        let candidates = [
-            std::env::var("CARGO_TARGET_DIR")
-                .map(|t| PathBuf::from(t).join(profile).join("fixture-runner"))
-                .ok(),
-            Some(manifest.join("target").join(profile).join("fixture-runner")),
-        ];
-        for c in candidates.into_iter().flatten() {
-            if c.is_file() {
-                return c;
-            }
-        }
-        // Not pre-built (e.g. `cargo test --test acceptance` alone
-        // still builds all workspace bins? it does NOT for other
-        // packages' bins). Build it once, loudly.
+        // le3.7 (RF3/stale-binary): NEVER trust a pre-existing
+        // binary — `cargo test -p bevy_swarm` does NOT rebuild other
+        // packages' bins. Always run `cargo build -p fixture-runner`
+        // (a cheap no-op when fresh) so the tested binary reflects
+        // current fixture/harness sources.
         let status = Command::new(env!("CARGO"))
             .args(["build", "-p", "fixture-runner"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -139,7 +130,20 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
     // runs/last path). Conventions put run reports under
     // target/bevy_swarm/runs/<run_id>/report.json — use a case-named
     // id so parallel test threads never collide.
-    let case_id = format!("{}-{}-{}", fixture, variant, std::process::id());
+    // le3.7 (RF3): pid alone is NOT enough under `cargo test`
+    // (threads share a pid) — add the current thread id AND a unique
+    // counter: two invocations of the same (fixture, variant) from
+    // different test fns can never collide.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let case_id = format!(
+        "{}-{}-{}-{:?}-{}",
+        fixture,
+        variant,
+        std::process::id(),
+        std::thread::current().id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(&target)

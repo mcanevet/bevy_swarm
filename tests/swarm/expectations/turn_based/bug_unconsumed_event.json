@@ -6,10 +6,15 @@
   ],
   "duration_s": 6.0,
   "must_not_report": [],
-  "status": "pass",
-  "must_report": [],
+  "status": "fail",
+  "must_report": [
+    {
+      "rule": "unconsumed_message"
+    }
+  ],
   "liveness": {
     "mode": "after_intent",
     "timeout_s": 2.0
-  }
+  },
+  "pending": "swarm-716.24"
 }
