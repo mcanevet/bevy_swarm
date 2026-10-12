@@ -6,11 +6,61 @@ Every bead references these conventions instead of inventing new paths or format
 
 ---
 
+## 0. Vocabulary: Zero-Contract, Tiers, and Integration Modes
+
+**Zero-contract** = no semantic hooks required from the game. The harness works
+with unmodified game code by inferring what it can (entities via Name/Reflection,
+inputs via raw injection, oracles via generic checks). When the game lacks
+declared helpers (TestApi, IntentSurface, typed oracles), the report states
+`contract_tier: "zero"` and lists inactive oracle families with reasons.
+
+**Contract tiers** (runtime detection, Z1):
+- `zero` — just the game's plugin; raw input, inferred entities, generic oracles only
+- `observable` — + identity/observability helpers (Name on entities, Reflect, seeded RNG)
+- `semantic` — + typed contract (TestApi resolver, IntentSurface, typed oracles, cheat/reset hooks)
+
+**Integration modes** (how the harness attaches):
+- **In-process** — a test file imports the game's root plugin and calls `autotest(GamePlugin)`.
+  Requires the game to have a `lib.rs` target exposing the plugin. No game-code changes
+  at runtime; the harness runs as part of `cargo test`.
+- **Subprocess (smoke)** — the game binary is launched fresh each run via
+  `bevy_ci_testing` (enabled with `cargo run --features bevy/bevy_ci_testing`).
+  No repo changes, no lib.rs, no test file. Coarse frame control via CI-testing
+  config events (AppExit, screenshots); observe-only oracles.
+- **External (observe-only, BRP)** — drive the game binary over BRP
+  (`bevy/get`/`bevy/query` polling), enabled with
+  `cargo run --features bevy/bevy_remote`. Zero repo changes, zero test files;
+  one documented build flag. Observe-only: crash/error/log/liveness/state-digest
+  oracles. Works on Bevy 0.20.0 stable.
+- **External (frame-exact, BRP)** — full remote control via BRP stepping verbs
+  and input injection. Zero repo changes. Requires the Bevy release after 0.20
+  (stepping verbs exist on Bevy main, unreleased). Until then this mode is
+  unavailable.
+
+**Note:** There is no `BrpPool` API in Bevy; the integration surface is
+`RemotePlugin`/`BrpClient` and the BRP HTTP verbs.
+
+**Important:** "Zero hand-written lines" (CLI scaffolding) is convenience, not a
+contract claim. Whether a human or `cargo swarm init` writes the test file, a new
+file enters the repo either way. The zero-contract guarantee is about *semantic*
+requirements (no TestApi, no IntentSurface), not about typing effort. Enabling
+a cargo feature at build time (e.g. `bevy_remote`) is a *thin build-time
+contract* — much lighter than a semantic contract, but must not be advertised
+as "zero contract".
+
+**Important:** "Zero hand-written lines" (CLI scaffolding) is convenience, not a
+contract claim. Whether a human or `cargo swarm init` writes the test file, a new
+file enters the repo either way. The zero-contract guarantee is about *semantic*
+requirements (no TestApi, no IntentSurface), not about typing effort.
+
+---
+
 ## 1. Cargo Workspace
 
 **Members:**
 - `.` — the `bevy_swarm` library crate (publishable)
 - `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_swarm dependency)
+- `bevy_swarm_cli/` (planned, Z10) — optional CLI binary for scaffolding (`cargo swarm init`); convenience only, not part of the zero-contract guarantee
 
 **Shared dependencies** (single place to pin, per Z0):
 
