@@ -159,7 +159,7 @@ fn default_persona_uniform() {
 #[test]
 #[serial]
 fn autotest_finds_dead_left_key_without_adapter() {
-    std::env::set_var("FIXTURE_BUG", "dead_left_key");
+    let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
     // 60Hz over 6s: 360 samples, ~45 per key — well past the 10-sample
     // dead_verb threshold for the dead keys.
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
@@ -172,7 +172,6 @@ fn autotest_finds_dead_left_key_without_adapter() {
         ..AutotestConfig::default()
     };
     let report = autotest(fixture_walker::WalkerGamePlugin, config).expect("autotest runs");
-    std::env::remove_var("FIXTURE_BUG");
     assert!(
         report.failures.iter().any(|f| f.rule == "dead_verb"),
         "tier-0 chaos must find the dead left key: {:?}",
@@ -184,7 +183,6 @@ fn autotest_finds_dead_left_key_without_adapter() {
 #[test]
 #[serial]
 fn autotest_clean_walker_passes() {
-    std::env::remove_var("FIXTURE_BUG");
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     ).unwrap();
@@ -229,4 +227,33 @@ fn autotest_counts_scenario_errors_as_failures() {
         "rejected scenario runs are crash status: {:?}",
         report.runs
     );
+}
+
+/// le3.2: RAII guard that saves/restores FIXTURE_BUG on scope exit,
+/// including panics mid-test (which would otherwise leak a set env
+/// var into subsequent tests in this binary). Panics are caught via
+/// Drop. Combined with #[serial], mutations are exception-safe and
+/// serialized within the test binary.
+struct FixtureBugGuard {
+    prev: Option<String>,
+}
+
+impl FixtureBugGuard {
+    fn set(env_bug: Option<&str>) -> Self {
+        let prev = std::env::var("FIXTURE_BUG").ok();
+        match env_bug {
+            Some(b) => std::env::set_var("FIXTURE_BUG", b),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+        Self { prev }
+    }
+}
+
+impl Drop for FixtureBugGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(p) => std::env::set_var("FIXTURE_BUG", p),
+            None => std::env::remove_var("FIXTURE_BUG"),
+        }
+    }
 }
