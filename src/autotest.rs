@@ -352,10 +352,13 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
                 .parse()
                 .unwrap_or(0);
             let rep = outcome.report;
-            // Per-run wall clock: simulated duration as a monotonic
-            // lower bound proxy (frame_count / tps); the harness's
-            // real-time run duration isn't retained in the report.
-            let elapsed_ms = (rep.simulated_duration_s * 1000.0) as u64;
+            // le3.6 (RF2): use wall_time_s (driver-measured) if
+            // present, else simulated_duration_s fallback.
+            let elapsed_ms = if rep.wall_time_s > 0.0 {
+                (rep.wall_time_s * 1000.0) as u64
+            } else {
+                (rep.simulated_duration_s * 1000.0) as u64
+            };
 
             let status = match rep.status {
                 PlaytestStatus::Pass => "pass",
