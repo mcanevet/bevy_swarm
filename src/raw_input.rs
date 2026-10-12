@@ -359,7 +359,7 @@ pub fn raw_input_preupdate_system(
                 #[cfg(feature = "gamepad")]
                 {
                     inject_gamepad_button(
-                        &button,
+                        button,
                         hold_frames,
                         &mut violations,
                         &mut commands,
