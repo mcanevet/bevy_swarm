@@ -10,6 +10,7 @@ members = [
     "fixtures/lone",
     "fixtures/bin_only",
     "fixtures/bin_only_clean",
+    "fixtures/brp",
     "tests/fixture-runner",
     "bevy_swarm_cli",
 ]
