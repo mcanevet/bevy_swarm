@@ -3,5 +3,14 @@ name = "fixture_bin_only"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fixture_bin_only"
+test = false
+bench = false
+
 [dependencies]
 bevy = { version = "0.20", default-features = false }
+
+# Z19: bin-only fixtures have no tests; `test = false` above stops
+# cargo/nextest from linking an unused test binary (repeated CI lld
+# SIGBUS flakes).
