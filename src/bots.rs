@@ -107,8 +107,29 @@ pub(crate) fn chaos_bot_system(
         let kind = kinds[choices.below(state.frame, kinds.len() as u64) as usize];
         let action = match kind {
             0 => {
-                let key =
-                    raw.keys[choices.below(state.frame, raw.keys.len() as u64) as usize].clone();
+                // Z4: weight key sampling by discovered effect breadth
+                // (uniform when no weights are declared).
+                let idx = if raw.weights.is_empty() {
+                    choices.below(state.frame, raw.keys.len() as u64) as usize
+                } else {
+                    let total: u64 = raw
+                        .keys
+                        .iter()
+                        .map(|k| raw.weights.get(k).copied().unwrap_or(1) as u64)
+                        .sum();
+                    let mut pick = choices.below(state.frame, total.max(1));
+                    let mut chosen = 0usize;
+                    for (i, k) in raw.keys.iter().enumerate() {
+                        let w = raw.weights.get(k).copied().unwrap_or(1) as u64;
+                        if pick < w {
+                            chosen = i;
+                            break;
+                        }
+                        pick -= w;
+                    }
+                    chosen
+                };
+                let key = raw.keys[idx].clone();
                 crate::scenario::RawAction::Key {
                     key,
                     hold_frames: choices.below(state.frame, 4) as u32 + 1,

@@ -322,9 +322,13 @@ fn rf8_arrows_only_passes_default_surface() {
         "no dead_verb on unused WASD keys; failures: {:?}",
         report.failures.iter().map(|f| &f.rule).collect::<Vec<_>>()
     );
+    for f in &report.failures {
+        eprintln!("FAILURE {} {}", f.rule, f.fingerprint.0);
+    }
     assert!(
         report.failures.is_empty(),
-        "arrows-only game passes default autotest"
+        "arrows-only game passes default autotest: {:#?}",
+        report.failures
     );
 }
 

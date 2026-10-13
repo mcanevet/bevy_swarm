@@ -279,6 +279,40 @@ pub struct RawSurface {
     pub gamepad: bool,
     #[serde(default)]
     pub clickables: bool, // ClickEntity targets discovered by Z6/Z5
+    /// Z4: per-key chaos sampling weights (key -> weight), from
+    /// DiscoveredSurface effect breadth (more changed percepts =
+    /// higher prior). Absent = uniform.
+    #[serde(default)]
+    pub weights: std::collections::HashMap<String, u32>,
+}
+
+impl RawSurface {
+    /// Z4: build a chaos-sampling surface from a discovered
+    /// surface. Keys are weighted by effect breadth (changed
+    /// percept count); mouse_motion/wheel/gamepad flags follow what
+    /// discovery observed; clickables pass through untouched.
+    pub fn from_discovered(d: &crate::discover::DiscoveredSurface) -> Self {
+        let mut weights = std::collections::HashMap::new();
+        let mut keys = vec![];
+        for (k, eff) in &d.keys {
+            keys.push(k.clone());
+            weights.insert(k.clone(), (eff.changed.len().max(1)) as u32);
+        }
+        let mut gamepad_buttons = d.gamepad_buttons.clone();
+        for (b, eff) in &d.gamepad_buttons {
+            weights.insert(format!("gamepad:{b}"), (eff.changed.len().max(1)) as u32);
+        }
+        gamepad_buttons.dedup_by(|a, b| a.0 == b.0);
+        Self {
+            keys,
+            mouse_buttons: !d.mouse_buttons.is_empty(),
+            mouse_motion: d.mouse_motion.is_some(),
+            wheel: d.wheel.is_some(),
+            gamepad: !d.gamepad_buttons.is_empty() || !d.gamepad_axes.is_empty(),
+            clickables: false,
+            weights,
+        }
+    }
 }
 
 impl Default for RawSurface {
@@ -309,6 +343,7 @@ impl Default for RawSurface {
             wheel: false,
             gamepad: false,
             clickables: false,
+            weights: std::collections::HashMap::new(),
         }
     }
 }

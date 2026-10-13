@@ -110,14 +110,27 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
     }
     let mut raw: Vec<RawRow> = vec![];
     for entity in world.iter_entities() {
-        let (Some(name), Some(t)) = (entity.get::<Name>(), entity.get::<Transform>()) else {
-            continue;
-        };
         if entity.get::<crate::harness::Gameplay>().is_none() {
             continue;
         }
+        let Some(t) = entity.get::<Transform>() else {
+            continue;
+        };
+        // Z4: tier-0 games often skip Name on gameplay entities —
+        // fall back to the StableId (assigned deterministically by
+        // the Gameplay-add observer) so unnamed state stays visible
+        // to digests. Without this, differential probing is blind.
+        let name = entity
+            .get::<Name>()
+            .map(|n| n.as_str().to_string())
+            .or_else(|| {
+                entity
+                    .get::<crate::identity::StableId>()
+                    .map(|sid| format!("#{}", sid.0))
+            })
+            .unwrap_or_else(|| "#unnamed".to_string());
         raw.push(RawRow {
-            name: name.as_str().to_string(),
+            name,
             pos: [
                 t.translation.x.to_bits().to_string(),
                 t.translation.y.to_bits().to_string(),

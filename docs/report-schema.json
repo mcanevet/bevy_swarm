@@ -106,6 +106,9 @@
     "robustness": {
       "$ref": "#/$defs/robustness"
     },
+    "discovered_surface": {
+      "$ref": "#/$defs/discovered_surface"
+    },
     "state_trace": {
       "type": [
         "array",
@@ -450,6 +453,87 @@
         "per_invariant",
         "overall"
       ],
+      "additionalProperties": false
+    },
+    "discovered_surface": {
+      "type": "object",
+      "description": "Z4: input surface discovered by differential probing (optional)",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+          }
+        },
+        "mouse_buttons": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+          }
+        },
+        "mouse_motion": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/effect" } ] },
+        "wheel": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/effect" } ] },
+        "gamepad_buttons": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+          }
+        },
+        "gamepad_axes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+          }
+        },
+        "probed_at": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "readers": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["exact", "statistical"]
+        },
+        "pruned_devices": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": [
+        "keys",
+        "mouse_buttons",
+        "mouse_motion",
+        "wheel",
+        "gamepad_buttons",
+        "gamepad_axes",
+        "probed_at",
+        "readers",
+        "confidence",
+        "pruned_devices"
+      ],
+      "additionalProperties": false
+    },
+    "effect": {
+      "type": "object",
+      "description": "Z4: a differential effect (first divergence + changed percept keys)",
+      "properties": {
+        "first_divergence_frame_delta": { "type": "integer", "minimum": 0 },
+        "changed": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["first_divergence_frame_delta", "changed"],
       "additionalProperties": false
     },
     "frame_digest": {
