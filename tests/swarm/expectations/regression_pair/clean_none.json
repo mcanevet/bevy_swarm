@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "scaffold": "none",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_not_report": [
+    {
+      "rule": "frozen_world"
+    },
+    {
+      "rule": "dead_verb"
+    }
+  ],
+  "status": "pass",
+  "must_report": []
+}

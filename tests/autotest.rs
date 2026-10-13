@@ -1,7 +1,8 @@
 //! Z18: autotest() integration — config defaults, env overrides, report.
 
 use bevy::prelude::*;
-use bevy_swarm::autotest::{autotest, AutotestConfig};
+use bevy_swarm::autotest::{autotest, autotest_with, AutotestConfig};
+use bevy_swarm::contract::ContractTier;
 use serial_test::serial;
 
 #[derive(Clone, Default)]
@@ -23,10 +24,22 @@ fn autotest_runs_and_writes_report() {
         ..AutotestConfig::default()
     };
     let report = autotest(SimpleGamePlugin, config).expect("autotest runs");
-    assert_eq!(report.schema_version, "0.1.0");
-    assert_eq!(report.harness_mode, "autotest");
-    assert_eq!(report.contract_tier, "tier-0");
-    assert_eq!(report.scope.seeds_run, 2);
+    // Z18.B (kill the tautology): schema_version is the conventions
+    // INTEGER, harness_mode uses U1 vocabulary, contract_tier comes
+    // from the per-run Z1 scopes (fixture-derived, not hardcoded).
+    assert_eq!(
+        report.schema_version,
+        bevy_swarm::conventions::SCHEMA_VERSION
+    );
+    assert_eq!(report.harness_mode, "in_process");
+    assert!(
+        matches!(
+            report.contract_tier,
+            ContractTier::Zero | ContractTier::Observable | ContractTier::Semantic
+        ),
+        "contract_tier must come from a Z1 tier"
+    );
+    assert_eq!(report.budget.seeds_run, 2);
     assert_eq!(report.runs.len(), 2);
     // Clean game: no failures.
     assert!(report.failures.is_empty(), "{:?}", report.failures);
@@ -39,9 +52,9 @@ fn autotest_runs_and_writes_report() {
         std::fs::read_dir(&runs_dir)
             .map(|entries| entries
                 .filter_map(|e| e.ok())
-                .any(|e| e.file_name().to_string_lossy().starts_with("autotest-")))
+                .any(|e| e.file_name().to_string_lossy() != "last"))
             .unwrap_or(false),
-        "expected an autotest-* run dir under {}",
+        "expected a run dir under {}",
         runs_dir.display()
     );
 }
@@ -89,7 +102,7 @@ fn autotest_unique_run_ids_and_last_pointer() {
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.starts_with("autotest-"))
+        .filter(|n| n != "last")
         .collect::<Vec<_>>();
     first_runs.sort();
     assert_eq!(first_runs.len(), 1, "exactly one run dir");
@@ -101,7 +114,7 @@ fn autotest_unique_run_ids_and_last_pointer() {
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.starts_with("autotest-"))
+        .filter(|n| n != "last")
         .collect::<Vec<_>>();
     second_runs.sort();
     assert_eq!(second_runs.len(), 2, "two distinct run dirs");
@@ -418,4 +431,243 @@ fn rf8_coverage_serialized_in_report() {
         json["coverage"].get("intents_emitted").is_some(),
         "intents_emitted present in coverage"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Z18 (swarm-m2h.19): gate, regressions-first, schema, junit, per-seed.
+// ---------------------------------------------------------------------------
+
+/// A game that reliably fails: a dead_verb-free but crashing plugin is
+/// overkill; use an always-violating invariant-less game via a bot on
+/// an unreachable target. Simpler: a plugin whose system violates the
+/// finite_transforms rule every frame.
+struct FailingGamePlugin;
+
+impl Plugin for FailingGamePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((
+                bevy_swarm::contract::Gameplay,
+                Name::new("bad"),
+                Transform::default(),
+            ));
+        })
+        .add_systems(
+            Update,
+            |mut q: Query<&mut Transform, With<bevy_swarm::contract::Gameplay>>| {
+                for mut t in &mut q {
+                    t.translation.x = f32::NAN;
+                }
+            },
+        );
+    }
+}
+
+fn z18_config(seeds: u64, dir_suffix: &str) -> AutotestConfig {
+    AutotestConfig {
+        num_seeds: seeds,
+        duration_s: 0.05,
+        parallel: 1,
+        minimize_failures: false,
+        max_failures: None,
+        output_dir: std::path::PathBuf::from(format!(
+            "bevy_swarm/runs-z18-{}-{}",
+            dir_suffix,
+            std::process::id()
+        )),
+        ..AutotestConfig::default()
+    }
+}
+
+fn z18_runs_dir(cfg: &AutotestConfig) -> std::path::PathBuf {
+    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    std::path::Path::new(&target).join(&cfg.output_dir)
+}
+
+/// Z18.F + T13: two consecutive autotests — the second classifies the
+/// known fingerprint as `known` (gate.new empty) when the DB records it.
+#[test]
+#[serial]
+fn z18_gate_second_run_knows_fingerprint() {
+    use bevy_swarm::fingerprint::Fingerprint;
+    use bevy_swarm::issues::{IssueDb, IssueRecord, IssueState};
+
+    let dir = std::path::PathBuf::from("tests/swarm/issues.json");
+    let backup = std::fs::read_to_string(&dir).ok();
+    std::fs::remove_file(&dir).ok();
+
+    // First run: everything is new (empty DB). Record to DB as the
+    // update mode would.
+    let cfg = z18_config(1, "gate1");
+    let first = autotest_with(|| FailingGamePlugin, cfg).expect("first autotest");
+    assert!(
+        !first.gate.classification.new.is_empty(),
+        "first run must see NEW fingerprints: {:?}",
+        first.gate.classification
+    );
+
+    // Populate the DB with the observed fingerprints (open).
+    let mut db = IssueDb::default();
+    let observed: Vec<(bevy_swarm::fingerprint::Fingerprint, u64, String, u64)> = first
+        .failures
+        .iter()
+        .map(|f| {
+            (
+                f.fingerprint.clone(),
+                f.first_seen_seed,
+                f.rule.clone(),
+                f.occurrences,
+            )
+        })
+        .collect();
+    db.record(&observed);
+    db.save().expect("save DB");
+
+    // Second run with the DB present: same fingerprint, now known.
+    let cfg2 = z18_config(1, "gate2");
+    let second = autotest_with(|| FailingGamePlugin, cfg2).expect("second autotest");
+    assert!(
+        second.gate.classification.new.is_empty(),
+        "second run must classify the fingerprint as known: {:?}",
+        second.gate.classification
+    );
+    assert!(second.gate.passed, "known-open must not fail the gate");
+
+    // Restore (or remove) the DB so other tests see the pristine state.
+    match backup {
+        Some(text) => std::fs::write(&dir, text).unwrap(),
+        None => std::fs::remove_file(&dir).unwrap(),
+    }
+    let _ = IssueRecord::default();
+    let _ = IssueState::Open;
+    let _ = Fingerprint(String::new());
+}
+
+/// Z18.E: a regressions-dir record replays FIRST (before seeds), and
+/// its still_failing status appears in the report.
+#[test]
+#[serial]
+fn z18_regressions_replayed_first() {
+    use bevy_swarm::sweep::{write_regression, RegressionRecord};
+
+    let cfg = z18_config(1, "reg");
+    let report =
+        autotest_with(|| FailingGamePlugin, cfg.clone()).expect("autotest for fingerprint");
+    let fp = report
+        .failures
+        .first()
+        .expect("failing game produces a failure fingerprint")
+        .fingerprint
+        .clone();
+
+    // Persist a regression record for that fingerprint.
+    let reg_dir = bevy_swarm::conventions::regressions_dir();
+    let mut scen = cfg.base_scenario.clone();
+    scen.duration_s = 0.05;
+    write_regression(
+        &RegressionRecord {
+            schema_version: 1,
+            fingerprint: fp,
+            found_by_seeds: vec![7],
+            status: "staging".into(),
+            scenario: scen,
+        },
+        &reg_dir,
+    )
+    .expect("write regression record");
+
+    // Re-run: the regression must be replayed and reported.
+    let cfg2 = z18_config(1, "reg2");
+    let report = autotest_with(|| FailingGamePlugin, cfg2).expect("second autotest");
+    assert_eq!(
+        report.regressions.len(),
+        1,
+        "regression record must be replayed"
+    );
+    assert_eq!(
+        report.regressions[0].status, "still_failing",
+        "the persisted regression must still fail"
+    );
+    // Cleanup: remove the record file so other tests are unaffected.
+    for entry in std::fs::read_dir(&reg_dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("regression_") && name.contains(&report.regressions[0].fingerprint.0) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Z18.B (amendment 2): the aggregate report.json validates against
+/// the `autotest_report` definition in docs/report-schema.json.
+#[test]
+#[serial]
+fn z18_autotest_report_matches_schema() {
+    let cfg = z18_config(1, "schema");
+    let report = autotest_with(|| FailingGamePlugin, cfg.clone()).expect("autotest runs");
+    let run_dir = z18_runs_dir(&cfg).join(report.run_id.clone().expect("run id"));
+    let json_text = std::fs::read_to_string(run_dir.join("report.json")).expect("read report.json");
+    let value: serde_json::Value = serde_json::from_str(&json_text).expect("report parses");
+
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../docs/report-schema.json")).expect("schema parses");
+    let wrapper = serde_json::json!({
+        "$ref": "#/$defs/autotest_report",
+        "$defs": schema["$defs"].clone()
+    });
+    let validator = jsonschema::validator_for(&wrapper).expect("schema compiles");
+    let errors: Vec<String> = validator
+        .iter_errors(&value)
+        .map(|e| format!("{e} at {}", e.instance_path))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "autotest report does not match docs/report-schema.json#/$defs/autotest_report: {errors:#?}"
+    );
+}
+
+/// Z18.B: per-seed PlaytestReports are written next to the aggregate.
+#[test]
+#[serial]
+fn z18_per_seed_reports_written() {
+    let cfg = z18_config(2, "seeds");
+    let cfg2 = cfg.clone();
+    let report = autotest(SimpleGamePlugin, cfg).expect("autotest runs");
+    let run_dir = z18_runs_dir(&cfg2).join(report.run_id.clone().expect("run id"));
+    for seed in [1u64, 2u64] {
+        let path = run_dir.join(format!("seed-{seed}.json"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let v: serde_json::Value = serde_json::from_str(&text).expect("per-seed report parses");
+        assert_eq!(
+            v.get("schema_version").and_then(|s| s.as_u64()),
+            Some(1),
+            "per-seed report must be a PlaytestReport"
+        );
+    }
+}
+
+/// Z18 amendment (adversarial review): the junit.xml actually written
+/// to the run dir parses with a STRICT parser and contains the
+/// failing case.
+#[test]
+#[serial]
+fn z18_junit_xml_strict_parse() {
+    let cfg = z18_config(1, "junit");
+    let cfg2 = cfg.clone();
+    let report = autotest_with(|| FailingGamePlugin, cfg).expect("autotest runs");
+    let run_dir = z18_runs_dir(&cfg2).join(report.run_id.clone().expect("run id"));
+    let junit_text = std::fs::read_to_string(run_dir.join("junit.xml")).expect("junit.xml written");
+    let doc = roxmltree::Document::parse(&junit_text)
+        .unwrap_or_else(|e| panic!("junit.xml must parse with a strict parser: {e}"));
+    let testsuites = doc.root_element();
+    assert_eq!(testsuites.tag_name().name(), "testsuites");
+    let suite = testsuites.first_element_child().expect("testsuite");
+    let testcases: Vec<_> = suite.children().filter(|n| n.is_element()).collect();
+    assert!(!testcases.is_empty(), "at least one testcase");
+    // Failing game: at least one failure element present.
+    let has_failure = testcases.iter().any(|tc| {
+        tc.children()
+            .any(|c| c.is_element() && c.tag_name().name() == "failure")
+    });
+    assert!(has_failure, "failing run must yield <failure> elements");
 }

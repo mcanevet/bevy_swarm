@@ -270,7 +270,27 @@ where
     // systems_with_access requires an initialized schedule — run one
     // update first (the probe app is then discarded).
     let mut probe_app = factory();
-    probe_app.update();
+    // Z18: a game that panics at startup (panic_on_load) must not
+    // crash the harness; catch the panic and treat as "no surface".
+    let probe_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        probe_app.update();
+    }));
+    if probe_result.is_err() {
+        // Startup panic: return an empty surface (autotest will still
+        // run seeds and report the crash via the panic oracle).
+        return DiscoveredSurface {
+            keys: vec![],
+            mouse_buttons: vec![],
+            mouse_motion: None,
+            wheel: None,
+            gamepad_buttons: vec![],
+            gamepad_axes: vec![],
+            probed_at: vec![],
+            readers: vec![],
+            confidence: SurfaceConfidence::Statistical,
+            pruned_devices: vec![],
+        };
+    }
     let (readers, pruned) = static_device_readers(&probe_app);
 
     let probe_keys = !pruned.contains(&"keyboard".to_string());

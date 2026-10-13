@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "scaffold": "none",
+  "seeds": [
+    42
+  ],
+  "duration_s": 6.0,
+  "must_not_report": [],
+  "status": "crash",
+  "must_report": []
+}

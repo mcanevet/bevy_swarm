@@ -246,6 +246,11 @@ where
         }
 
         let plugin = make_plugin();
+        // FX4.1: add PlaytestPlugin EARLY (before the game plugin) so
+        // its panic hook catches panics in the game's Startup systems.
+        if !app.is_plugin_added::<crate::driver::PlaytestPlugin>() {
+            app.add_plugins(crate::driver::PlaytestPlugin);
+        }
         app.add_plugins(plugin);
         // le3.11 (RF7): install LogPlugin with the swarm capture layer
         // as custom_layer — integrates with the game's logging while
@@ -256,11 +261,6 @@ where
         };
         if !app.is_plugin_added::<bevy::log::LogPlugin>() {
             app.add_plugins(log_plugin);
-        }
-        // FX4.1: add PlaytestPlugin once (bots + oracles). Guard against
-        // double-add in case the harness is reused.
-        if !app.is_plugin_added::<crate::driver::PlaytestPlugin>() {
-            app.add_plugins(crate::driver::PlaytestPlugin);
         }
         // Z6: classify game-owned types from the game plugin's crate
         // path so gameplay inference can run without annotations.

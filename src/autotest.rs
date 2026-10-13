@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
 use crate::branch::InProcess;
+use crate::branch::ScenarioRunner;
 use crate::enums::PlaytestStatus;
 use crate::fingerprint::Fingerprint;
 use crate::scenario::Scenario;
@@ -45,6 +46,10 @@ const ENV_THREADS: &str = "BEVY_SWARM_THREADS";
 pub struct AutotestConfig {
     /// Number of seeds to run (1..N). Default: 16.
     pub num_seeds: u64,
+    /// Explicit seed list. When set, overrides `num_seeds`
+    /// (expectations pin exact seeds like `[42]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seeds: Option<Vec<u64>>,
     /// Duration per run in seconds. Default: 20.
     pub duration_s: f32,
     /// Parallelism (threads). Default: min(4, available_parallelism).
@@ -53,6 +58,10 @@ pub struct AutotestConfig {
     pub minimize_failures: bool,
     /// Maximum failures before early-stop. Default: 10.
     pub max_failures: Option<usize>,
+    /// CI gate over the failure classification (T13). Default:
+    /// NewOrRegressed.
+    #[serde(default)]
+    pub gate: crate::issues::GateSerde,
     /// Base scenario template (seeds overwritten per run).
     pub base_scenario: Scenario,
     /// Output directory for reports (relative to CARGO_TARGET_DIR).
@@ -68,10 +77,12 @@ impl Default for AutotestConfig {
 
         Self {
             num_seeds: 16,
+            seeds: None,
             duration_s: 20.0,
             parallel,
             minimize_failures: false,
             max_failures: Some(10),
+            gate: crate::issues::GateSerde::default(),
             base_scenario: default_chaos_scenario(),
             output_dir: PathBuf::from("bevy_swarm/runs"),
         }
@@ -114,14 +125,18 @@ fn default_chaos_scenario() -> Scenario {
 /// Aggregated report from `autotest()`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutotestReport {
-    /// Schema version (for tooling compatibility).
-    pub schema_version: String,
-    /// Contract tier exercised (tier-0 for v0.3).
-    pub contract_tier: String,
-    /// Harness mode ("autotest").
+    /// Schema version (for tooling compatibility; conventions §4 —
+    /// integer, matching `conventions::SCHEMA_VERSION`).
+    pub schema_version: u32,
+    /// Contract tier exercised, derived from the per-run
+    /// `PlaytestReport.scope.tier` (Z1) — the MAXIMUM tier across runs.
+    pub contract_tier: crate::contract::ContractTier,
+    /// Harness mode (U1 vocabulary: "in_process").
     pub harness_mode: String,
-    /// Scope summary (seeds_run, failures, etc.).
-    pub scope: ScopeSummary,
+    /// Union of the per-run Z1 `CheckedScope`s.
+    pub scope: crate::contract::CheckedScope,
+    /// Run budget (seeds, duration, parallelism).
+    pub budget: BudgetSummary,
     /// Individual run reports (filtered to failures + last N passes).
     pub runs: Vec<RunSummary>,
     /// Failure fingerprints (deduplicated).
@@ -141,10 +156,18 @@ pub struct AutotestReport {
     /// the configuration ran discovery (no IntentSurface).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovered_surface: Option<crate::discover::DiscoveredSurface>,
+    /// E3: persisted regressions replayed before the seed matrix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regressions: Vec<RegressionReplayOutcome>,
+    /// T13: new/regressed gate classification + verdict.
+    #[serde(default)]
+    pub gate: AutotestGateSummary,
 }
 
+/// Budget actually spent (formerly `ScopeSummary` — renamed because
+/// `scope` is now the Z1 checked-scope union).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ScopeSummary {
+pub struct BudgetSummary {
     pub seeds_run: u64,
     pub total_duration_s: f32,
     pub parallelism: usize,
@@ -157,6 +180,36 @@ pub struct RunSummary {
     pub violations_count: usize,
     pub frame_count: u64,
     pub duration_ms: u64,
+    /// Per-run violations (rule, detail, fingerprint) so
+    /// expectations can use `detail_contains` against the aggregate.
+    #[serde(default)]
+    pub violations: Vec<RunViolation>,
+}
+
+/// Violation summary embedded in a `RunSummary`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunViolation {
+    pub rule: String,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<Fingerprint>,
+}
+
+/// E3 regression replay outcome inside the autotest report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegressionReplayOutcome {
+    pub fingerprint: Fingerprint,
+    /// "still_failing" | "now_passing"
+    pub status: String,
+}
+
+/// T13 gate summary embedded in the report.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AutotestGateSummary {
+    /// Classification of observed failures.
+    pub classification: crate::issues::GateSummary,
+    /// Gate verdict: true = the suite passes the configured gate.
+    pub passed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -188,12 +241,35 @@ pub struct MinimizedFailureSummary {
 
 impl AutotestReport {
     /// cj8.14 (E2): JUnit XML document for CI dashboards. One
-    /// `<testcase>` per seed run; failures/errors counted from statuses.
+    /// `<testcase>` per seed run; failures/errors counted from
+    /// statuses. T13 (Z18.G2): fingerprints classified known/muted map
+    /// to `<skipped>` with the issue title; new/regressed stay
+    /// failures.
     pub fn to_junit(&self, suite_name: &str) -> String {
         let esc = crate::junit::xml_escape;
         let tests = self.runs.len();
-        let failures = self.runs.iter().filter(|r| r.status == "fail").count();
-        let errors = self.runs.iter().filter(|r| r.status == "crash").count();
+        // Runs whose failing fingerprints are all known/muted count
+        // as skipped, not failed.
+        let muted_run = |r: &RunSummary| -> bool {
+            !r.violations.is_empty()
+                && r.violations.iter().all(|v| {
+                    v.fingerprint.as_ref().is_some_and(|fp| {
+                        self.gate.classification.known.contains(fp)
+                            || self.gate.classification.muted.contains(fp)
+                    })
+                })
+        };
+        let failures = self
+            .runs
+            .iter()
+            .filter(|r| r.status == "fail" && !muted_run(r))
+            .count();
+        let errors = self
+            .runs
+            .iter()
+            .filter(|r| r.status == "crash" && !muted_run(r))
+            .count();
+        let skipped = self.runs.iter().filter(|r| muted_run(r)).count();
         let time: f64 = self
             .runs
             .iter()
@@ -203,11 +279,12 @@ impl AutotestReport {
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.push_str("<testsuites>\n");
         out.push_str(&format!(
-            "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"{}\" time=\"{:.3}\">\n",
+            "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"{}\" skipped=\"{}\" time=\"{:.3}\">\n",
             esc(suite_name),
             tests,
             failures,
             errors,
+            skipped,
             time
         ));
         for r in &self.runs {
@@ -217,20 +294,26 @@ impl AutotestReport {
                 esc(suite_name),
                 r.duration_ms as f64 / 1000.0
             ));
-            match r.status.as_str() {
-                "fail" => {
-                    out.push_str(&format!(
-                        "        <failure message=\"{} violations\" type=\"assertion\">seed {}\n</failure>\n",
-                        r.violations_count, r.seed
-                    ));
+            if muted_run(r) {
+                out.push_str("        <skipped message=\"known/muted issue\"/>\n");
+            } else {
+                match r.status.as_str() {
+                    "fail" => {
+                        out.push_str(&format!(
+                            "        <failure message=\"{} violations\" type=\"assertion\">seed {}\n{}</failure>\n",
+                            r.violations_count,
+                            r.seed,
+                            esc(&r.violations.iter().map(|v| format!("{}: {}", v.rule, v.detail)).collect::<Vec<_>>().join("\n"))
+                        ));
+                    }
+                    "crash" => {
+                        out.push_str(&format!(
+                            "        <error message=\"crashed after {} frames\" type=\"crash\">seed {}\n</error>\n",
+                            r.frame_count, r.seed
+                        ));
+                    }
+                    _ => {}
                 }
-                "crash" => {
-                    out.push_str(&format!(
-                        "        <error message=\"crashed after {} frames\" type=\"crash\">seed {}\n</error>\n",
-                        r.frame_count, r.seed
-                    ));
-                }
-                _ => {}
             }
             out.push_str("      </testcase>\n");
         }
@@ -239,7 +322,8 @@ impl AutotestReport {
         out
     }
 
-    /// Human-readable summary line.
+    /// Human-readable summary line. Counts FAILING RUNS for the pass
+    /// percentage (FX4) and lists New/Regressed fingerprints (Z18.F).
     pub fn summary(&self) -> String {
         let surface_info = match &self.discovered_surface {
             Some(s) => format!(
@@ -253,23 +337,54 @@ impl AutotestReport {
             ),
             None => String::new(),
         };
+        let gate_info = if !self.gate.classification.new.is_empty()
+            || !self.gate.classification.regressed.is_empty()
+        {
+            format!(
+                ", NEW: [{}], REGRESSED: [{}]",
+                self.gate
+                    .classification
+                    .new
+                    .iter()
+                    .map(|f| f.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.gate
+                    .classification
+                    .regressed
+                    .iter()
+                    .map(|f| f.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            String::new()
+        };
         format!(
-            "autotest: {} seeds, {} failures ({} unique), {}s total, {}%{}",
-            self.scope.seeds_run,
-            self.failures.iter().map(|f| f.occurrences).sum::<u64>(),
+            "autotest: {} seeds, {} failing runs ({} unique), {}s total, {}%{}, {}{}",
+            self.budget.seeds_run,
+            self.runs.iter().filter(|r| r.status != "pass").count(),
             self.failures.len(),
             self.timing.elapsed_ms / 1000,
             (100.0
-                * (self.scope.seeds_run as f32
+                * (self.budget.seeds_run as f32
                     - self.runs.iter().filter(|r| r.status != "pass").count() as f32)
-                / self.scope.seeds_run.max(1) as f32) as u32,
-            surface_info
+                / self.budget.seeds_run.max(1) as f32) as u32,
+            if self.gate.passed {
+                "gate: pass"
+            } else {
+                "gate: FAIL"
+            },
+            surface_info,
+            gate_info
         )
     }
 
-    /// Whether the entire suite passed (no crashes/fails and no failures recorded).
+    /// Whether the entire suite passed the T13 gate: no New/Regressed
+    /// fingerprints (known/muted issues do not fail CI) AND every run
+    /// passed.
     pub fn passed(&self) -> bool {
-        self.failures.is_empty() && self.runs.iter().all(|r| r.status == "pass")
+        self.gate.passed && self.runs.iter().all(|r| r.status == "pass")
     }
 }
 
@@ -289,6 +404,30 @@ pub fn autotest<P: bevy::prelude::Plugin + Clone + Send + 'static>(
 /// plugin, so games without `Clone` work natively. Game-type inference
 /// uses the constructed type, preserving Z6 semantics.
 pub fn autotest_factory<P, F>(
+    make_plugin: F,
+    config: AutotestConfig,
+) -> Result<AutotestReport, Box<dyn std::error::Error>>
+where
+    P: bevy::prelude::Plugin + Send + 'static,
+    F: Fn() -> P + Send + Sync + 'static,
+{
+    autotest_inner(make_plugin, config)
+}
+
+/// Alias for non-Clone plugins (Z18.H). Unit-struct plugins without
+/// `#[derive(Clone)]` use this factory variant.
+pub fn autotest_with<P, F>(
+    make_plugin: F,
+    config: AutotestConfig,
+) -> Result<AutotestReport, Box<dyn std::error::Error>>
+where
+    P: bevy::prelude::Plugin + Send + 'static,
+    F: Fn() -> P + Send + Sync + 'static,
+{
+    autotest_factory::<P, F>(make_plugin, config)
+}
+
+fn autotest_inner<P, F>(
     make_plugin: F,
     config: AutotestConfig,
 ) -> Result<AutotestReport, Box<dyn std::error::Error>>
@@ -365,8 +504,17 @@ where
         None
     };
 
-    let seeds: Vec<u64> = (1..=config.num_seeds).collect();
+    // Z18.H: explicit seed list overrides num_seeds (expectations pin
+    // seeds like [42]).
+    let seeds: Vec<u64> = match &config.seeds {
+        Some(explicit) => explicit.clone(),
+        None => (1..=config.num_seeds).collect(),
+    };
     let mut run_summaries: Vec<RunSummary> = Vec::new();
+    let mut run_scopes: Vec<crate::contract::CheckedScope> = Vec::new();
+    // Z18: every per-seed PlaytestReport, written as seed-<n>.json
+    // next to the aggregate report.
+    let mut per_seed_reports: Vec<(u64, crate::driver::PlaytestReport)> = Vec::new();
     let mut all_violations: Vec<(u64, crate::state::ViolationEntry)> = Vec::new();
     let mut failures_by_fp: HashMap<Fingerprint, FingerprintSummary> = HashMap::new();
     let mut aggregate_coverage = Coverage::default();
@@ -377,6 +525,31 @@ where
     // B2 minimize candidates: (seed, base scenario, full report) of
     // failed runs — the report's action log is the replay material.
     let mut failed_reports: Vec<(u64, Scenario, crate::driver::PlaytestReport)> = Vec::new();
+
+    // E3 (Z18.E): replay persisted regressions FIRST, before the seed
+    // matrix — a still-failing known bug must surface even if the new
+    // sweep would miss it. Each record is reported as still_failing |
+    // now_passing under AutotestReport.regressions.
+    let regression_dir = crate::conventions::regressions_dir();
+    let mut regressions: Vec<RegressionReplayOutcome> = Vec::new();
+    {
+        let mut skipped_reg_files = 0u64;
+        if let Ok(records) = crate::sweep::load_regressions(&regression_dir, &mut skipped_reg_files)
+        {
+            for rec in &records {
+                let rep = runner.run(&rec.scenario)?;
+                let still_failing = !matches!(rep.status, PlaytestStatus::Pass);
+                regressions.push(RegressionReplayOutcome {
+                    fingerprint: rec.fingerprint.clone(),
+                    status: if still_failing {
+                        "still_failing".to_string()
+                    } else {
+                        "now_passing".to_string()
+                    },
+                });
+            }
+        }
+    }
 
     // max_failures early-stop: run seeds in batches of config.parallel;
     // check the budget BETWEEN batches (run_matrix itself is
@@ -451,7 +624,19 @@ where
                 violations_count: rep.violations.len(),
                 frame_count: rep.frame_count,
                 duration_ms: elapsed_ms,
+                violations: rep
+                    .violations
+                    .iter()
+                    .map(|v| RunViolation {
+                        rule: v.rule.clone(),
+                        detail: v.detail.clone(),
+                        fingerprint: v.fingerprint.clone(),
+                    })
+                    .collect(),
             });
+            // Z18.B: union of per-run Z1 checked scopes.
+            run_scopes.push(rep.scope.clone());
+            per_seed_reports.push((seed, rep.clone()));
 
             // B2 candidates: keep (seed, seeded scenario, full
             // report) for every failed run so minimize_failure can
@@ -543,11 +728,50 @@ where
     }
 
     let failures: Vec<FingerprintSummary> = failures_by_fp.into_values().collect();
+
+    // T13 (Z18.F): classify observed failure fingerprints against the
+    // issue DB and apply the configured gate.
+    let issue_db = crate::issues::IssueDb::load();
+    let observed: Vec<(Fingerprint, u64)> = failures
+        .iter()
+        .map(|f| (f.fingerprint.clone(), f.first_seen_seed))
+        .collect();
+    let classification = issue_db.classify(&observed);
+    // Z18.F: update-mode write — record observed occurrences so the
+    // second consecutive autotest classifies them as known.
+    if crate::conventions::can_update("issues") {
+        let mut db = issue_db.clone();
+        let observed_full: Vec<(Fingerprint, u64, String, u64)> = failures
+            .iter()
+            .map(|f| {
+                (
+                    f.fingerprint.clone(),
+                    f.first_seen_seed,
+                    f.rule.clone(),
+                    f.occurrences,
+                )
+            })
+            .collect();
+        db.record(&observed_full);
+        db.save()?;
+    }
+    let gate_enum: crate::issues::Gate = config.gate.into();
+    let gate_passed = gate_enum.apply(&classification);
+    let gate = AutotestGateSummary {
+        classification,
+        passed: gate_passed,
+    };
+
+    // Z18.B: contract tier from the per-run scopes (never hardcoded).
+    let scope_union = crate::contract::CheckedScope::union(run_scopes);
+    let contract_tier = scope_union.tier.unwrap_or_default();
+
     let report = AutotestReport {
-        schema_version: "0.1.0".to_string(),
-        contract_tier: "tier-0".to_string(),
-        harness_mode: "autotest".to_string(),
-        scope: ScopeSummary {
+        schema_version: crate::conventions::SCHEMA_VERSION,
+        contract_tier,
+        harness_mode: "in_process".to_string(),
+        scope: scope_union,
+        budget: BudgetSummary {
             seeds_run: run_summaries.len() as u64,
             total_duration_s: config.duration_s * run_summaries.len() as f32,
             parallelism: config.parallel,
@@ -567,10 +791,20 @@ where
             run_summaries.len() as u64,
         )),
         discovered_surface,
+        regressions,
+        gate,
     };
 
-    // Write report to disk.
-    write_report(&report, &config.output_dir)?;
+    // Write report to disk. Z18: per-seed PlaytestReports are written
+    // alongside the aggregate so expectations can check each seed.
+    write_report(
+        &report,
+        &config.output_dir,
+        per_seed_reports
+            .iter()
+            .map(|(seed, rep)| (*seed, rep.clone()))
+            .collect(),
+    )?;
 
     Ok(report)
 }
@@ -578,25 +812,31 @@ where
 fn write_report(
     report: &AutotestReport,
     output_dir: &Path,
+    per_seed: Vec<(u64, crate::driver::PlaytestReport)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Z18.B: honour CARGO_TARGET_DIR (U1 layout: runs/<run-id>/, no
+    // autotest- prefix — the run id itself identifies the mode).
     let target_dir = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
-
-    // FX4.5: use conventions::run_id (timestamp + hash) so consecutive
-    // autotests never collide on the same directory.
-    let run_dir = target_dir.join(output_dir).join(format!(
-        "autotest-{}",
+    let runs_root = target_dir.join(output_dir);
+    let run_dir = runs_root.join(
         report
             .run_id
             .clone()
-            .unwrap_or_else(|| crate::conventions::run_id(0, report.timing.elapsed_ms))
-    ));
+            .unwrap_or_else(|| crate::conventions::run_id(0, report.timing.elapsed_ms)),
+    );
     std::fs::create_dir_all(&run_dir)?;
 
     let report_path = run_dir.join("report.json");
     let json = serde_json::to_string_pretty(report)?;
     std::fs::write(&report_path, json)?;
+
+    // Z18: per-seed PlaytestReports — one seed-<n>.json per run.
+    for (seed, rep) in per_seed {
+        let path = run_dir.join(format!("seed-{seed}.json"));
+        std::fs::write(path, serde_json::to_string_pretty(&rep)?)?;
+    }
 
     // cj8.14 (E2): JUnit XML for CI dashboards, per U1 convention
     // runs/<run-id>/junit.xml.
@@ -604,7 +844,7 @@ fn write_report(
     std::fs::write(run_dir.join("junit.xml"), junit)?;
 
     // Conventions §2: write a `last` pointer to the latest run.
-    let last_pointer = target_dir.join(output_dir).join("last");
+    let last_pointer = runs_root.join("last");
     let _ = std::fs::write(
         &last_pointer,
         run_dir
@@ -641,15 +881,23 @@ mod tests {
     #[test]
     fn autotest_report_summary_format() {
         let report = AutotestReport {
-            schema_version: "0.1.0".to_string(),
-            contract_tier: "tier-0".to_string(),
-            harness_mode: "autotest".to_string(),
-            scope: ScopeSummary {
+            runs: vec![RunSummary {
+                seed: 1,
+                status: "fail".to_string(),
+                violations_count: 1,
+                frame_count: 10,
+                duration_ms: 500,
+                violations: vec![],
+            }],
+            schema_version: crate::conventions::SCHEMA_VERSION,
+            contract_tier: crate::contract::ContractTier::Zero,
+            harness_mode: "in_process".to_string(),
+            scope: crate::contract::CheckedScope::default(),
+            budget: BudgetSummary {
                 seeds_run: 10,
                 total_duration_s: 200.0,
                 parallelism: 4,
             },
-            runs: vec![],
             failures: vec![FingerprintSummary {
                 fingerprint: Fingerprint("test-fp".to_string()),
                 rule: "panic".to_string(),
@@ -666,11 +914,16 @@ mod tests {
             },
             run_id: None,
             discovered_surface: None,
+            regressions: vec![],
+            gate: AutotestGateSummary {
+                classification: crate::issues::GateSummary::default(),
+                passed: true,
+            },
         };
 
         let summary = report.summary();
         assert!(summary.contains("10 seeds"));
-        assert!(summary.contains("3 failures"));
+        assert!(summary.contains("(1 unique)"));
         assert!(summary.contains("5s total"));
         // Z10: passed() = all runs pass + no failures recorded.
         assert!(!report.passed());
@@ -681,6 +934,7 @@ mod tests {
                 violations_count: 0,
                 frame_count: 10,
                 duration_ms: 1,
+                violations: vec![],
             }],
             failures: vec![],
             ..report
@@ -693,6 +947,7 @@ mod tests {
                 violations_count: 1,
                 frame_count: 5,
                 duration_ms: 1,
+                violations: vec![],
             }],
             ..passing
         };
