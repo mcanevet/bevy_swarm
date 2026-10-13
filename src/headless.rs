@@ -119,6 +119,27 @@ pub fn headless_platform() -> PluginGroupBuilder {
 /// - Returns a closure that produces a fresh `App` on each call (for
 ///   repeated test runs without cross-contamination).
 ///
+/// ## Example
+/// ```no_run
+/// use bevy::prelude::*;
+/// use bevy_swarm::headless::headless_app;
+/// use bevy_swarm::harness::{run_scenario, Scenario};
+///
+/// #[derive(Clone, Default)]
+/// struct MyGamePlugin;
+/// impl Plugin for MyGamePlugin {
+///     fn build(&self, _: &mut App) {}
+/// }
+///
+/// let build = headless_app(MyGamePlugin);
+/// let scenario: Scenario = serde_json::from_str(
+///     r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[]}"#
+/// ).unwrap();
+/// let mut app = build(); // fresh App per run
+/// let report = run_scenario(&mut app, &scenario).unwrap();
+/// assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
+/// ```
+///
 /// ## Panics
 /// Panics if the game plugin conflicts with platform plugins (e.g., the
 /// game bundles its own `DefaultPlugins`). In that case, migrate the

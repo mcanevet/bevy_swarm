@@ -19,7 +19,17 @@
 use bevy::prelude::*;
 
 /// Continuation semantics once replayed choices run out.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Continuation {
     /// Keep drawing from the seeded PRNG (default).
@@ -33,7 +43,9 @@ pub enum Continuation {
 }
 
 /// One recorded random draw.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct Choice {
     pub frame: u64,
     /// Reduced value in [0, bound).

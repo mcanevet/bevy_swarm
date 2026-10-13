@@ -130,12 +130,17 @@ Every persisted file and every report has a top-level `schema_version: <int>`.
 - After that, breaking changes bump it.
 - Sub-reports (determinism, golden, sweep, run summary, mutation) are **embedded**
   in the report JSON under named keys, not separate files.
-- Schema definition: `docs/report-schema.json` (owned by X1's schema test).
+- Report schema: `docs/report-schema.json` (owned by X1's schema test).
+- Scenario schema: `docs/schema.json` — GENERATED from `Scenario` via
+  schemars; regenerate with
+  `BEVY_SWARM_UPDATE=schema cargo test --test schema_doc` (drift-guarded).
+- Rule catalog: `docs/rules.md` — GENERATED from the `Rule` enum; regenerate
+  with `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.
 
 ## 5. Update Mode
 
 ```bash
-BEVY_SWARM_UPDATE=golden,issues,model,perf,regressions  # or 'all'
+BEVY_SWARM_UPDATE=golden,issues,model,perf,regressions,schema  # or 'all'
 ```
 
 Environment variables read by the harness (full table):
@@ -149,7 +154,7 @@ Environment variables read by the harness (full table):
 | `BEVY_SWARM_AGENT_TOKEN` | auth token for the agent feature |
 | `SWARM_TRANSFORM_DESYNC_TOL` | tolerance for transform desync detection |
 
-- Without `BEVY_SWARM_UPDATE`, nothing under `tests/swarm/` is written by
+- Without `BEVY_SWARM_UPDATE`, nothing under `tests/swarm/` or `docs/` is written by
   CHECK paths; `record_golden` is an explicit library call that always writes.
 - CI never commits changes (external side effects need user approval).
 - Insta-style semantics: only the listed categories update.

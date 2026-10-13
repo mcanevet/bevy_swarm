@@ -481,6 +481,35 @@ thread_local! {
     static WALL_TIMER: std::cell::RefCell<Option<f64>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Run one scenario against an already-built `App`.
+///
+/// The app must contain `PlaytestPlugin` (add it to your test app, or
+/// use [`crate::headless::headless_app`], which wires it for you).
+/// The returned report carries status, violations (rule names from the
+/// [`crate::rules`] registry), coverage, and the frame-indexed action
+/// log. Reports are also written to
+/// `target/bevy_swarm/runs/<run-id>/report.json`.
+///
+/// ## Example
+/// ```no_run
+/// use bevy::prelude::*;
+/// use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
+/// use bevy_swarm::scenario::Scenario;
+///
+/// # fn game_app() -> App { unimplemented!() }
+/// let scenario: Scenario = serde_json::from_str(
+///     r#"{"bot":{"type":"chaos","seed":7},"duration_s":0.5,
+///        "invariants":[{"name":"hp","rule":"custom","path":"TestApi.hp",
+///                       "check":"above","value":10}]}"#
+/// ).unwrap();
+/// let mut app = game_app();
+/// app.add_plugins(PlaytestPlugin);
+/// let report = run_scenario(&mut app, &scenario).unwrap();
+/// eprintln!("status: {:?}", report.status);
+/// for v in &report.violations {
+///     eprintln!("{}: {} (frame {})", v.rule, v.detail, v.first_frame);
+/// }
+/// ```
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 

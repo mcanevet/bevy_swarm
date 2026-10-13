@@ -1,0 +1,1328 @@
+{
+  "$defs": {
+    "BotConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_target": {
+          "description": "pursuit: agent/target entity Names",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "choices": {
+          "default": null,
+          "description": "J0: replay prefix for the bot's random choices (recorded\nvalues; each draw consumes one). Absent = pure PRNG from seed.",
+          "items": {
+            "$ref": "#/$defs/Choice"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "continuation": {
+          "$ref": "#/$defs/Continuation",
+          "default": "prng",
+          "description": "J0: continuation once replayed choices run out (prng/zeros/\nreseed). Default prng."
+        },
+        "deadzone": {
+          "default": 10.0,
+          "format": "float",
+          "type": "number"
+        },
+        "goals": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GoalNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "planner: declarative goal tree (aplib-inspired). The scenario\nauthor writes WHAT to achieve (TestApi predicates), not WHEN\nto press."
+        },
+        "input_rate_hz": {
+          "default": 10,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputs": {
+          "default": [],
+          "description": "replay: frame-indexed typed intents — genre-free",
+          "items": {
+            "$ref": "#/$defs/ReplayInput"
+          },
+          "type": "array"
+        },
+        "key_presses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeyPressInput"
+          },
+          "type": "array"
+        },
+        "persona": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Persona"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "synthetic_keyboard: frame-indexed raw key presses. Exercises\nthe FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`\n→ game adapter) that intent-injection bots bypass. A dead\nadapter or wrong key mapping fails the scenario's invariants.\nChaos persona: \"uniform\" (default), \"aggressive\" (2x rate, never\nWait), \"curious\" (reserved for F1 coverage-guided curiosity;\ncurrently behaves as uniform), \"idle\" (mostly Wait, occasional\njabs). REPLACES the legacy text: \"curious\" previously meant\nbias toward unseen variants (not implemented).\n(stronger unseen-variant bias), \"idle\" (mostly waiting, rare\njabs). Different personas find different bugs."
+        },
+        "pointer_clicks": {
+          "default": [],
+          "description": "synthetic_pointer: frame-indexed raw pointer clicks at named\nentities. Exercises the FULL input chain (pointer input →\npicking backend → PointerClick → game adapter) that\nintent-injection bots bypass. A missing mesh/sprite picking\nbackend fails LOUDLY here instead of silently dead-clicking.",
+          "items": {
+            "$ref": "#/$defs/PointerClickInput"
+          },
+          "type": "array"
+        },
+        "policy": {
+          "default": null,
+          "description": "custom: name of a registered typed bot policy\n(PlaytestAppExt::add_bot_policy). Unknown names reject at load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_surface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RawSurface"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw input surface for chaos/curious bots (Z3). When present,\nchaos bot emits RawActions instead of UserIntents."
+        },
+        "seed": {
+          "default": 42,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/BotType"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "BotType": {
+      "oneOf": [
+        {
+          "enum": [
+            "chaos",
+            "pursuit",
+            "replay",
+            "synthetic_pointer",
+            "synthetic_keyboard",
+            "planner"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "description": "I3: user-registered typed bot policy (BotConfig.policy names it).",
+          "type": "string"
+        }
+      ]
+    },
+    "CheatCall": {
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "CheckOp": {
+      "description": "Comparison operators with ONE semantics everywhere.\nWire format: `lt`, `le`, `gt`, `ge`, `equals`, `ne` (plus the legacy\naliases `below` = `le`, `above` = `ge`, `eq` = `equals`; all inclusive\nboundaries).",
+      "enum": [
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "equals",
+        "ne"
+      ],
+      "type": "string"
+    },
+    "Choice": {
+      "description": "One recorded random draw.",
+      "properties": {
+        "bound": {
+          "description": "0 = raw u64 draw (no reduction).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "description": "Reduced value in [0, bound).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frame",
+        "value",
+        "bound"
+      ],
+      "type": "object"
+    },
+    "Continuation": {
+      "description": "Continuation semantics once replayed choices run out.",
+      "oneOf": [
+        {
+          "const": "prng",
+          "description": "Keep drawing from the seeded PRNG (default).",
+          "type": "string"
+        },
+        {
+          "const": "zeros",
+          "description": "Draw zeros (simplest choices) — used by choice shrinking.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Reseed the PRNG with a fixed value — used by Go-Explore (J3)\nto diverge deterministically after a replayed prefix.",
+          "properties": {
+            "reseed": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "reseed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DifferentialOp": {
+      "enum": [
+        "no_decrease",
+        "no_increase"
+      ],
+      "type": "string"
+    },
+    "EntityRef": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "description": "Reference to a gameplay entity (by Name or StableId). Used by ClickEntity."
+    },
+    "GoalNode": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Achieve children in order.",
+          "properties": {
+            "children": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/GoalNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "seq",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Achieve any one child: try in order; a child is abandoned after\n`max_s` seconds without achievement (default 10s), next child starts.",
+          "properties": {
+            "children": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/GoalNode"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "any",
+              "type": "string"
+            },
+            "max_s": {
+              "default": 10.0,
+              "format": "float",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Repeat the child until achieved (bounded by max_s to fail loudly\ninstead of looping forever).",
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/GoalNode"
+            },
+            "kind": {
+              "const": "repeat",
+              "type": "string"
+            },
+            "max_s": {
+              "default": 10.0,
+              "format": "float",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "child"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Leaf (I3): a registered typed goal predicate, evaluated as a\nBevy system. Achieved when the predicate returns true.\n{\"kind\":\"predicate\",\"name\":\"door_open\",\"emit\":[...]}",
+          "properties": {
+            "emit": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ReplayIntent"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "predicate",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Leaf: a TestApi predicate plus intents to emit while pursuing it.\nAchieved when `path` satisfies `check` vs `value`.",
+          "properties": {
+            "check": {
+              "$ref": "#/$defs/CheckOp",
+              "description": "\"below\" | \"above\" | \"equals\" (numeric), \"equals\" (text)"
+            },
+            "emit": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ReplayIntent"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "primitive",
+              "type": "string"
+            },
+            "max_gain": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "min_gain": {
+              "default": null,
+              "description": "Differential post-condition (aplib Hoare-triple style):\nwhen this goal is activated, snapshot `path`'s value; upon\nachievement, require the value changed by at least/at most\n`min_gain`/`max_gain` (numeric paths only).",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "kind",
+            "path",
+            "check",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Invariant": {
+      "additionalProperties": false,
+      "properties": {
+        "after_s": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "before_s": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "differential": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DifferentialOp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Differential invariants: no_decrease (value must never drop) or\nno_increase (value must never rise). Requires numeric path."
+        },
+        "eventually_s": {
+          "description": "Eventually mode: the rule must hold AT LEAST ONCE within this\ndeadline (seconds). Unlike always-mode invariants (per-frame),\neventually waits for the first satisfaction and reports failure\nonly if the deadline expires unmet. Playwright/gdUnit pattern.",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_delta_per_sec": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_x": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_y": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_z": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_x": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_y": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min_z": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Query-shaped target: component filters instead of a TestApi path.\nWhen present, the rule applies to the COUNT of entities matching\nthe filter (e.g., \"count_above\", \"count_equals\"). This is the\nECS-native analogue of Playwright's `toHaveCount`."
+        },
+        "requires_check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requires_path": {
+          "description": "Expert-rule oracle: WHEN `path` satisfies `check` vs\n`value`, REQUIRE `requires_path` to satisfy `requires_check` vs\n`requires_value`. Checks game POLICY compliance (\"low HP ⇒ heal\"),\ncomplementing state invariants.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requires_value": true,
+        "rule": {
+          "$ref": "#/$defs/InvariantRule"
+        },
+        "scale": {
+          "description": "J1: robustness normalization scale. Defaults to max(|threshold|,\n1.0) so large-unit invariants don't dominate the overall min.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "targets": {
+          "default": [],
+          "description": "Entity Names. Empty = all Gameplay entities.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "value": true
+      },
+      "required": [
+        "name",
+        "rule"
+      ],
+      "type": "object"
+    },
+    "InvariantRule": {
+      "enum": [
+        "nodes_in_bounds",
+        "frame_time_p99_below",
+        "fps_floor",
+        "custom",
+        "frame_time_anomaly"
+      ],
+      "type": "string"
+    },
+    "KeyPressInput": {
+      "additionalProperties": false,
+      "description": "synthetic_pointer: click a named entity at a given frame. The\npointer position is derived from the entity's world transform via\nthe camera, so the click lands on whatever the picking backend\nactually hits — which is the point.\nsynthetic_keyboard: press+release a key at a given frame, through\nthe real keyboard input chain.",
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hold_frames": {
+          "default": 1,
+          "description": "Hold the key for N frames (default 1). Charge attacks, dash\ncharging, and long-press menus require this.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "description": "Key name: \"space\", \"enter\", \"escape\", \"tab\", \"backspace\",\n\"up\"/\"down\"/\"left\"/\"right\", single letters a-z, digits 0-9.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "key"
+      ],
+      "type": "object"
+    },
+    "LivenessConfig": {
+      "additionalProperties": false,
+      "description": "I4: liveness configuration.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/LivenessMode",
+          "default": "real_time",
+          "description": "Liveness mode (default: real-time)."
+        },
+        "timeout_s": {
+          "default": 2.0,
+          "description": "Timeout for liveness signal (seconds).",
+          "format": "float",
+          "type": "number"
+        },
+        "watch": {
+          "default": [],
+          "description": "Optional watched resources/components by type path (future Z6).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "LivenessMode": {
+      "description": "I4: liveness mode.",
+      "oneOf": [
+        {
+          "const": "real_time",
+          "description": "Real-time: violation if no liveness signal for timeout_s.",
+          "type": "string"
+        },
+        {
+          "const": "after_intent",
+          "description": "Turn-based: idle is fine, but after an intent some liveness must occur.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Disable the liveness oracle (loud: recorded in report warnings).",
+          "type": "string"
+        }
+      ]
+    },
+    "MouseBtn": {
+      "description": "Mouse button for raw input (wire-compatible with PointerButton).",
+      "enum": [
+        "left",
+        "right",
+        "middle"
+      ],
+      "type": "string"
+    },
+    "Persona": {
+      "oneOf": [
+        {
+          "enum": [
+            "aggressive",
+            "idle"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "uniform",
+          "description": "Default: uniform sampling over the declared surface.",
+          "type": "string"
+        },
+        {
+          "const": "curious",
+          "description": "Reserved for F1 (coverage-guided curiosity); currently behaves\nas uniform.",
+          "type": "string"
+        }
+      ]
+    },
+    "PointerButton": {
+      "enum": [
+        "primary",
+        "secondary",
+        "middle"
+      ],
+      "type": "string"
+    },
+    "PointerClickInput": {
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "$ref": "#/$defs/PointerButton",
+          "default": "primary",
+          "description": "Primary button by default; \"secondary\"/\"middle\" supported."
+        },
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hold_frames": {
+          "default": 1,
+          "description": "Hold the button for N frames before releasing (default 1).\nLong-press interactions, drag-to-hold menus.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "require_actionable": {
+          "default": false,
+          "description": "ACTIONABILITY GATE (Playwright-style, opt-in): after the click\ngesture completes, verify the picking backend's hover map shows\nthe pointer over SOME entity — i.e. the click was receivable by\nthe game's picking wiring. A click through a masked/occluded\ntarget or with a dead picking backend reports\n`pointer_not_actionable` instead of silently hitting nothing.",
+          "type": "boolean"
+        },
+        "target": {
+          "description": "Entity Name to click (resolved against Gameplay entities).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "target"
+      ],
+      "type": "object"
+    },
+    "QueryTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "with": {
+          "default": [],
+          "description": "Component types that MUST be present.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "without": {
+          "default": [],
+          "description": "Component types that MUST NOT be present.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RawAction": {
+      "description": "A raw input action for the tier-0 actuator (Z3). Peer of ReplayIntent:\nkeys, mouse, cursor, gamepad, wheel, and ClickEntity gestures.",
+      "oneOf": [
+        {
+          "description": "Key press (reuse parse_key_code for validation).",
+          "properties": {
+            "hold_frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "key": {
+              "type": "string"
+            },
+            "raw": {
+              "const": "key",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "key",
+            "hold_frames"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Mouse button press.",
+          "properties": {
+            "button": {
+              "$ref": "#/$defs/MouseBtn"
+            },
+            "hold_frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "raw": {
+              "const": "mouse_button",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "button",
+            "hold_frames"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Mouse motion (delta in logical pixels).",
+          "properties": {
+            "delta": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "raw": {
+              "const": "mouse_move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Absolute cursor position (logical pixels, viewport coordinates).",
+          "properties": {
+            "pos": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "raw": {
+              "const": "cursor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "pos"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Click gesture: move to pos, press, hold, release.",
+          "properties": {
+            "button": {
+              "$ref": "#/$defs/MouseBtn"
+            },
+            "hold_frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pos": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "raw": {
+              "const": "click",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "pos",
+            "button",
+            "hold_frames"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Click an entity by Name or StableId (resolved each frame).",
+          "properties": {
+            "raw": {
+              "const": "click_entity",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/EntityRef"
+            }
+          },
+          "required": [
+            "raw",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Mouse wheel scroll.",
+          "properties": {
+            "dy": {
+              "format": "float",
+              "type": "number"
+            },
+            "raw": {
+              "const": "wheel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "dy"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Gamepad button.",
+          "properties": {
+            "button": {
+              "type": "string"
+            },
+            "hold_frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "raw": {
+              "const": "gamepad_button",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "button",
+            "hold_frames"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Gamepad axis.",
+          "properties": {
+            "axis": {
+              "type": "string"
+            },
+            "hold_frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "raw": {
+              "const": "gamepad_axis",
+              "type": "string"
+            },
+            "value": {
+              "format": "float",
+              "type": "number"
+            }
+          },
+          "required": [
+            "raw",
+            "axis",
+            "value",
+            "hold_frames"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Wait N frames (no-op, for pacing).",
+          "properties": {
+            "frames": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "raw": {
+              "const": "wait",
+              "type": "string"
+            }
+          },
+          "required": [
+            "raw",
+            "frames"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RawSurface": {
+      "description": "Raw input surface declaration (Z3). Defines what raw inputs are available\nfor chaos/curious bots to sample from.",
+      "properties": {
+        "clickables": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gamepad": {
+          "default": false,
+          "type": "boolean"
+        },
+        "keys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mouse_buttons": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mouse_motion": {
+          "default": false,
+          "type": "boolean"
+        },
+        "weights": {
+          "additionalProperties": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "Z4: per-key chaos sampling weights (key -> weight), from\nDiscoveredSurface effect breadth (more changed percepts =\nhigher prior). Absent = uniform.",
+          "type": "object"
+        },
+        "wheel": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ReplayInput": {
+      "additionalProperties": false,
+      "description": "A typed replay intent. Whatever intent sequence a scenario author\n(or a recorded human play session translated through the adapter)\nprovides is replayed verbatim.",
+      "properties": {
+        "frame": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "intent": {
+          "$ref": "#/$defs/ReplayIntent"
+        }
+      },
+      "required": [
+        "frame",
+        "intent"
+      ],
+      "type": "object"
+    },
+    "ReplayIntent": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dir": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "intent": {
+              "const": "move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent",
+            "dir"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "intent": {
+              "const": "choice",
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent",
+            "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "intent": {
+              "const": "axis",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "format": "float",
+              "type": "number"
+            }
+          },
+          "required": [
+            "intent",
+            "name",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Select a tile/entity BY NAME or StableId — resolved against live\n`Name` + `Gameplay` entities at fire time. Unlike raw-entity\nSelects, this survives reset cycles (fresh entity ids) — the\nreplay scenario refers to stable scene identities. StableId\ntargets work for unnamed Gameplay entities (I1).",
+          "properties": {
+            "intent": {
+              "const": "select",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/SelectTarget"
+            }
+          },
+          "required": [
+            "intent",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "intent": {
+              "const": "wait",
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Raw input action for tier-0 games (Z3): the actuator replays it\nverbatim through the real input chain. Details form is the\nserde-tagged RawAction JSON.",
+          "properties": {
+            "intent": {
+              "const": "raw",
+              "type": "string"
+            },
+            "raw": {
+              "$ref": "#/$defs/RawAction"
+            }
+          },
+          "required": [
+            "intent",
+            "raw"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ResetCall": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "SelectTarget": {
+      "anyOf": [
+        {
+          "description": "Plain string name (existing JSON scenarios keep working).",
+          "type": "string"
+        },
+        {
+          "description": "StableId object form: {\"stable_id\": n}.",
+          "properties": {
+            "stable_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stable_id"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "Target of a replay Select: Name (plain string, back-compat) or\nStableId (unnamed Gameplay entities; I1)."
+    },
+    "Setup": {
+      "additionalProperties": false,
+      "properties": {
+        "cheats": {
+          "default": [],
+          "description": "Cheats invoked at scheduled frames, mid-run (AUDITED — every\ninvocation lands in the action log and bumps cheat_count).",
+          "items": {
+            "$ref": "#/$defs/CheatCall"
+          },
+          "type": "array"
+        },
+        "resets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResetCall"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bot": {
+      "$ref": "#/$defs/BotConfig"
+    },
+    "check_determinism": {
+      "default": null,
+      "description": "A4: opt-in determinism check. None = disabled; Some(N) means\nrun the scenario N times (N >= 2) with the same seed and compare\nstate digests. Reports \"nondeterministic\" rule on divergence.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "deny_ambiguities": {
+      "default": false,
+      "description": "Fail the run (ScenarioError::Rejected listing the ambiguities) when\nany schedule has conflicting systems with no order. Opt-in: many\ngames have benign ambiguities.",
+      "type": "boolean"
+    },
+    "duration_s": {
+      "default": 15.0,
+      "format": "float",
+      "type": "number"
+    },
+    "invariants": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Invariant"
+      },
+      "type": "array"
+    },
+    "liveness": {
+      "$ref": "#/$defs/LivenessConfig",
+      "default": {
+        "mode": "real_time",
+        "timeout_s": 2.0,
+        "watch": []
+      },
+      "description": "I4: liveness configuration (default 2s timeout, real-time mode)."
+    },
+    "name": {
+      "description": "Stable scenario name. Used for golden-trajectory file naming\n(`scenario-NAME-SEED`): scenarios recorded into a golden set\nmust have unique names so reordering the list cannot rename or\noverwrite files. Optional for plain playtests.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oracles": {
+      "default": null,
+      "description": "I3: typed-oracle selection. None = run ALL registered typed\noracles; Some(names) restricts to the listed ones. Unknown names\nreject at load time (ScenarioError::Rejected).",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "setup": {
+      "$ref": "#/$defs/Setup",
+      "default": {
+        "cheats": [],
+        "resets": []
+      }
+    },
+    "simulated_time": {
+      "default": true,
+      "description": "Drive `Time` with a fixed delta of 1/tps (deterministic, the default)\ninstead of the wall clock. Turn off only for soak tests that want\nreal-time behaviour.",
+      "type": "boolean"
+    },
+    "single_threaded": {
+      "default": true,
+      "description": "Run every schedule on Bevy's SingleThreadedExecutor (deterministic\nsystem order for a given schedule graph). Default true: playtests\nvalue reproducibility over throughput. Parallelism comes from\nrunning many scenarios at once, not from threading one App.",
+      "type": "boolean"
+    },
+    "tps": {
+      "default": 60,
+      "description": "Simulation ticks per second. Each `app.update()` advances simulated\ntime by exactly 1/tps when `simulated_time` is true.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "bot"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}
