@@ -266,6 +266,11 @@ impl AutotestReport {
             surface_info
         )
     }
+
+    /// Whether the entire suite passed (no crashes/fails and no failures recorded).
+    pub fn passed(&self) -> bool {
+        self.failures.is_empty() && self.runs.iter().all(|r| r.status == "pass")
+    }
 }
 
 /// Run a full autotest suite: N seeds × chaos, aggregating failures,
@@ -667,5 +672,30 @@ mod tests {
         assert!(summary.contains("10 seeds"));
         assert!(summary.contains("3 failures"));
         assert!(summary.contains("5s total"));
+        // Z10: passed() = all runs pass + no failures recorded.
+        assert!(!report.passed());
+        let passing = AutotestReport {
+            runs: vec![RunSummary {
+                seed: 1,
+                status: "pass".to_string(),
+                violations_count: 0,
+                frame_count: 10,
+                duration_ms: 1,
+            }],
+            failures: vec![],
+            ..report
+        };
+        assert!(passing.passed());
+        let crashed = AutotestReport {
+            runs: vec![RunSummary {
+                seed: 2,
+                status: "crash".to_string(),
+                violations_count: 1,
+                frame_count: 5,
+                duration_ms: 1,
+            }],
+            ..passing
+        };
+        assert!(!crashed.passed());
     }
 }
