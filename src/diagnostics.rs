@@ -4,7 +4,10 @@ use bevy::app::App;
 use bevy::ecs::world::World;
 use bevy::prelude::*;
 
-use crate::contract::{IntentSurface, ResetHooks, TestApi, TestApiResolver, HARNESS_TYPE_PATHS};
+use crate::contract::{
+    CheckedScope, ContractTier, IntentSurface, ResetHooks, TestApi, TestApiResolver,
+    HARNESS_TYPE_PATHS,
+};
 use crate::driver::ScenarioResource;
 use crate::scenario::{Scenario, ScenarioError};
 use crate::state::{PlaytestState, Violations};
@@ -43,9 +46,8 @@ pub fn contract_diagnostics(world: &World) -> ContractReport {
         .map(|h| h.0.keys().cloned().collect())
         .unwrap_or_default();
     if reset_hooks.is_empty() {
-        recommendations.push(
-            "no reset hooks — add register ResetHooks explicitly or register ResetHooks".into(),
-        );
+        recommendations
+            .push("no reset hooks — register ResetHooks to let scenarios reset game state".into());
     }
 
     let cheat_kinds: Vec<String> = world
@@ -80,7 +82,10 @@ pub fn contract_diagnostics(world: &World) -> ContractReport {
         );
     }
 
-    let test_api_present = world.get_resource::<TestApi>().is_some();
+    // Z1: check the RESOLVER too, not just the resource —
+    // resolver-based games look non-semantic otherwise.
+    let test_api_present = world.get_resource::<TestApi>().is_some()
+        || world.get_resource::<TestApiResolver>().is_some();
 
     // Feature detection: classify gameplay by component/resource field
     // vocabulary (zero game cooperation). Feeds persona selection and
@@ -96,6 +101,207 @@ pub fn contract_diagnostics(world: &World) -> ContractReport {
         recommendations,
         detected_features,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Z1: Tier detection — registry-based signal sets (amendment 1)
+// ---------------------------------------------------------------------------
+
+/// Signal predicates for tier detection. Each predicate returns (tier, description).
+/// Ordered by ascending tier — we take the highest tier whose signals are all present.
+#[expect(dead_code, reason = "reserved for the v0.2 plugin model (swarm-2yc.7)")]
+type TierSignal = fn(&World) -> Option<(ContractTier, &'static str)>;
+
+fn detect_zero_signals(_world: &World) -> Option<(ContractTier, &'static str)> {
+    // Zero tier is the baseline — always present if the game plugin runs.
+    Some((ContractTier::Zero, "game plugin present"))
+}
+
+fn detect_observable_signals(world: &World) -> Option<(ContractTier, &'static str)> {
+    // Observable tier: at least ONE of these signals must be present.
+    // 1. Name on any gameplay entity (Gameplay marker or InferredGameplay)
+    let has_name = world.iter_entities().any(|e| {
+        (e.contains::<crate::contract::Gameplay>()
+            || e.contains::<crate::game_types::InferredGameplay>())
+            && e.contains::<Name>()
+    });
+    if has_name {
+        return Some((ContractTier::Observable, "Name on gameplay entity"));
+    }
+
+    // 2. Game types reflect-registered (non-empty prefixes)
+    if world
+        .get_resource::<crate::game_types::GameTypes>()
+        .map(|gt| !gt.prefixes.is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Observable, "GameTypes registered"));
+    }
+
+    // 3. (ScenarioSeed presence is NOT a signal: the harness inserts
+    // it for every run, so it cannot discriminate game-side intent.)
+    None
+}
+
+fn detect_semantic_signals(world: &World) -> Option<(ContractTier, &'static str)> {
+    // Semantic tier: ANY of these signals suffices.
+    // 1. TestApiResolver or TestApi resource
+    if world.get_resource::<TestApiResolver>().is_some()
+        || world.get_resource::<TestApi>().is_some()
+    {
+        return Some((ContractTier::Semantic, "TestApi/Resolver present"));
+    }
+
+    // 2. Non-empty IntentSurface
+    if world
+        .get_resource::<IntentSurface>()
+        .map(|s| !s.0.is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Semantic, "non-empty IntentSurface"));
+    }
+
+    // 3. Typed oracle/policy registered
+    if world
+        .get_resource::<crate::typed::TypedRegistry>()
+        .map(|r| !r.predicate_names().is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Semantic, "typed oracles registered"));
+    }
+
+    // 4. ResetHooks/CheatHooks/NamedIntents non-empty
+    if world
+        .get_resource::<ResetHooks>()
+        .map(|h| !h.0.is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Semantic, "reset hooks registered"));
+    }
+    if world
+        .get_resource::<crate::contract::CheatHooks>()
+        .map(|h| !h.0.is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Semantic, "cheat hooks registered"));
+    }
+    if world
+        .get_resource::<crate::contract::NamedIntents>()
+        .map(|n| !n.0.is_empty())
+        .unwrap_or(false)
+    {
+        return Some((ContractTier::Semantic, "named intents registered"));
+    }
+
+    None
+}
+
+/// Detect the contract tier for a built App using registry-based signals.
+/// Returns the highest tier whose signals are present.
+pub fn detect_contract_tier(world: &World) -> ContractTier {
+    let signals = [
+        detect_zero_signals,
+        detect_observable_signals,
+        detect_semantic_signals,
+    ];
+
+    let mut tier = ContractTier::Zero;
+    for signal_fn in signals {
+        if let Some((detected_tier, _desc)) = signal_fn(world) {
+            if detected_tier > tier {
+                tier = detected_tier;
+            }
+        }
+    }
+    tier
+}
+
+/// Build a CheckedScope for a run, given the world and actuator info.
+pub fn build_checked_scope(
+    world: &World,
+    actuators: Vec<String>,
+    active_oracles: Vec<String>,
+    inactive_oracles: Vec<(String, String)>,
+) -> CheckedScope {
+    CheckedScope {
+        tier: Some(detect_contract_tier(world)),
+        active: active_oracles,
+        inactive: inactive_oracles,
+        actuators,
+    }
+}
+
+/// Compute the checked scope for a run (Z1).
+pub fn compute_run_scope(world: &World, scenario: &crate::scenario::Scenario) -> CheckedScope {
+    // Determine the actuator based on bot config and world state.
+    let mut actuators = Vec::new();
+    let bot_config = &scenario.bot;
+
+    // Actuator selection logic (rule 2 from Z1 spec):
+    // - If actuator is explicitly set, use that (validates at load time).
+    // - Else "auto": IntentSurface present -> intents, else raw (+ UI monkey if widgets exist).
+    let surface_nonempty = world
+        .get_resource::<IntentSurface>()
+        .map(|s| !s.0.is_empty())
+        .unwrap_or(false);
+    let auto = if surface_nonempty {
+        "intents"
+    } else {
+        "raw_input"
+    };
+    let chosen_actuator = match bot_config.actuator.as_deref() {
+        Some("intents") => "intents",
+        Some("raw") => "raw_input",
+        Some("ui") => "ui_monkey",
+        Some("auto") | None => auto,
+        _other => "raw_input", // fallback for invalid values
+    };
+
+    actuators.push(chosen_actuator.to_string());
+
+    // Oracle families that are always active when PlaytestPlugin is in.
+    let active = vec![
+        "panic".into(),
+        "error_handler".into(),
+        "liveness".into(),
+        "action_effect".into(),
+        "finite_transforms".into(),
+        "transform_desync".into(),
+        "bounds".into(),
+        "custom_oracles".into(),
+        "typed_oracles".into(),
+        "determinism".into(),
+    ];
+
+    // Semantic invariants inactive when no TestApi/Resolver.
+    let has_test_api = world.get_resource::<TestApi>().is_some()
+        || world.get_resource::<TestApiResolver>().is_some();
+    let mut inactive = Vec::new();
+    if !has_test_api {
+        inactive.push((
+            "semantic_invariants".into(),
+            "no TestApi or Resolver".into(),
+        ));
+    }
+
+    // Intent effect inactive when no gameplay state to observe (false-positive guard).
+    if world
+        .get_resource::<crate::game_types::GameTypes>()
+        .is_none()
+        && world
+            .iter_entities()
+            .filter(|e| e.contains::<crate::contract::Gameplay>())
+            .count()
+            == 0
+    {
+        // No gameplay entities — intent_effect may be vacuous.
+        inactive.push((
+            "intent_effect".into(),
+            "no gameplay state to observe".into(),
+        ));
+    }
+
+    build_checked_scope(world, actuators, active, inactive)
 }
 
 /// A gameplay feature detected by reflection — zero game cooperation.

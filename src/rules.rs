@@ -42,6 +42,7 @@ impl Rule {
         match self {
             Rule::FrozenWorld => "Entities must keep changing: a world that stops updating while the game is running is a soft-lock.",
             Rule::UndrivableGame => "The bot's actions had no observable effect; the game may not be drivable by the configured input.",
+            Rule::HarnessCouldNotDriveGame => "The harness could not drive the game: enough actions were injected but none had any effect.",
             Rule::BevyError => "Bevy reported an error (bevy_log/LogPlugin error stream).",
             Rule::BevyWarning => "Bevy reported a warning (bevy_log/LogPlugin warn stream).",
             Rule::LogError => "Game code logged at error level (tracing subscriber).",
@@ -97,6 +98,7 @@ impl Rule {
         match self {
             Rule::FrozenWorld => "Per-frame gameplay-entity digest unchanged for N consecutive frames while not paused.",
             Rule::UndrivableGame => "Post-run analysis: zero percept changes across the entire action log.",
+            Rule::HarnessCouldNotDriveGame => "End-of-run vacuity check: >= 20 audited actions and an overall effect rate of exactly 0.",
             Rule::BevyError => "ERROR-level record routed through the injected Bevy log subscriber.",
             Rule::BevyWarning => "WARN-level record routed through the injected Bevy log subscriber.",
             Rule::LogError => "ERROR-level tracing event captured by the harness sink.",
@@ -152,6 +154,7 @@ impl Rule {
         match self {
             Rule::FrozenWorld => "Legitimately static scenes (menus, cutscenes) — scope with the Gameplay marker or pause hooks.",
             Rule::UndrivableGame => "Games whose state only changes via time-based schedules with no input dependence.",
+            Rule::HarnessCouldNotDriveGame => "Menus needing clicks the monkey cannot find; input gated behind state; broken headless build.",
             Rule::BevyError => "Upstream Bevy errors that are benign in headless mode (asset loader warnings, GPU absence).",
             Rule::BevyWarning => "Warnings that only apply to rendering backends absent in headless runs.",
             Rule::LogError => "Game logs transient recoverable errors by design (retry logic).",
@@ -225,6 +228,7 @@ impl Rule {
 declare_rules! {
     FrozenWorld => "frozen_world",
     UndrivableGame => "undrivable_game",
+    HarnessCouldNotDriveGame => "harness_could_not_drive_game",
     BevyError => "bevy_error",
     BevyWarning => "bevy_warning",
     LogError => "log_error",

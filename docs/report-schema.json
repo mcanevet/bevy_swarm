@@ -10,7 +10,8 @@
     "violations",
     "metrics",
     "coverage",
-    "frame_count"
+    "frame_count",
+    "scope"
   ],
   "properties": {
     "schema_version": {
@@ -118,6 +119,9 @@
       "items": {
         "$ref": "#/$defs/frame_digest"
       }
+    },
+    "scope": {
+      "$ref": "#/$defs/checked_scope"
     }
   },
   "additionalProperties": false,
@@ -463,53 +467,114 @@
           "type": "array",
           "items": {
             "type": "array",
-            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/effect"
+              }
+            ]
           }
         },
         "mouse_buttons": {
           "type": "array",
           "items": {
             "type": "array",
-            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/effect"
+              }
+            ]
           }
         },
-        "mouse_motion": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/effect" } ] },
-        "wheel": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/effect" } ] },
+        "mouse_motion": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/effect"
+            }
+          ]
+        },
+        "wheel": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/effect"
+            }
+          ]
+        },
         "gamepad_buttons": {
           "type": "array",
           "items": {
             "type": "array",
-            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/effect"
+              }
+            ]
           }
         },
         "gamepad_axes": {
           "type": "array",
           "items": {
             "type": "array",
-            "prefixItems": [ { "type": "string" }, { "$ref": "#/$defs/effect" } ]
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/effect"
+              }
+            ]
           }
         },
         "probed_at": {
           "type": "array",
-          "items": { "type": "integer", "minimum": 0 }
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
         "readers": {
           "type": "array",
           "items": {
             "type": "array",
             "prefixItems": [
-              { "type": "string" },
-              { "type": "array", "items": { "type": "string" } }
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             ]
           }
         },
         "confidence": {
           "type": "string",
-          "enum": ["exact", "statistical"]
+          "enum": [
+            "exact",
+            "statistical"
+          ]
         },
         "pruned_devices": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -530,10 +595,21 @@
       "type": "object",
       "description": "Z4: a differential effect (first divergence + changed percept keys)",
       "properties": {
-        "first_divergence_frame_delta": { "type": "integer", "minimum": 0 },
-        "changed": { "type": "array", "items": { "type": "string" } }
+        "first_divergence_frame_delta": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
-      "required": ["first_divergence_frame_delta", "changed"],
+      "required": [
+        "first_divergence_frame_delta",
+        "changed"
+      ],
       "additionalProperties": false
     },
     "frame_digest": {
@@ -555,6 +631,47 @@
             "object",
             "null"
           ]
+        }
+      }
+    },
+    "checked_scope": {
+      "type": "object",
+      "description": "Z1: contract tier + oracle families that ran/were skipped, and actuators used.",
+      "properties": {
+        "tier": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "zero",
+            "observable",
+            "semantic",
+            null
+          ]
+        },
+        "active": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inactive": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "actuators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }
