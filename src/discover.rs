@@ -19,7 +19,7 @@
 //!    completed so a dead key's siblings still get sampled (the
 //!    dead_verb oracle needs them to notice a dead verb).
 
-use crate::branch::{InProcess, ScenarioRunner};
+use crate::branch::InProcess;
 use crate::determinism::FrameDigest;
 use crate::scenario::{RawAction, ReplayIntent, Scenario};
 use std::collections::BTreeMap;
