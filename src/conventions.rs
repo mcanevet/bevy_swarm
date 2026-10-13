@@ -55,7 +55,13 @@ pub fn special_build_root() -> PathBuf {
 /// arbitrary locations. Only runtime scratch (output_root family)
 /// honors CARGO_TARGET_DIR.
 pub fn persisted_root() -> PathBuf {
-    PathBuf::from("tests/swarm")
+    // Z18: env override lets tests (and tooling) isolate the persisted
+    // ledger (issues.json, regressions/, ...) per process. nextest
+    // runs each test in its OWN process, so #[serial] cannot prevent
+    // cross-test interference with the shared paths.
+    std::env::var_os("BEVY_SWARM_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("tests/swarm"))
 }
 
 /// Config: `tests/swarm/config.json`

@@ -484,6 +484,19 @@ fn z18_runs_dir(cfg: &AutotestConfig) -> std::path::PathBuf {
     std::path::Path::new(&target).join(&cfg.output_dir)
 }
 
+/// Z18: isolate the persisted ledger (issues.json, regressions/) per
+/// test. nextest runs each test in its OWN process, so #[serial] does
+/// not prevent interference with the shared tests/swarm paths.
+fn z18_isolate_state(suffix: &str) {
+    let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
+    let dir = std::path::Path::new(&target).join(format!("z18-state-{}", suffix));
+    // Fresh state every time: stale issues.json/regressions/ from an
+    // earlier run would flip classifications.
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create state dir");
+    std::env::set_var("BEVY_SWARM_STATE_DIR", &dir);
+}
+
 /// Z18.F + T13: two consecutive autotests — the second classifies the
 /// known fingerprint as `known` (gate.new empty) when the DB records it.
 #[test]
@@ -492,9 +505,7 @@ fn z18_gate_second_run_knows_fingerprint() {
     use bevy_swarm::fingerprint::Fingerprint;
     use bevy_swarm::issues::{IssueDb, IssueRecord, IssueState};
 
-    let dir = std::path::PathBuf::from("tests/swarm/issues.json");
-    let backup = std::fs::read_to_string(&dir).ok();
-    std::fs::remove_file(&dir).ok();
+    z18_isolate_state("gate");
 
     // First run: everything is new (empty DB). Record to DB as the
     // update mode would.
@@ -534,10 +545,6 @@ fn z18_gate_second_run_knows_fingerprint() {
     assert!(second.gate.passed, "known-open must not fail the gate");
 
     // Restore (or remove) the DB so other tests see the pristine state.
-    match backup {
-        Some(text) => std::fs::write(&dir, text).unwrap(),
-        None => std::fs::remove_file(&dir).unwrap(),
-    }
     let _ = IssueRecord::default();
     let _ = IssueState::Open;
     let _ = Fingerprint(String::new());
@@ -549,6 +556,8 @@ fn z18_gate_second_run_knows_fingerprint() {
 #[serial]
 fn z18_regressions_replayed_first() {
     use bevy_swarm::sweep::{write_regression, RegressionRecord};
+
+    z18_isolate_state("reg");
 
     let cfg = z18_config(1, "reg");
     let report =
@@ -602,6 +611,8 @@ fn z18_regressions_replayed_first() {
 #[test]
 #[serial]
 fn z18_autotest_report_matches_schema() {
+    z18_isolate_state("schema");
+
     let cfg = z18_config(1, "schema");
     let report = autotest_with(|| FailingGamePlugin, cfg.clone()).expect("autotest runs");
     let run_dir = z18_runs_dir(&cfg).join(report.run_id.clone().expect("run id"));
@@ -629,6 +640,8 @@ fn z18_autotest_report_matches_schema() {
 #[test]
 #[serial]
 fn z18_per_seed_reports_written() {
+    z18_isolate_state("seeds");
+
     let cfg = z18_config(2, "seeds");
     let cfg2 = cfg.clone();
     let report = autotest(SimpleGamePlugin, cfg).expect("autotest runs");
@@ -652,6 +665,8 @@ fn z18_per_seed_reports_written() {
 #[test]
 #[serial]
 fn z18_junit_xml_strict_parse() {
+    z18_isolate_state("junit");
+
     let cfg = z18_config(1, "junit");
     let cfg2 = cfg.clone();
     let report = autotest_with(|| FailingGamePlugin, cfg).expect("autotest runs");
