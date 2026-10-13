@@ -309,6 +309,10 @@ pub struct PlaytestReport {
     /// J1: signed robustness margins (STL-style) per invariant and
     /// overall (normalized). Positive = satisfied by that margin.
     pub robustness: crate::robustness::RobustnessSummary,
+    /// Z4: input surface discovered by differential probing, when
+    /// the caller ran discovery for this game.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovered_surface: Option<crate::discover::DiscoveredSurface>,
 }
 
 impl PlaytestReport {
@@ -338,6 +342,7 @@ impl PlaytestReport {
             action_effect_rate: Default::default(),
             choices: vec![],
             robustness: Default::default(),
+            discovered_surface: None,
         }
     }
 }
@@ -1432,6 +1437,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .get_resource::<crate::robustness::RobustnessTracker>()
             .map(|t| t.summary())
             .unwrap_or_default(),
+        discovered_surface: None,
     })
 }
 

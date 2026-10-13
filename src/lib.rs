@@ -46,6 +46,7 @@ pub mod contract;
 pub mod conventions;
 pub mod determinism;
 pub mod diagnostics;
+pub mod discover;
 pub mod driver;
 pub mod effects;
 pub mod entropy;

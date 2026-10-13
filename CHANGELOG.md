@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **m2h.5 (Z4): input-surface discovery** — `discover_surface()` differential probing (baseline + per-candidate probe runs, digest diff with harness-owned key filtering), static device pruning via `Schedule::systems_with_access`, group completion (arrow/WASD/d-pad/face groups), `RawSurface::from_discovered` with effect-breadth weights feeding chaos sampling, autotest integration (runs discovery when chaos has no declared surface, falls back to the FX4 default when nothing is observable), `discovered_surface` on `PlaytestReport`/`AutotestReport` + schema, `AutotestReport::summary()` surface line.
+- **Z4 dependency fix**: A4 `canonical_state` now digests unnamed `Gameplay` entities via `StableId` fallback keys (tier-0 games without `Name` were previously invisible to digests, blinding differential probing).
 - **le3.11 (RF7): error/log capture** — LogPlugin custom_layer integration (headless_app installs swarm capture layer via `LogPlugin::custom_layer`), stable sink fingerprints (digit-run normalization + count-suffix stripping), `bevy_suppressed` informational rule for Ignore-severity errors, drop-guarded handler install (handler moved after load-time validation). PR #124.
 - **le3.10 (RF6): informational rules** — informational rules never gate run status, fps_floor uses wall-clock time, `Rule::is_informational()` derived from enum with parity test. PR #123.
 - **le3.9 (RF5): expert-rule semantics** — text-WHEN rules fixed, J1 overall<0 iff fail corrected, text REQUIRE robustness ±1, deadline-capped observe_max. PR #122.

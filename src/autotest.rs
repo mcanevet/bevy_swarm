@@ -137,6 +137,10 @@ pub struct AutotestReport {
     /// FX4.5: stable run identifier (conventions::run_id) — prevents
     /// directory collisions between consecutive autotests.
     pub run_id: Option<String>,
+    /// Z4: input surface discovered by differential probing, when
+    /// the configuration ran discovery (no IntentSurface).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovered_surface: Option<crate::discover::DiscoveredSurface>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -237,8 +241,20 @@ impl AutotestReport {
 
     /// Human-readable summary line.
     pub fn summary(&self) -> String {
+        let surface_info = match &self.discovered_surface {
+            Some(s) => format!(
+                ", surface: {} keys [{}]",
+                s.keys.len(),
+                s.keys
+                    .iter()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            None => String::new(),
+        };
         format!(
-            "autotest: {} seeds, {} failures ({} unique), {}s total, {}%",
+            "autotest: {} seeds, {} failures ({} unique), {}s total, {}%{}",
             self.scope.seeds_run,
             self.failures.iter().map(|f| f.occurrences).sum::<u64>(),
             self.failures.len(),
@@ -246,7 +262,8 @@ impl AutotestReport {
             (100.0
                 * (self.scope.seeds_run as f32
                     - self.runs.iter().filter(|r| r.status != "pass").count() as f32)
-                / self.scope.seeds_run.max(1) as f32) as u32
+                / self.scope.seeds_run.max(1) as f32) as u32,
+            surface_info
         )
     }
 }
@@ -310,6 +327,39 @@ where
     });
 
     let runner = InProcess { factory };
+
+    // Z4: discover the input surface when the game has no declared
+    // contract (chaos bot without a raw_surface): probing replaces
+    // the hard-coded default surface, weighted by effect breadth.
+    let discovered_surface = if config.base_scenario.bot.bot_type == crate::enums::BotType::Chaos
+        && config.base_scenario.bot.raw_surface.is_none()
+    {
+        let factory_fn = crate::headless::headless_app_factory({
+            let make_plugin = make_plugin.clone();
+            move || (make_plugin)()
+        });
+        let surface =
+            crate::discover::discover_surface(factory_fn, &crate::discover::ProbeConfig::default());
+        // Feed the discovered surface back into the scenario: chaos
+        // samples the discovered (group-completed) keys, weighted.
+        // If NOTHING was discovered (no observable game state), keep
+        // the FX4 default surface — an empty surface would make chaos
+        // refuse (chaos_bot_config) and the run vacuous.
+        let non_empty = !surface.keys.is_empty()
+            || !surface.mouse_buttons.is_empty()
+            || surface.mouse_motion.is_some()
+            || surface.wheel.is_some()
+            || !surface.gamepad_buttons.is_empty()
+            || !surface.gamepad_axes.is_empty();
+        if non_empty {
+            config.base_scenario.bot.raw_surface =
+                Some(crate::scenario::RawSurface::from_discovered(&surface));
+        }
+        Some(surface)
+    } else {
+        None
+    };
+
     let seeds: Vec<u64> = (1..=config.num_seeds).collect();
     let mut run_summaries: Vec<RunSummary> = Vec::new();
     let mut all_violations: Vec<(u64, crate::state::ViolationEntry)> = Vec::new();
@@ -511,6 +561,7 @@ where
             elapsed_ms_total,
             run_summaries.len() as u64,
         )),
+        discovered_surface,
     };
 
     // Write report to disk.
@@ -609,6 +660,7 @@ mod tests {
                 elapsed_ms: 5000,
             },
             run_id: None,
+            discovered_surface: None,
         };
 
         let summary = report.summary();
