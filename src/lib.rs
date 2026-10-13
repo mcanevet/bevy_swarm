@@ -70,6 +70,7 @@ pub mod robustness;
 pub mod rules;
 pub mod scenario;
 pub mod sinks;
+pub mod smoke;
 pub mod state;
 pub mod sweep;
 pub mod typed;

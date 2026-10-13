@@ -11,7 +11,8 @@
     "metrics",
     "coverage",
     "frame_count",
-    "scope"
+    "scope",
+    "harness_mode"
   ],
   "properties": {
     "schema_version": {
@@ -122,6 +123,15 @@
     },
     "scope": {
       "$ref": "#/$defs/checked_scope"
+    },
+    "harness_mode": {
+      "type": "string",
+      "enum": [
+        "in_process",
+        "external_smoke",
+        "external_driven"
+      ],
+      "description": "Which harness mode produced this report. Conventions \u00a77 vocabulary."
     }
   },
   "additionalProperties": false,

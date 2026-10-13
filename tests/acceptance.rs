@@ -743,6 +743,9 @@ fn clean_fixtures_pass_long() {
                 None
             }
         })
+        // Z19: bin-only fixtures are external smoke binaries, not
+        // in-process adapter fixtures (no fixture-runner support).
+        .filter(|f| !f.starts_with("bin_only"))
         .collect();
     fixtures.sort();
     assert!(
@@ -960,4 +963,45 @@ fn clean_turn_based_no_stuck_on_wait() {
             stuck
         );
     }
+}
+
+/// Z19 (m2h.20): smoke runner with stderr classifier on a crashing binary.
+#[test]
+fn smoke_crashing_binary_yields_crash_status() {
+    use bevy_swarm::smoke::smoke_run;
+
+    let binary = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("../fixture_bin_only");
+    let report = smoke_run(&binary, &[], 5).expect("smoke_run succeeds");
+
+    assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Crash);
+    assert_eq!(report.harness_mode, "external_smoke");
+    assert!(report.violations.iter().any(|v| v.rule == "panic"));
+}
+
+/// Z19 amendment: a CLEAN binary must NOT yield crash/error status
+/// (false-positive guard — the classifier must not fire on stderr
+/// noise).
+#[test]
+fn smoke_clean_binary_passes() {
+    use bevy_swarm::smoke::smoke_run;
+
+    let binary = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("../fixture_bin_only_clean");
+    let report = smoke_run(&binary, &[], 30).expect("smoke_run succeeds");
+
+    assert_eq!(
+        report.status,
+        bevy_swarm::enums::PlaytestStatus::Pass,
+        "clean binary must pass: violations={:?}",
+        report.violations
+    );
+    assert_eq!(report.harness_mode, "external_smoke");
+    assert!(report.violations.is_empty());
 }

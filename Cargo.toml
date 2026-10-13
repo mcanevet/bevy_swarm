@@ -8,6 +8,8 @@ members = [
     "fixtures/turn_based",
     "fixtures/regression_pair",
     "fixtures/lone",
+    "fixtures/bin_only",
+    "fixtures/bin_only_clean",
     "tests/fixture-runner",
     "bevy_swarm_cli",
 ]

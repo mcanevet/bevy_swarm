@@ -1137,6 +1137,7 @@ dependencies = [
  "bevy_shape",
  "bevy_sprite",
  "bevy_sprite_render",
+ "bevy_state",
  "bevy_tasks",
  "bevy_text",
  "bevy_time",
@@ -2759,6 +2760,20 @@ dependencies = [
  "fixture_walker",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fixture_bin_only"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "fixture_bin_only_clean"
+version = "0.1.0"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]
