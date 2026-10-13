@@ -172,7 +172,12 @@ fn run_fixture(
     let fixture = fixture.to_string();
     let mut env_bug = None;
     if enable_bug {
-        if let Some(bug) = variant.strip_prefix("bug_") {
+        // Z18: scaffold:none copies are suffixed _none; drop suffix.
+        let bug = variant
+            .strip_prefix("bug_")
+            .and_then(|s| s.strip_suffix("_none"))
+            .or_else(|| variant.strip_prefix("bug_"));
+        if let Some(bug) = bug {
             env_bug = Some(bug.to_string());
         }
     }
