@@ -1,5 +1,7 @@
 # bevy_swarm
 
+[![Sponsor](https://img.shields.io/badge/sponsor-%40mcanevet-db61a2?logo=github-sponsors&style=flat-square)](https://github.com/sponsors/mcanevet)
+
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
 **Targets Bevy 0.20** (`0.20.0` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
@@ -287,3 +289,36 @@ proxy — the HTTP transport is plaintext.
 - raw input (gamepad/pointer injection) — gamepad actions not in the audit log (RF16)
 - `ClickEntity`/pointer picking — `NoViewportSize` failures without a camera (RF11)
 - deterministic entropy — `rand::rng()` not reproducible on the same thread (RF10)
+
+## Contributing
+
+Contributions are welcome! By submitting a contribution you agree it is
+licensed under **MIT OR Apache-2.0**, at the option of the project. There is
+no CLA; this preserves the project's freedom to adjust licensing of future
+versions (existing versions remain MIT/Apache-2.0 forever).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the
+Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.
+
+bevy_swarm is a **permanent open-core library**: the core crate stays
+MIT/Apache-2.0 forever. Any future commercial surface (hosted runners,
+LLM backends, portals) would live in separate companion products with
+their own licenses — never a relicense of this crate.
+
+## Sponsor
+
+bevy_swarm is free (MIT/Apache-2.0). If your studio ships with it,
+consider [sponsoring @mcanevet](https://github.com/sponsors/mcanevet).
