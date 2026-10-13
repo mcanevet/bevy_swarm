@@ -970,11 +970,8 @@ fn clean_turn_based_no_stuck_on_wait() {
 fn smoke_crashing_binary_yields_crash_status() {
     use bevy_swarm::smoke::smoke_run;
 
-    let binary = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("../fixture_bin_only");
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let binary = manifest.join("target/debug/fixture_bin_only");
     let report = smoke_run(&binary, &[], 5).expect("smoke_run succeeds");
 
     assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Crash);
@@ -989,11 +986,8 @@ fn smoke_crashing_binary_yields_crash_status() {
 fn smoke_clean_binary_passes() {
     use bevy_swarm::smoke::smoke_run;
 
-    let binary = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("../fixture_bin_only_clean");
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let binary = manifest.join("target/debug/fixture_bin_only_clean");
     let report = smoke_run(&binary, &[], 30).expect("smoke_run succeeds");
 
     assert_eq!(
