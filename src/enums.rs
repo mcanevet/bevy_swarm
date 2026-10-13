@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 // Bot types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BotType {
     Chaos,
@@ -46,7 +46,9 @@ impl From<BotType> for String {
 // Persona configurations
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Persona {
     /// Default: uniform sampling over the declared surface.
@@ -74,7 +76,7 @@ impl std::fmt::Display for Persona {
 // Invariant rule types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InvariantRule {
     NodesInBounds,
@@ -104,7 +106,7 @@ impl std::fmt::Display for InvariantRule {
 /// Wire format: `lt`, `le`, `gt`, `ge`, `equals`, `ne` (plus the legacy
 /// aliases `below` = `le`, `above` = `ge`, `eq` = `equals`; all inclusive
 /// boundaries).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckOp {
     Lt,
@@ -167,7 +169,7 @@ impl std::fmt::Display for CheckOp {
 // Differential invariants
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DifferentialOp {
     NoDecrease,
@@ -187,7 +189,7 @@ impl std::fmt::Display for DifferentialOp {
 // Playtest report status
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaytestStatus {
     Pass,
@@ -215,7 +217,9 @@ impl From<PlaytestStatus> for String {
 // Pointer buttons
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PointerButton {
     #[default]

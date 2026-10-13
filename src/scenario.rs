@@ -10,7 +10,7 @@ fn default_true() -> bool {
 }
 use std::collections::HashSet;
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     /// Stable scenario name. Used for golden-trajectory file naming
@@ -149,7 +149,7 @@ fn default_duration() -> f32 {
     15.0
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BotConfig {
     #[serde(rename = "type")]
@@ -212,7 +212,7 @@ pub struct BotConfig {
 }
 
 /// I4: liveness configuration.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LivenessConfig {
     /// Liveness mode (default: real-time).
@@ -241,7 +241,7 @@ impl Default for LivenessConfig {
 }
 
 /// I4: liveness mode.
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LivenessMode {
     /// Real-time: violation if no liveness signal for timeout_s.
@@ -265,7 +265,7 @@ fn default_deadzone() -> f32 {
 
 /// Raw input surface declaration (Z3). Defines what raw inputs are available
 /// for chaos/curious bots to sample from.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RawSurface {
     #[serde(default)]
     pub keys: Vec<String>,
@@ -351,7 +351,7 @@ impl Default for RawSurface {
 /// A typed replay intent. Whatever intent sequence a scenario author
 /// (or a recorded human play session translated through the adapter)
 /// provides is replayed verbatim.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayInput {
     pub frame: u64,
@@ -360,7 +360,7 @@ pub struct ReplayInput {
 
 /// A raw input action for the tier-0 actuator (Z3). Peer of ReplayIntent:
 /// keys, mouse, cursor, gamepad, wheel, and ClickEntity gestures.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(tag = "raw", rename_all = "snake_case")]
 pub enum RawAction {
     /// Key press (reuse parse_key_code for validation).
@@ -394,7 +394,7 @@ pub enum RawAction {
 }
 
 /// Reference to a gameplay entity (by Name or StableId). Used by ClickEntity.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum EntityRef {
     ByName(String),
@@ -402,7 +402,9 @@ pub enum EntityRef {
 }
 
 /// Mouse button for raw input (wire-compatible with PointerButton).
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseBtn {
     Left,
@@ -416,7 +418,7 @@ pub enum MouseBtn {
 /// actually hits — which is the point.
 /// synthetic_keyboard: press+release a key at a given frame, through
 /// the real keyboard input chain.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeyPressInput {
     pub frame: u64,
@@ -433,7 +435,7 @@ fn default_hold_frames() -> u64 {
     1
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PointerClickInput {
     pub frame: u64,
@@ -471,7 +473,7 @@ pub fn action_log_to_timed_actions(log: &[crate::contract::ActionEntry]) -> Vec<
         .collect()
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, schemars::JsonSchema)]
 #[serde(tag = "intent", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReplayIntent {
     Move {
@@ -503,7 +505,7 @@ pub enum ReplayIntent {
 
 /// Target of a replay Select: Name (plain string, back-compat) or
 /// StableId (unnamed Gameplay entities; I1).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum SelectTarget {
     /// Plain string name (existing JSON scenarios keep working).
@@ -515,7 +517,7 @@ pub enum SelectTarget {
 /// Timed action for replay from ActionLog. Frame-aligned with the original
 /// run for deterministic reproduction. Used by the replay bot and ddmin
 /// minimizer to reconstruct crash-inducing sequences.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TimedAction {
     pub frame: u64,
     pub source: String,
@@ -523,7 +525,7 @@ pub struct TimedAction {
     pub details: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Invariant {
     pub name: String,
@@ -572,7 +574,7 @@ pub struct Invariant {
     pub scale: Option<f64>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryTarget {
     /// Component types that MUST be present.
@@ -583,7 +585,7 @@ pub struct QueryTarget {
     pub without: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Setup {
     #[serde(default)]
@@ -594,13 +596,13 @@ pub struct Setup {
     pub cheats: Vec<CheatCall>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 pub struct CheatCall {
     pub frame: u64,
     pub kind: String,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResetCall {
     pub kind: String,

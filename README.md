@@ -6,23 +6,127 @@ An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.
 
 **Targets Bevy 0.20** (`0.20.0` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
 
+## Quick start (10 minutes)
+
+bevy_swarm runs your game headlessly, drives it with bots, and checks
+generic oracles (crashes, log errors, soft-locks, NaNs, liveness) — with
+**zero semantic contract**: no `TestApi`, no `IntentSurface`, no game-code
+changes.
+
+**One line of test code, zero semantic contract:**
+
+```rust,no_run
+use bevy::prelude::*;
+use bevy_swarm::autotest::{autotest, AutotestConfig};
+
+# #[derive(Clone, Default)]
+# struct MyGamePlugin;
+# impl Plugin for MyGamePlugin {
+#     fn build(&self, _: &mut App) {}
+# }
+# fn main() {
+// tests/playtest.rs — runs 16 seeds × 20s of chaos with tier-0 oracles
+let report = autotest(MyGamePlugin, AutotestConfig::default()).unwrap();
+assert!(report.failures.is_empty(), "{}", report.summary());
+# }
+```
+
+Requirements for the in-process mode (stated up front):
+
+- Your game needs a `src/lib.rs` exposing its root plugin, so an
+  integration test can import it. (Binary-only crate? Promote your
+  `main.rs` plugin setup into `lib.rs` — a mechanical refactor.)
+- `headless_app()` strips the render/window/audio backends; systems
+  reading window state need a guard or the subprocess tier.
+- Add bevy_swarm as a dev-dependency:
+
+```toml
+[dev-dependencies]
+bevy_swarm = "0.1"
+```
+
+Then `cargo test --test playtest` — that's the whole wiring. The
+[scenario JSON](docs/schema.json) tells the harness WHAT to check:
+
+```json
+{
+  "bot": { "type": "chaos", "seed": 42 },
+  "duration_s": 10.0,
+  "invariants": [
+    { "name": "hp_floor", "rule": "custom", "path": "TestApi.hp",
+      "check": "above", "value": 10 }
+  ]
+}
+```
+
+### Interpreting a failure report
+
+A failing run writes `target/bevy_swarm/runs/<run-id>/report.json`.
+The three fields to read first:
+
+- `status` — `"fail"` / `"crash"` (a crashed run) / `"pass"`.
+- `violations` — one entry per broken rule (see the
+  [rule catalog](docs/rules.md)). Each entry carries the rule name, the
+  first/last frame, a `detail` string with the offending values, and a
+  stable `fingerprint` for regression tracking.
+- `action_log` — every input the bots fired, frame-indexed, so the
+  failing sequence can be replayed or minimized.
+
+Example: a soft-lock shows up as a `stuck_after_intent` violation with
+`detail: "no liveness within 0.5s after intent choice#2 (frame 214)"` —
+the action log tells you exactly which input sequence got you there.
+
+## Integration modes: on-ramp vs depth
+
+Two paths, positioned as a funnel (full table in
+[docs/conventions.md §0](docs/conventions.md)):
+
+1. **On-ramp — zero-touch external BRP tier**: smoke-test any Bevy game
+   in ~30 seconds with one documented build flag
+   (`--features bevy/bevy_remote`). Ceiling is observe-only
+   (crash/error/log/liveness/state-digest) — that ceiling is the
+   trade-off for touching zero code.
+2. **Depth — in-process `autotest(GamePlugin)`**: the richest mode,
+   structurally and forever. Semantic contract, bit-exact replay,
+   scheduler/RNG control, dense oracles via local queries. External
+   tiers can approach but never replace it.
+
+Start zero-touch, graduate to `autotest()` when you want bots, replay,
+and typed oracles.
+
+## Contract tiers (what "zero-contract" means)
+
+- **zero-contract** = no semantic hooks required from the game. NOT a
+  claim about typing effort: enabling a cargo feature (e.g.
+  `bevy_remote`) is a thin build-time contract, and "zero hand-written
+  lines" (CLI scaffolding) is convenience, not a guarantee.
+- **zero game-code changes at runtime** — true for in-process mode, but
+  requires a `lib.rs` target (see Quick start).
+- Detected tier and inactive oracle families (with reasons) are stated
+  in every report.
+
+Optional semantic pieces, in increasing depth:
+
+1. `TestApi` resource implementing `TestApiResolve` — publish
+   observable state (score, phase, hp) for invariants and planner
+   goals; world percepts (`Resource:`/`Component:` paths) work with
+   zero game-side setup
+2. `IntentSurface` — declare your game's input verbs; the chaos bot
+   samples only from it
+3. `ResetHooks`, `CheatHooks`, genre markers
+   (`TurnBased`/`RealTime`), `Gameplay` marker component
+
+Games with none of these still work: reflection-based percepts and
+auto-discovery calibration kick in, and the harness fails loudly rather
+than passing vacuously when a contract piece it needs is missing.
+
 ## Conventions
 
 Workspace layout, artifact paths, update mode (`BEVY_SWARM_UPDATE`), versioning,
 rule-name registry, and vocabulary are governed by [docs/conventions.md](docs/conventions.md)
-— the single source of truth. Oracle rule names live in the [rule registry](docs/rules.md)
-(`bevy_swarm::rules`).
-
-## Bevy compatibility policy
-
-Each bevy_swarm release supports **exactly one Bevy minor version**. No
-cross-version compatibility shims — the harness tracks Bevy's API closely
-(observers, message buffers, diagnostics), and carrying fallbacks doubles the
-surface that can silently diverge from real game behavior.
-
-| bevy_swarm | Bevy |
-|-----------|------|
-| 0.1.0 (unreleased) | 0.20 (`0.20.0`) |
+— the single source of truth. Oracle rule names live in the generated
+[rule catalog](docs/rules.md) (`bevy_swarm::rules`); the scenario format
+is specified by the generated [schema](docs/schema.json).
 
 ## Gameplay Snapshot Testing (Z11)
 
@@ -60,12 +164,7 @@ assert!(report.all_same(), "no regressions");
 - **Calibration** — `diagnostics::calibrate_world` runs a chaos session and derives suggested invariants from archetype-count envelopes, with zero game annotations (library API; there is no CLI flag)
 - **Loud contracts** — missing picking backends, unresolved TestApi paths, vacuous setups REJECT the scenario instead of silently passing
 
-## Usage
-
-```toml
-[dev-dependencies]
-bevy_swarm = "0.1" # or path/git
-```
+## Usage (single scenario)
 
 ```rust,no_run
 use bevy_swarm::harness::{run_scenario, Scenario};
@@ -85,15 +184,19 @@ assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
 
 ## Game-side contract (deliberately thin)
 
-1. Optional: a `TestApi` resource implementing `TestApiResolve` (or `app.register_test_api::<YourType>()` for a custom type) — publish observable state (score, phase, hp...) for invariants and planner goals; world percepts (`Resource:`/`Component:` paths) work with ZERO game-side setup
-2. `IntentSurface` — declare your game's input verbs; the chaos bot samples only from it
-3. Optional: `ResetHooks`, `CheatHooks`, genre markers (`TurnBased`/`RealTime`), `Gameplay` marker component
-
-Games with none of these still work: reflection-based percepts and auto-discovery calibration kick in, and the harness fails loudly rather than passing vacuously when a contract piece it needs is missing.
+See "Contract tiers" above for the full picture.
 
 ## Feature flags
 
 - `agent` — BRP-based resident agent for live inspection and intent injection
+
+## Feature-gated modes
+
+In-process mode (Quick start above) is the primary integration. The
+external/subprocess tiers are on the roadmap (see docs/conventions.md
+§0 for the full modes table); on current Bevy 0.20 the external
+observe-only BRP tier works with `--features bevy/bevy_remote` on the
+game side.
 
 ## Architecture
 
