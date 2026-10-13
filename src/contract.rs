@@ -3,6 +3,42 @@ use bevy::ecs::world::World;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Contract depth detected for this run. Purely informational: never a rejection reason.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractTier {
+    /// Just the game's plugin. Raw input, inferred gameplay entities, generic oracles only.
+    #[default]
+    Zero,
+    /// + identity/observability helpers: Name on gameplay entities, Reflect on components,
+    ///   RNG seeded from ScenarioSeed, optional Gameplay marker.
+    Observable,
+    /// + semantic contract: TestApi resolver, IntentSurface, typed oracles, reset/cheat hooks.
+    Semantic,
+}
+
+impl std::fmt::Display for ContractTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContractTier::Zero => write!(f, "zero"),
+            ContractTier::Observable => write!(f, "observable"),
+            ContractTier::Semantic => write!(f, "semantic"),
+        }
+    }
+}
+
+/// Scope of what was actually checked during a run (tier detection + oracle activity).
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct CheckedScope {
+    pub tier: Option<ContractTier>,
+    /// Oracle families that actually ran (e.g. "panic", "error_handler", "liveness", "invariants:3").
+    pub active: Vec<String>,
+    /// Families that could NOT run, with the reason.
+    pub inactive: Vec<(String, String)>,
+    /// How the harness acted on the game: "intents", "raw_input", "ui_monkey".
+    pub actuators: Vec<String>,
+}
+
 /// Input Abstraction — gameplay systems consume these; never ButtonInput.
 /// Buffered events are `Message`s — registered via `app.add_message::<M>()`,
 /// written/read via `MessageWriter`/`MessageReader`. `Event`/observers is

@@ -3,6 +3,14 @@
     "BotConfig": {
       "additionalProperties": false,
       "properties": {
+        "actuator": {
+          "default": null,
+          "description": "Z1: how the harness acts on the game. \"auto\" (default) selects\nintents when a non-empty IntentSurface exists, raw input\notherwise. \"intents\" | \"raw\" | \"ui\" force one (rejecting\nimpossible combinations at load time).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "agent_target": {
           "description": "pursuit: agent/target entity Names",
           "type": [

@@ -240,6 +240,40 @@ fn check_case(report: &serde_json::Value, expectation: &serde_json::Value) -> Ve
         ));
     }
 
+    // Z1 (swarm-m2h.2): every report carries a checked scope; an
+    // optional "expect_tier" field asserts the detected tier.
+    let scope = report.get("scope");
+    if scope.is_none() {
+        errors.push("scope: missing from report (Z1)".into());
+    } else {
+        let tier = scope
+            .and_then(|s| s.get("tier"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("<missing>");
+        if let Some(expected_tier) = expectation.get("expect_tier").and_then(|t| t.as_str()) {
+            if tier != expected_tier {
+                errors.push(format!(
+                    "scope.tier: expected {}, got {}",
+                    expected_tier, tier
+                ));
+            }
+        } else if expectation
+            .get("scaffold")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s == "adapter")
+        {
+            // Adapter cases are semantic by construction (they install
+            // TestConventionsPlugin pieces). Guard against accidental
+            // tier regressions until Z18 converts them to "none".
+            if tier != "semantic" {
+                errors.push(format!(
+                    "scope.tier: adapter scaffold must be semantic, got {}",
+                    tier
+                ));
+            }
+        }
+    }
+
     let violation_rules: Vec<&str> = report
         .get("violations")
         .and_then(|v| v.as_array())

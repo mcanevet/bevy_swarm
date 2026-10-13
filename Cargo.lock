@@ -1730,6 +1730,7 @@ dependencies = [
  "bevy_ui_widgets",
  "bevy_winit",
  "fixture-runner",
+ "fixture_lone",
  "fixture_regression_pair",
  "fixture_spawner",
  "fixture_spinner",
@@ -2749,6 +2750,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_swarm",
+ "fixture_lone",
  "fixture_regression_pair",
  "fixture_spawner",
  "fixture_spinner",
@@ -2756,6 +2758,13 @@ dependencies = [
  "fixture_walker",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fixture_lone"
+version = "0.1.0"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ Expectation files (X2) reference only these names.
 |---|---|
 | `frozen_world` | major |
 | `undrivable_game` | informational |
+| `harness_could_not_drive_game` | major |
 | `bevy_error` | major |
 | `bevy_warning` | major |
 | `log_error` | major |
@@ -76,6 +77,14 @@ Expectation files (X2) reference only these names.
 **Detects:** Post-run analysis: zero percept changes across the entire action log.
 
 **False-positive modes:** Games whose state only changes via time-based schedules with no input dependence.
+
+### `harness_could_not_drive_game`
+
+**Kind:** major (fails the run) — The harness could not drive the game: enough actions were injected but none had any effect.
+
+**Detects:** End-of-run vacuity check: >= 20 audited actions and an overall effect rate of exactly 0.
+
+**False-positive modes:** Menus needing clicks the monkey cannot find; input gated behind state; broken headless build.
 
 ### `bevy_error`
 

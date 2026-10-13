@@ -209,6 +209,12 @@ pub struct BotConfig {
     /// reseed). Default prng.
     #[serde(default)]
     pub continuation: crate::choice::Continuation,
+    /// Z1: how the harness acts on the game. "auto" (default) selects
+    /// intents when a non-empty IntentSurface exists, raw input
+    /// otherwise. "intents" | "raw" | "ui" force one (rejecting
+    /// impossible combinations at load time).
+    #[serde(default)]
+    pub actuator: Option<String>,
 }
 
 /// I4: liveness configuration.
@@ -767,6 +773,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             }
         }
         _ => {}
+    }
+
+    // Z1: actuator selection must be one of the known values.
+    if let Some(actuator) = &scenario.bot.actuator {
+        match actuator.as_str() {
+            "auto" | "intents" | "raw" | "ui" => {}
+            other => {
+                return Err(ScenarioError::Rejected(format!(
+                    "bot.actuator '{other}' is invalid: expected one of \
+                     auto | intents | raw | ui"
+                )));
+            }
+        }
     }
 
     // Invariant names key the eventual-state and dedup tables —

@@ -96,14 +96,30 @@ and typed oracles.
 
 ## Contract tiers (what "zero-contract" means)
 
+The harness detects how deep your game's test contract goes and states
+it in every report (`report.scope.tier`), along with the oracle
+families that ran vs. could not run (`scope.active` /
+`scope.inactive`, each with a reason) and how the harness drove the
+game (`scope.actuators`: `intents`, `raw_input`, `ui_monkey`).
+
+| Tier | Requires | What you get |
+|------|----------|--------------|
+| `zero` | nothing — the game's plugin alone | raw-input chaos (arrows/WASD default surface), inferred gameplay entities, generic oracles (panic, liveness, NaN, bounds, frame-time) |
+| `observable` | `Name` on gameplay entities, or `GameTypes` registered, or reflect-registered components | stable entity identity in reports/replays, per-entity percept paths, effect attribution |
+| `semantic` | any of: `TestApi`/`TestApiResolver`, non-empty `IntentSurface`, typed oracles, `ResetHooks`/`CheatHooks`/`NamedIntents` | intent bots, typed oracles, planner goals, reset/cheat hooks, `TestApi.*` invariants |
+
 - **zero-contract** = no semantic hooks required from the game. NOT a
   claim about typing effort: enabling a cargo feature (e.g.
   `bevy_remote`) is a thin build-time contract, and "zero hand-written
   lines" (CLI scaffolding) is convenience, not a guarantee.
 - **zero game-code changes at runtime** — true for in-process mode, but
   requires a `lib.rs` target (see Quick start).
-- Detected tier and inactive oracle families (with reasons) are stated
-  in every report.
+- A missing contract piece is NEVER a rejection reason by itself:
+  scenarios that don't reference the missing pieces run fine, and the
+  report states what was not checked.
+- Actuator selection is automatic (intents when an `IntentSurface`
+  exists, raw input otherwise) and can be forced per-scenario with
+  `"actuator": "intents" | "raw" | "ui" | "auto"`.
 
 Optional semantic pieces, in increasing depth:
 

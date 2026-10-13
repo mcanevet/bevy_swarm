@@ -59,13 +59,32 @@ pub(crate) fn chaos_bot_system(
     if persona == crate::enums::Persona::Idle && !choices.chance(state.frame, 1, 8) {
         return;
     }
-    // FX4.4: tier-0 raw chaos. Without an IntentSurface the game is a
-    // tier-0 game (no testable-conventions) — chaos samples RAW input
-    // (keys / mouse buttons / gamepad from the scenario's RawSurface
-    // default set) into RawActionQueue via ChoiceStream. Audit-log
-    // entries come from the raw input actuator (raw:key:<K> etc.),
-    // which Replay can replay.
-    let Some(surface) = surface else {
+    // Z1 (rule 2): actuator selection. "intents"|"raw"|"ui" force one
+    // (loud when impossible); default/auto picks intents when a
+    // non-empty IntentSurface exists, raw otherwise.
+    let actuator = scenario.0.bot.actuator.as_deref().unwrap_or("auto");
+    let surface_nonempty = surface.as_ref().map(|s| !s.0.is_empty()).unwrap_or(false);
+    let use_intents = match actuator {
+        "intents" => true,
+        "raw" | "ui" => false,
+        _ => surface_nonempty, // auto
+    };
+    if !use_intents {
+        // Forced-intent check: actuator "intents" with an empty surface
+        // is a scenario-authoring error — report loudly.
+        if actuator == "intents" && !surface_nonempty {
+            violations.report(
+                crate::rules::Rule::ChaosBotConfig,
+                "",
+                "bot.actuator is forced to \"intents\" but the IntentSurface is empty — \
+                 declare the game's input surface or use actuator \"raw\""
+                    .to_string(),
+                state.frame,
+            );
+            return;
+        }
+        // Z1 rule 2 fallthrough: raw actuator (Z3/Z4). FX4.4's tier-0
+        // default surface covers the no-IntentSurface case.
         let raw = scenario.0.bot.raw_surface.clone().unwrap_or_default();
         if raw.keys.is_empty()
             && !raw.mouse_buttons
@@ -180,6 +199,12 @@ pub(crate) fn chaos_bot_system(
             .entry(format!("raw_kind:{}", kind))
             .and_modify(|c| *c += 1)
             .or_insert(1);
+        return;
+    };
+    // Intent path (Z1): auto with a surface, or forced "intents".
+    let Some(surface) = surface else {
+        // auto with no IntentSurface resource at all cannot reach here
+        // (use_intents would be false); forced intents already errored.
         return;
     };
     if surface.0.is_empty() {

@@ -313,6 +313,8 @@ pub struct PlaytestReport {
     /// the caller ran discovery for this game.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovered_surface: Option<crate::discover::DiscoveredSurface>,
+    /// Z1: tier + what actually ran (oracle families, actuators).
+    pub scope: crate::contract::CheckedScope,
 }
 
 impl PlaytestReport {
@@ -343,6 +345,7 @@ impl PlaytestReport {
             choices: vec![],
             robustness: Default::default(),
             discovered_surface: None,
+            scope: crate::contract::CheckedScope::default(),
         }
     }
 }
@@ -510,6 +513,10 @@ thread_local! {
 ///     eprintln!("{}: {} (frame {})", v.rule, v.detail, v.first_frame);
 /// }
 /// ```
+/// Z1 rule 3: minimum audited actions before the vacuity guard
+/// (harness_could_not_drive_game) may fire.
+pub const VACUITY_MIN_ACTIONS: u64 = 20;
+
 pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport, ScenarioError> {
     validate_scenario(scenario)?;
 
@@ -1414,11 +1421,69 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .get_resource::<crate::contract::GameVersion>()
         .map(|v| v.0.clone());
 
+    // Z1: checked scope — tier + oracle families + actuators.
+    let scope = crate::diagnostics::compute_run_scope(app.world(), scenario);
+
+    // Z1 rule 3: vacuity guard. Enough actions injected but ZERO effect
+    // across all of them => the harness could not drive the game.
+    // False-positive guard (spec): a tier-0 game with no observable
+    // gameplay state (no Gameplay entities, no GameTypes) cannot
+    // ATTRIButE effects at all — recorded as scope.inactive, not a
+    // failure.
+    let observable_gameplay = app.world().iter_entities().any(|e| {
+        e.contains::<crate::contract::Gameplay>()
+            || e.contains::<crate::game_types::InferredGameplay>()
+    }) || app
+        .world()
+        .get_resource::<crate::game_types::GameTypes>()
+        .is_some();
+    if let Some(rate) = crate::effects::overall_effect_rate(app.world()) {
+        let total_actions: u64 = app
+            .world()
+            .get_resource::<crate::effects::ActionEffects>()
+            .map(|e| e.rates.values().map(|r| r.total).sum())
+            .unwrap_or(0);
+        if rate == 0.0 && total_actions >= VACUITY_MIN_ACTIONS && observable_gameplay {
+            let top_keys: Vec<String> = app
+                .world()
+                .get_resource::<crate::effects::ActionEffects>()
+                .map(|e| {
+                    let mut v: Vec<(u64, String)> =
+                        e.rates.iter().map(|(k, r)| (r.total, k.clone())).collect();
+                    v.sort_by_key(|(total, _)| std::cmp::Reverse(*total));
+                    v.into_iter().take(3).map(|(_, k)| k).collect()
+                })
+                .unwrap_or_default();
+            let last_frame = app
+                .world()
+                .get_resource::<crate::state::PlaytestState>()
+                .map(|s| s.frame)
+                .unwrap_or(0);
+            snap.push(ViolationEntry {
+                rule: crate::rules::Rule::HarnessCouldNotDriveGame.to_string(),
+                target: "harness".to_string(),
+                first_frame: 0,
+                last_frame,
+                count: 1,
+                detail: format!(
+                    "{} actions injected (top: {}) but no effect on the game. Suggested \
+                     causes: a menu needs a click the monkey can't find; input is gated \
+                     behind a state; broken headless build.",
+                    total_actions,
+                    top_keys.join(", ")
+                ),
+                last_detail: format!("{total_actions} actions injected with zero effect"),
+                fingerprint: None,
+                fingerprint_scheme: 1,
+            });
+        }
+    }
+
     // Auto-minimization on crash is NOT done inline — the harness cannot
     // rebuild the game's App from inside run_scenario. Instead, the
     // caller uses `minimize_crash`, which takes an app builder and the
-    // report's action log, applies ddmin, and returns the minimal
-    // reproducer plus a ready-to-save regression scenario.
+    // action log, applies ddmin, and returns the minimal reproducer
+    // plus a ready-to-save regression scenario.
 
     Ok(PlaytestReport {
         schema_version: 1,
@@ -1467,6 +1532,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .map(|t| t.summary())
             .unwrap_or_default(),
         discovered_surface: None,
+        scope,
     })
 }
 

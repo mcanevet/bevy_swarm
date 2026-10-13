@@ -7,6 +7,7 @@ members = [
     "fixtures/spawner",
     "fixtures/turn_based",
     "fixtures/regression_pair",
+    "fixtures/lone",
     "tests/fixture-runner",
     "bevy_swarm_cli",
 ]
@@ -138,6 +139,7 @@ fixture-walker = { package = "fixture_walker", path = "fixtures/walker" }
 fixture-spawner = { package = "fixture_spawner", path = "fixtures/spawner" }
 # xd5: in-process fx0_gate sweep reuses fixture-runner's adapters
 fixture-runner = { package = "fixture-runner", path = "tests/fixture-runner" }
+fixture-lone = { package = "fixture_lone", path = "fixtures/lone" }
 fixture-spinner = { package = "fixture_spinner", path = "fixtures/spinner" }
 fixture-regression-pair = { package = "fixture_regression_pair", path = "fixtures/regression_pair" }
 

@@ -46,6 +46,20 @@ fn main() {
     // same execution path as matrix/sweep consumers.
     let build_app = || {
         let mut app = headless_app();
+
+        // Z1 (swarm-m2h.2): the standalone fixture runs with NO adapter
+        // and NO harness contract scaffolding — pure tier-0 (scaffold
+        // "none"). The harness drives it via raw input; Z6 inference
+        // (GameTypes from the plugin's crate) marks its entities as
+        // InferredGameplay so liveness/effect oracles can observe them.
+        if fixture == "lone" {
+            app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
+                fixture_lone::LoneGamePlugin,
+            >());
+            app.add_plugins(PlaytestPlugin);
+            app.add_plugins(fixture_lone::LoneGamePlugin);
+            return app;
+        }
         app.add_plugins(bevy_swarm::contract::TestConventionsPlugin);
         app.add_plugins(PlaytestPlugin);
         // Insert AFTER TestConventionsPlugin so it persists
