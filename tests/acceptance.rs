@@ -1098,3 +1098,62 @@ fn brp_external_run_reports_unreachable_endpoint() {
         report.warnings
     );
 }
+
+/// x4k regression: liveness oracle must fire frozen_world at high TPS.
+/// The history ring cap was computed with a hardcoded 60 fps, so at
+/// tps > 300 the lookback window exceeded the ring and the oracle
+/// silently disabled (nth() always None). Now the cap scales with
+/// scenario.tps.
+#[test]
+fn frozen_world_at_high_tps() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 10.0,
+        "tps": 480,
+        "invariants": [],
+        "setup": {},
+        "liveness": {"mode": "real_time", "timeout_s": 2.0}
+    })
+    .to_string();
+    let (report, _) =
+        run_case_with_scenario("spinner", "bug_frozen", &scenario, &serde_json::json!({}));
+    let frozen = report["violations"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("frozen_world"))
+        })
+        .unwrap_or(false);
+    assert!(
+        frozen,
+        "frozen_world must fire at tps=480; ring-cap regression?"
+    );
+}
+
+/// x4k regression: verify the history ring cap scales with tps.
+/// At tps=1000, timeout_s=2 → window 2000 frames, cap must be >= 4000.
+#[test]
+fn liveness_ring_cap_scales_with_tps() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 5.0,
+        "tps": 1000,
+        "invariants": [],
+        "setup": {},
+        "liveness": {"mode": "real_time", "timeout_s": 2.0}
+    })
+    .to_string();
+    let (report, _) =
+        run_case_with_scenario("spinner", "bug_frozen", &scenario, &serde_json::json!({}));
+    let frozen = report["violations"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("frozen_world"))
+        })
+        .unwrap_or(false);
+    assert!(
+        frozen,
+        "frozen_world must fire at tps=1000; ring-cap regression?"
+    );
+}
