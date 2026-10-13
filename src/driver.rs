@@ -315,6 +315,9 @@ pub struct PlaytestReport {
     pub discovered_surface: Option<crate::discover::DiscoveredSurface>,
     /// Z1: tier + what actually ran (oracle families, actuators).
     pub scope: crate::contract::CheckedScope,
+    /// Z19/Z20: which harness mode produced this report.
+    /// Conventions §7 vocabulary: "in_process", "external_smoke", "external_driven".
+    pub harness_mode: String,
 }
 
 impl PlaytestReport {
@@ -346,6 +349,7 @@ impl PlaytestReport {
             robustness: Default::default(),
             discovered_surface: None,
             scope: crate::contract::CheckedScope::default(),
+            harness_mode: "in_process".to_string(),
         }
     }
 }
@@ -1533,6 +1537,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .unwrap_or_default(),
         discovered_surface: None,
         scope,
+        harness_mode: "in_process".to_string(),
     })
 }
 
