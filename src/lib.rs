@@ -38,6 +38,9 @@ struct _ReadmeDoctests;
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod autotest;
+/// Z18.H: crate-root re-exports so the Z10-generated test can call
+/// `bevy_swarm::autotest(GamePlugin, AutotestConfig::from_env())`.
+pub use autotest::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
 pub mod bots;
 pub mod branch;
 pub mod choice;
@@ -92,3 +95,4 @@ mod verify {
     mod test_api_ext;
     mod validation;
 }
+pub mod issues;

@@ -109,19 +109,28 @@ fn fixture_runner_bin() -> std::path::PathBuf {
 /// from the file the harness wrote (the user path).
 fn run_case(fixture: &str, variant: &str, expectation: &serde_json::Value) -> serde_json::Value {
     let scenario = build_scenario(expectation);
-    run_case_with_scenario(fixture, variant, &scenario)
+    let (report, _) = run_case_with_scenario(fixture, variant, &scenario, expectation);
+    report
 }
 
-/// FX1: fixture-runner writes reports to the SHARED runs/last path —
-/// concurrent tests would race on it and read each other's reports
-/// Run fixture-runner with an explicit scenario string (FX1: the
-/// meta-test builds long-duration scenarios directly).
-fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde_json::Value {
+/// Z18 (swarm-m2h.19): scaffold:none cases write AutotestReport + per-seed
+/// PlaytestReports; acceptance checks each seed-<n>.json with check_case.
+fn run_case_with_scenario(
+    fixture: &str,
+    variant: &str,
+    scenario: &str,
+    expectation: &serde_json::Value,
+) -> (serde_json::Value, PathBuf) {
     let bug_env = match variant {
-        "clean" => None,
+        // Z18: clean variants (including scaffold:none copies like
+        // clean_none) run the unmodified game.
+        v if v.starts_with("clean") => None,
         v => Some(
             v.strip_prefix("bug_")
                 .expect("variant is clean or bug_*")
+                // Z18: scaffold:none copies are suffixed _none; the
+                // underlying FIXTURE_BUG id drops the suffix.
+                .trim_end_matches("_none")
                 .to_string(),
         ),
     };
@@ -158,6 +167,14 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
         .arg("--out")
         .arg(&out_path)
         .current_dir(env!("CARGO_MANIFEST_DIR"));
+    // Z18 (swarm-m2h.19): scaffold selects the fixture-runner build
+    // path — "none" = zero-contract autotest over the plain game
+    // plugin; "adapter" (default) = the historical adapter path.
+    let scaffold = expectation
+        .get("scaffold")
+        .and_then(|s| s.as_str())
+        .unwrap_or("adapter");
+    cmd.arg("--scaffold").arg(scaffold);
     if let Some(bug) = &bug_env {
         cmd.env("FIXTURE_BUG", bug);
     }
@@ -174,7 +191,8 @@ fn run_case_with_scenario(fixture: &str, variant: &str, scenario: &str) -> serde
 
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("read report {}: {}", out_path.display(), e));
-    serde_json::from_str(&json).expect("report is valid JSON")
+    let report: serde_json::Value = serde_json::from_str(&json).expect("report is valid JSON");
+    (report, out_dir)
 }
 
 /// Build the scenario JSON from the expectation file (duration, seeds,
@@ -399,8 +417,42 @@ fn acceptance_suite() {
         let expectation: serde_json::Value = serde_json::from_str(&raw)
             .unwrap_or_else(|e| panic!("parse {}: {}", expect_path.display(), e));
 
-        let report = run_case(fixture, variant, &expectation);
-        let errors = check_case(&report, &expectation);
+        let scenario_built = build_scenario(&expectation);
+        let (report, out_dir) =
+            run_case_with_scenario(fixture, variant, &scenario_built, &expectation);
+        let scaffold = expectation
+            .get("scaffold")
+            .and_then(|s| s.as_str())
+            .unwrap_or("adapter");
+        let errors = if scaffold == "none" {
+            // Z18 (swarm-m2h.19): scaffold:none writes AutotestReport +
+            // per-seed PlaytestReports; check each seed individually.
+            let mut all_errors = Vec::new();
+            for entry in std::fs::read_dir(out_dir).expect("read out dir").flatten() {
+                let p = entry.path();
+                if !p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with("seed-"))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&p).expect("read seed report");
+                let seed_report: serde_json::Value =
+                    serde_json::from_str(&text).expect("seed report parses");
+                let seed_errors = check_case(&seed_report, &expectation);
+                if !seed_errors.is_empty() {
+                    all_errors.push(format!(
+                        "{}: {:#?}",
+                        p.file_name().unwrap().to_string_lossy(),
+                        seed_errors
+                    ));
+                }
+            }
+            all_errors
+        } else {
+            check_case(&report, &expectation)
+        };
 
         let pending = expectation.get("pending").and_then(|p| p.as_str());
         let outcome = match (errors.is_empty(), pending) {
@@ -538,6 +590,16 @@ fn report_matches_schema() {
     let schema: serde_json::Value =
         serde_json::from_str(include_str!("../docs/report-schema.json")).expect("schema parses");
     let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+    // Z18 (amendment 2): scaffold:none cases produce an
+    // AutotestReport — validate against its definition in the same
+    // schema file.
+    let autotest_validator = {
+        let wrapper = serde_json::json!({
+            "$ref": "#/$defs/autotest_report",
+            "$defs": schema["$defs"].clone()
+        });
+        jsonschema::validator_for(&wrapper).expect("autotest schema compiles")
+    };
 
     for (fixture, variant) in &cases {
         let expectation = serde_json::from_str::<serde_json::Value>(
@@ -546,11 +608,21 @@ fn report_matches_schema() {
         )
         .unwrap();
         let report = run_case(fixture, variant, &expectation);
-
-        let errors: Vec<String> = validator
-            .iter_errors(&report)
-            .map(|e| format!("{} at {}", e, e.instance_path))
-            .collect();
+        let use_autotest = expectation
+            .get("scaffold")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s == "none");
+        let errors: Vec<String> = if use_autotest {
+            autotest_validator
+                .iter_errors(&report)
+                .map(|e| format!("{} at {}", e, e.instance_path))
+                .collect()
+        } else {
+            validator
+                .iter_errors(&report)
+                .map(|e| format!("{} at {}", e, e.instance_path))
+                .collect()
+        };
         assert!(
             errors.is_empty(),
             "{}/{}: report does not match docs/report-schema.json: {:#?}",
@@ -694,7 +766,8 @@ fn clean_fixtures_pass_long() {
                 "liveness": liveness
             })
             .to_string();
-            let report = run_case_with_scenario(fixture, "clean", &scenario);
+            let (report, _) =
+                run_case_with_scenario(fixture, "clean", &scenario, &serde_json::json!({}));
             let violations: Vec<String> = report["violations"]
                 .as_array()
                 .map(|arr| {
@@ -729,7 +802,12 @@ fn softlock_detected_while_bot_retries() {
             "liveness": {"mode": "after_intent", "timeout_s": timeout_s}
         })
         .to_string();
-        let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+        let (report, _) = run_case_with_scenario(
+            "turn_based",
+            "bug_softlock_turn_4",
+            &scenario,
+            &serde_json::json!({}),
+        );
         let stuck = report["violations"]
             .as_array()
             .map(|arr| {
@@ -758,7 +836,12 @@ fn softlock_aggressive_30hz_detected() {
         "liveness": {"mode": "after_intent", "timeout_s": 2.0}
     })
     .to_string();
-    let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+    let (report, _) = run_case_with_scenario(
+        "turn_based",
+        "bug_softlock_turn_4",
+        &scenario,
+        &serde_json::json!({}),
+    );
     let stuck = report["violations"]
         .as_array()
         .map(|arr| {
@@ -785,7 +868,12 @@ fn softlock_sweep_seeds_1_to_32() {
             "liveness": {"mode": "after_intent", "timeout_s": 2.0}
         })
         .to_string();
-        let report = run_case_with_scenario("turn_based", "bug_softlock_turn_4", &scenario);
+        let (report, _) = run_case_with_scenario(
+            "turn_based",
+            "bug_softlock_turn_4",
+            &scenario,
+            &serde_json::json!({}),
+        );
         let stuck = report["violations"]
             .as_array()
             .map(|arr| {
@@ -818,7 +906,8 @@ fn frozen_world_fires_for_long_timeouts() {
         "liveness": {"mode": "real_time", "timeout_s": 12.0}
     })
     .to_string();
-    let report = run_case_with_scenario("spinner", "bug_frozen", &scenario);
+    let (report, _) =
+        run_case_with_scenario("spinner", "bug_frozen", &scenario, &serde_json::json!({}));
     let frozen = report["violations"]
         .as_array()
         .map(|arr| {
@@ -846,7 +935,8 @@ fn clean_turn_based_no_stuck_on_wait() {
             "liveness": {"mode": "after_intent", "timeout_s": 0.5}
         })
         .to_string();
-        let report = run_case_with_scenario("turn_based", "clean", &scenario);
+        let (report, _) =
+            run_case_with_scenario("turn_based", "clean", &scenario, &serde_json::json!({}));
         let stuck: Vec<String> = report["violations"]
             .as_array()
             .map(|arr| {

@@ -4,7 +4,18 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Contract depth detected for this run. Purely informational: never a rejection reason.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContractTier {
     /// Just the game's plugin. Raw input, inferred gameplay entities, generic oracles only.
@@ -28,7 +39,7 @@ impl std::fmt::Display for ContractTier {
 }
 
 /// Scope of what was actually checked during a run (tier detection + oracle activity).
-#[derive(Clone, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CheckedScope {
     pub tier: Option<ContractTier>,
     /// Oracle families that actually ran (e.g. "panic", "error_handler", "liveness", "invariants:3").
@@ -37,6 +48,36 @@ pub struct CheckedScope {
     pub inactive: Vec<(String, String)>,
     /// How the harness acted on the game: "intents", "raw_input", "ui_monkey".
     pub actuators: Vec<String>,
+}
+
+impl CheckedScope {
+    /// Union of several run scopes (Z18 autotest aggregation): the
+    /// maximum tier, deduplicated active families, merged inactive
+    /// entries, and the union of actuator kinds.
+    pub fn union(scopes: impl IntoIterator<Item = CheckedScope>) -> CheckedScope {
+        let mut out = CheckedScope::default();
+        for s in scopes {
+            if out.tier.unwrap_or(ContractTier::Zero) < s.tier.unwrap_or(ContractTier::Zero) {
+                out.tier = s.tier;
+            }
+            for a in s.active {
+                if !out.active.contains(&a) {
+                    out.active.push(a);
+                }
+            }
+            for (fam, why) in s.inactive {
+                if !out.inactive.iter().any(|(f, _)| *f == fam) {
+                    out.inactive.push((fam, why));
+                }
+            }
+            for a in s.actuators {
+                if !out.actuators.contains(&a) {
+                    out.actuators.push(a);
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Input Abstraction — gameplay systems consume these; never ButtonInput.

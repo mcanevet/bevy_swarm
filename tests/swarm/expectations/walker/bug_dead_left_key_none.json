@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "status": "fail",
+  "scaffold": "none",
+  "seeds": [
+    42
+  ],
+  "duration_s": 10.0,
+  "must_report": [
+    {
+      "rule": "dead_verb",
+      "detail_contains": "raw:key:ArrowLeft"
+    }
+  ],
+  "must_not_report": []
+}

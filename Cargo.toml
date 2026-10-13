@@ -142,6 +142,7 @@ fixture-runner = { package = "fixture-runner", path = "tests/fixture-runner" }
 fixture-lone = { package = "fixture_lone", path = "fixtures/lone" }
 fixture-spinner = { package = "fixture_spinner", path = "fixtures/spinner" }
 fixture-regression-pair = { package = "fixture_regression_pair", path = "fixtures/regression_pair" }
+roxmltree = "0.20"
 
 [badges]
 maintenance = { status = "actively-developed" }
