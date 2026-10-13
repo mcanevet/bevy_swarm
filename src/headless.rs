@@ -81,9 +81,72 @@ pub fn headless_platform() -> PluginGroupBuilder {
     };
 
     // Render: requires GPU; disable for headless operation.
+    // FX4 re-review (Z10 e2e): disabling RenderPlugin alone is NOT
+    // enough when the game compiles bevy with default features —
+    // CorePipelinePlugin::build loads a Shader asset (panics without
+    // RenderPlugin's init_asset), and the other pipeline plugins
+    // (Sprite, UI, Pbr, Gizmo, Text, Scene) transitively require
+    // render. Disable the whole render family; games needing meshes
+    // in tests should expose state via TestApi instead.
     #[cfg(feature = "render")]
     let group = if group.contains::<bevy_render::RenderPlugin>() {
-        group.disable::<bevy_render::RenderPlugin>()
+        // Disable the entire render family (Z10 e2e): individual
+        // pipeline plugins (CorePipeline, PostProcess, ...) load
+        // Shader assets during build and panic without RenderPlugin's
+        // init_asset; render is impossible headless anyway. `contains`
+        // guards keep this correct for any bevy feature combination.
+        // UiWidgetsPlugins is a nested GROUP (cannot be disabled as a
+        // unit); its widget members are disabled individually instead.
+        macro_rules! strip {
+            ($g:expr, $($p:ty),+ $(,)?) => {{
+                let mut g = $g;
+                $(
+                    g = if g.contains::<$p>() {
+                        g.disable::<$p>()
+                    } else {
+                        g
+                    };
+                )+
+                g
+            }};
+        }
+        strip!(
+            group,
+            bevy_render::RenderPlugin,
+            bevy::image::ImagePlugin,
+            bevy::mesh::MeshPlugin,
+            bevy::camera::CameraPlugin,
+            bevy::light::LightPlugin,
+            bevy_render::pipelined_rendering::PipelinedRenderingPlugin,
+            bevy::core_pipeline::CorePipelinePlugin,
+            bevy::post_process::PostProcessPlugin,
+            bevy::anti_alias::AntiAliasPlugin,
+            bevy::sprite::SpritePlugin,
+            bevy::sprite_render::SpriteRenderPlugin,
+            bevy::text::TextPlugin,
+            bevy::ui::UiPlugin,
+            bevy::ui_render::UiRenderPlugin,
+            bevy::gltf::GltfPlugin,
+            bevy::pbr::PbrPlugin,
+            bevy::animation::AnimationPlugin,
+            bevy::gizmos::GizmoPlugin,
+            bevy::gizmos_render::GizmoRenderPlugin,
+            bevy::scene::ScenePlugin,
+            bevy::ui_widgets::ButtonPlugin,
+            bevy::ui_widgets::CheckboxPlugin,
+            bevy::ui_widgets::TextInputPlugin,
+            bevy::ui_widgets::ListBoxPlugin,
+            bevy::ui_widgets::MenuPlugin,
+            bevy::ui_widgets::DialogPlugin,
+            bevy::ui_widgets::ModalDialogPlugin,
+            bevy_ui_widgets::popover::PopoverPlugin,
+            bevy::ui_widgets::RadioGroupPlugin,
+            bevy::ui_widgets::ScrollAreaPlugin,
+            bevy::ui_widgets::ScrollbarPlugin,
+            bevy::ui_widgets::SliderPlugin,
+            bevy::ui_widgets::TabPlugin,
+            bevy::input_focus::pointer_focus::PointerFocusPlugin,
+        )
     } else {
         group
     };

@@ -8,7 +8,13 @@ members = [
     "fixtures/turn_based",
     "fixtures/regression_pair",
     "tests/fixture-runner",
+    "bevy_swarm_cli",
 ]
+
+# Z10: CLI test-fixture crates are standalone workspaces driven by the
+# CLI's own tests; building them as members would pull bevy
+# dev-deps into workspace-wide feature unification.
+exclude = ["bevy_swarm_cli/tests/fixtures"]
 
 [workspace.package]
 version = "0.1.0"
@@ -76,10 +82,38 @@ bevy_winit = { version = "0.20", optional = true }
 bevy_render = { version = "0.20", optional = true, default-features = false }
 bevy_audio = { version = "0.20", optional = true, default-features = false }
 bevy_gilrs = { version = "0.20", optional = true, default-features = false }
+# Z10: for disabling render-family/ui-widget plugins in headless_platform.
+bevy_ui_widgets = { version = "0.20", optional = true, default-features = false }
 
 [features]
 default = ["render", "audio", "gamepad"]
-render = ["bevy/bevy_render", "bevy/x11", "bevy/wayland", "dep:bevy_render", "passthrough-winit"]
+render = [
+    "bevy/bevy_render",
+    "bevy/bevy_core_pipeline",
+    "bevy/bevy_image",
+    "bevy/bevy_mesh",
+    "bevy/bevy_camera",
+    "bevy/bevy_light",
+    "bevy/bevy_post_process",
+    "bevy/bevy_anti_alias",
+    "bevy/bevy_sprite",
+    "bevy/bevy_sprite_render",
+    "bevy/bevy_text",
+    "bevy/bevy_ui",
+    "bevy/bevy_ui_render",
+    "bevy/bevy_ui_widgets",
+    "bevy/bevy_gltf",
+    "bevy/bevy_pbr",
+    "bevy/bevy_animation",
+    "bevy/bevy_gizmos",
+    "bevy/bevy_gizmos_render",
+    "bevy/bevy_scene",
+    "bevy/x11",
+    "bevy/wayland",
+    "dep:bevy_render",
+    "dep:bevy_ui_widgets",
+    "passthrough-winit",
+]
 audio = ["bevy/bevy_audio", "dep:bevy_audio", "passthrough-winit"]
 gamepad = ["bevy/gamepad", "bevy/bevy_gilrs", "dep:bevy_gilrs", "passthrough-winit"]
 # Standalone winit passthrough for consumers that only need winit

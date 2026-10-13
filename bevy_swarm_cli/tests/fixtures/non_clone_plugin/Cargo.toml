@@ -1,0 +1,9 @@
+[package]
+name = "non_clone_game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.20"
+
+[workspace]
