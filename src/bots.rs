@@ -593,10 +593,22 @@ pub(crate) fn pursuit_bot_system(
 
 pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
     let tick = world.read_change_tick().get();
+    // x4k: the history cap must scale with the SCENARIO's tps, not a
+    // hardcoded 60 fps. At tps > 300 the liveness lookback
+    // (timeout_s * tps) exceeded the ring, nth() was always None, and
+    // frozen_world/undrivable_game could never fire.
+    let tps = world
+        .get_resource::<ScenarioResource>()
+        .map(|s| s.0.tps)
+        .unwrap_or(1)
+        .max(1) as f32;
     let liveness_cap = world
         .get_resource::<ScenarioResource>()
         .map(|s| {
-            let timeout_frames = (s.0.liveness.timeout_s * 60.0) as usize;
+            let timeout_frames = (s.0.liveness.timeout_s * tps) as usize;
+            // Look back far enough for the liveness oracle's window
+            // AND the stuck-after-intent fallback, plus slack for the
+            // frame heuristic comparison.
             timeout_frames.saturating_mul(2).max(600)
         })
         .unwrap_or(600);

@@ -141,6 +141,9 @@ pub struct PlaytestState {
     pub(crate) warned_paths: HashSet<String>,
     /// FX12 (I4): one-shot — liveness.mode was off this run.
     pub(crate) warned_liveness_off: bool,
+    /// x4k: one-shot — liveness frame history evicted before an intent
+    /// frame (should be unreachable since the ring cap scales with tps).
+    pub(crate) warned_liveness_history_evicted: bool,
     pub coverage: Coverage,
     /// Execution-time oracle state (Welford per-frame stats).
     pub frame_timing: FrameTimingStats,
@@ -446,6 +449,7 @@ impl PlaytestState {
             delta_windows: HashMap::default(),
             warned_paths: HashSet::default(),
             warned_liveness_off: false,
+            warned_liveness_history_evicted: false,
             coverage: Coverage::default(),
             frame_timing: FrameTimingStats::default(),
             api_history: HashMap::default(),

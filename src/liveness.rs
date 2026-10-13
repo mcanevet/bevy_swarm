@@ -175,18 +175,29 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             // count — bots run in PreUpdate, games react in Update).
             // Comparing frame numbers counted a change that happened
             // EARLIER in the intent's own frame (false pass).
-            let alive_after_intent = {
+            let (alive_after_intent, history_evicted) = {
                 let state = world.resource::<PlaytestState>();
                 match frame_start_tick_of(state, last_intent) {
                     Some(t) => {
                         let since = Tick::new(t);
-                        gameplay_changed_since(world, since, now)
-                            || game_resource_changed_since(world, since, now)
+                        (
+                            gameplay_changed_since(world, since, now)
+                                || game_resource_changed_since(world, since, now),
+                            false,
+                        )
                     }
-                    // history evicted — fall back to the frame heuristic
-                    None => state.last_alive_frame >= last_intent,
+                    // History evicted — fall back to the weaker frame
+                    // heuristic. x4k: this should now be unreachable in
+                    // steady state (the ring cap scales with scenario
+                    // tps), but stay loud if it ever regresses: the
+                    // fallback only approximates liveness.
+                    None => (state.last_alive_frame >= last_intent, true),
                 }
             };
+            if history_evicted {
+                let mut state = world.resource_mut::<PlaytestState>();
+                state.warned_liveness_history_evicted = true;
+            }
             // Accumulate a STUCK STREAK: consecutive no-reaction quanta.
             // A softlock that swallows every intent keeps the bot
             // retrying — idle_since_intent alone would reset on every

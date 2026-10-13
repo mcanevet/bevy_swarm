@@ -1402,6 +1402,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 "liveness.mode is off — frozen-world detection disabled for this run".to_string(),
             );
         }
+        if state.warned_liveness_history_evicted {
+            warnings.push(
+                "liveness frame history evicted before an intent frame — stuck_after_intent degraded to the weaker frame heuristic".to_string(),
+            );
+        }
     }
     // FX12 (H1): one-time [idx] selector warning (thread-local from
     // resolve_world_percept).
