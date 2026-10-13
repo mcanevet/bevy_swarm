@@ -2777,6 +2777,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixture_brp"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "fixture_lone"
 version = "0.1.0"
 dependencies = [

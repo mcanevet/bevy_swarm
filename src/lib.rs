@@ -54,6 +54,7 @@ pub mod driver;
 pub mod effects;
 pub mod entropy;
 pub mod enums;
+pub mod external;
 pub mod fingerprint;
 pub mod game_types;
 pub mod golden;

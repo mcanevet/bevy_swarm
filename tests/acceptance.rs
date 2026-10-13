@@ -745,7 +745,8 @@ fn clean_fixtures_pass_long() {
         })
         // Z19: bin-only fixtures are external smoke binaries, not
         // in-process adapter fixtures (no fixture-runner support).
-        .filter(|f| !f.starts_with("bin_only"))
+        // Z20: likewise the BRP fixture (external subprocess tier).
+        .filter(|f| !f.starts_with("bin_only") && f != "brp")
         .collect();
     fixtures.sort();
     assert!(
@@ -1023,4 +1024,77 @@ fn smoke_clean_binary_passes() {
     );
     assert_eq!(report.harness_mode, "external_smoke");
     assert!(report.violations.is_empty());
+}
+
+/// Z20 (m2h.27): external BRP observe-only run against a BRP-enabled
+/// fixture. Verifies the report is stamped external_driven, the
+/// liveness oracle polled a changing world, and no crash is reported.
+#[test]
+fn brp_external_run_observes_live_game() {
+    use bevy_swarm::external::{external_brp_run, ExternalBrpConfig};
+
+    let binary = build_fixture_bin("fixture_brp");
+    let config = ExternalBrpConfig {
+        binary_path: binary.to_string_lossy().to_string(),
+        timeout_secs: 8,
+        poll_interval_ms: 250,
+        ..Default::default()
+    };
+    let report = external_brp_run(&config).expect("external_brp_run succeeds");
+
+    assert_eq!(report.harness_mode, "external_driven");
+    assert_eq!(
+        report.status,
+        bevy_swarm::enums::PlaytestStatus::Pass,
+        "live BRP game must pass: violations={:?} warnings={:?}",
+        report.violations,
+        report.warnings
+    );
+    // The liveness oracle must have polled the game several times.
+    assert!(
+        report.frame_count >= 4,
+        "expected several BRP polls, got {}",
+        report.frame_count
+    );
+    // Observe-only scope: input/invariants/determinism must be inactive.
+    let inactive: Vec<_> = report
+        .scope
+        .inactive
+        .iter()
+        .map(|(family, _)| family.as_str())
+        .collect();
+    assert!(inactive.contains(&"input"));
+    assert!(inactive.contains(&"invariants"));
+    assert!(inactive.contains(&"determinism_replay"));
+}
+
+/// Z20 amendment: a binary WITHOUT BRP (no RemotePlugin) must not be
+/// reported as a pass with silent no-observation — the harness records
+/// the unreachable endpoint as an error.
+#[test]
+fn brp_external_run_reports_unreachable_endpoint() {
+    use bevy_swarm::external::{external_brp_run, ExternalBrpConfig};
+
+    let binary = build_fixture_bin("fixture_bin_only_clean");
+    let config = ExternalBrpConfig {
+        binary_path: binary.to_string_lossy().to_string(),
+        timeout_secs: 8,
+        startup_grace_secs: 3,
+        ..Default::default()
+    };
+    let report = external_brp_run(&config).expect("external_brp_run succeeds");
+
+    assert_eq!(report.harness_mode, "external_driven");
+    assert!(
+        report.error.is_some(),
+        "non-BRP binary must surface an error"
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("never became reachable")),
+        "warnings must explain the missing BRP endpoint: {:?}",
+        report.warnings
+    );
 }
