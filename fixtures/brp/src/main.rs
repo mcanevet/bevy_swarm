@@ -1,9 +1,10 @@
 //! Z20 fixture: a pure-Bevy game exposing BRP for the external
 //! observe-only tier. No harness dependency.
 //!
-//! Moves an entity forever so BRP state polling observes a changing
-//! world (liveness), and exits cleanly after N frames.
+//! Advances a counter every frame so BRP state polling observes a
+//! changing world (liveness), and exits cleanly after N frames.
 
+use bevy::app::ScheduleRunnerPlugin;
 use bevy::prelude::*;
 use bevy::remote::http::RemoteHttpPlugin;
 use bevy::remote::RemotePlugin;
@@ -34,18 +35,10 @@ fn setup(mut commands: Commands) {
 }
 
 fn main() {
-    // Headless-ish DefaultPlugins (no audio/render avoids GPU deps while
-    // keeping the full task-pool/async machinery that BRP needs).
-    // WinitPlugin is disabled (no window) so we supply our own
-    // ScheduleRunnerPlugin to drive the app loop.
-    let plugins = DefaultPlugins
-        .build()
-        .disable::<bevy::winit::WinitPlugin>()
-        .add(bevy::app::ScheduleRunnerPlugin::run_loop(
-            std::time::Duration::from_secs_f64(1.0 / 60.0),
-        ));
     App::new()
-        .add_plugins(plugins)
+        .add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
+            std::time::Duration::from_secs_f64(1.0 / 60.0),
+        )))
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .init_resource::<FrameCounter>()

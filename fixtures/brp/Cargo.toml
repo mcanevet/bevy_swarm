@@ -9,7 +9,7 @@ test = false
 bench = false
 
 [dependencies]
-bevy = { version = "0.20", default-features = false, features = ["std", "bevy_remote", "bevy_winit", "bevy_window"] }
+bevy = { version = "0.20", default-features = false, features = ["std", "bevy_remote"] }
 
 # Z20 fixture: bin-only, pure-Bevy. RemotePlugin + RemoteHttpPlugin
 # expose BRP on 127.0.0.1:15702 for the external observe-only tier.
