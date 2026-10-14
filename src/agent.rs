@@ -489,6 +489,12 @@ impl Plugin for AgentPlugin {
             // registered LATER than guarded_remote_plugin() (other
             // plugins' RemotePlugin extensions).
             .add_systems(Startup, agent_method_allowlist_sweep)
+            // le3.24 (RF28): bevy-remote SERVES in RemoteLast — a
+            // method inserted by an Update system was served (unguarded)
+            // before the next PreUpdate sweep ran. Sweeping again in
+            // RemoteLast (before serving) closes the one-frame window
+            // permanently, even for methods re-inserted every frame.
+            .add_systems(bevy::remote::RemoteLast, agent_method_allowlist_sweep)
             .add_plugins(
                 guarded_remote_plugin()
                     .with_method_main("playtest/schema", playtest_schema)
@@ -760,12 +766,9 @@ fn playtest_reset(In(params): In<Option<Value>>, world: &World) -> BrpResult {
             message: format!(
                 "unknown reset kind `{kind}` (known: {})",
                 world
-                    .resource::<ResetHooks>()
-                    .0
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                    .get_resource::<ResetHooks>()
+                    .map(|h| h.0.keys().cloned().collect::<Vec<_>>().join(", "))
+                    .unwrap_or_default()
             ),
             data: None,
         });
@@ -791,12 +794,9 @@ fn playtest_cheat(In(params): In<Option<Value>>, world: &World) -> BrpResult {
             message: format!(
                 "unknown cheat kind `{kind}` (known: {})",
                 world
-                    .resource::<CheatHooks>()
-                    .0
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                    .get_resource::<CheatHooks>()
+                    .map(|h| h.0.keys().cloned().collect::<Vec<_>>().join(", "))
+                    .unwrap_or_default()
             ),
             data: None,
         });
