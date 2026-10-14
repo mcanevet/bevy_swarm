@@ -14,6 +14,10 @@ This tutorial assumes a Bevy 0.20 game whose plugin setup lives in a
 from `main.rs` into `lib.rs` first — it's a mechanical refactor, and
 integration tests need the lib target).
 
+**What's a seed?** A seed fixes the bot's random input sequence.
+Same seed, same replayable run. Different seeds explore different
+sequences.
+
 ## Step 1: Add the dev-dependency
 
 ```toml
@@ -60,6 +64,8 @@ cargo test --test playtest
 `headless_app()` strips the render/window/audio backends and swaps in
 `SingleThreadedExecutor` for deterministic scheduling. Your game
 systems run normally — same schedule, same binary, no adapter layer.
+Render systems still execute but target no window; guard any systems
+that read `Window` state or camera output.
 
 ## Step 4: Read the output
 
