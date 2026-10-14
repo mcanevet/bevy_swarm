@@ -41,6 +41,36 @@ pub fn report() -> Result<i32, String> {
                 .and_then(|x| x.as_f64())
                 .unwrap_or(0.0)
         );
+        // bbb: inactive scope families carry genuine signal (why an
+        // oracle family could NOT run) — never drop them silently.
+        if let Some(inactive) = scope.get("inactive").and_then(|i| i.as_array()) {
+            if !inactive.is_empty() {
+                println!("inactive checks ({}):", inactive.len());
+                for entry in inactive {
+                    // Serialized as [family, reason] pairs (tuples).
+                    let parts: Vec<&str> = entry
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default();
+                    let (family, reason) = match parts.as_slice() {
+                        [f, r] => (*f, *r),
+                        [f] => (*f, ""),
+                        _ => ("?", "?"),
+                    };
+                    println!("  [{family}] {reason}");
+                }
+            }
+        }
+    }
+    // bbb: warnings (Z19 stderr classifier, informational notes) —
+    // surfaced alongside failures, never silently dropped.
+    if let Some(warns) = v.get("warnings").and_then(|w| w.as_array()) {
+        if !warns.is_empty() {
+            println!("warnings ({}):", warns.len());
+            for w in warns {
+                println!("  - {}", w.as_str().unwrap_or("?"));
+            }
+        }
     }
     if let Some(fails) = v.get("failures").and_then(|f| f.as_array()) {
         if fails.is_empty() {
