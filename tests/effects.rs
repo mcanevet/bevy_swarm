@@ -83,7 +83,7 @@ fn dead_verb_detected() {
         })
         .collect();
     let scenario: Scenario = serde_json::from_str(&format!(
-        r#"{{"bot":{{"type":"replay","inputs":[{}]}},"duration_s":2.0,"invariants":[]}}"#,
+        r#"{{"bot":{{"type":"replay","inputs":[{}]}},"duration_s":2.0,"invariants":[],"liveness":{{"timeout_s":30.0}}}}"#,
         inputs.join(",")
     ))
     .unwrap();
