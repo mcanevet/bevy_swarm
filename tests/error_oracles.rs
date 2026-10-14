@@ -540,13 +540,24 @@ fn le311_reuse_after_rejected_run() {
     }
     let build = bevy_swarm::headless::headless_app(NoisyGame);
     let mut app = build();
-    // Rejected: unknown reset kind.
+    // Rejected #1: unknown reset kind (rejects BEFORE install).
     let bad: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.05,"invariants":[],"setup":{"resets":[{"kind":"nope"}]}}"#,
     )
     .unwrap();
     let err = run_scenario(&mut app, &bad);
     assert!(err.is_err(), "unknown reset must be rejected");
+    // Rejected #2: load-time component typo (compile()). le3.21
+    // (RF25): this rejected AFTER the handler install point in the
+    // old code, leaving the swarm handler wrapped with a dead run id
+    // in HANDLER_CHAIN — the next run then captured nothing.
+    let bad2: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.05,"invariants":[
+            {"name":"t","rule":"custom","path":"Component:Nope.hp","check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let err2 = run_scenario(&mut app, &bad2);
+    assert!(err2.is_err(), "component typo must reject");
     // Valid run: errors must still be captured.
     let good: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
@@ -556,6 +567,43 @@ fn le311_reuse_after_rejected_run() {
     assert!(
         rep.violations.iter().any(|v| v.rule == "log_error"),
         "post-rejection run must still capture log errors; got {:?}",
+        rep.violations
+            .iter()
+            .map(|v| v.rule.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// le3.21 (RF25): a run rejected AFTER the handler install point
+/// (load-time component typo via compile()) must not poison the
+/// handler for the NEXT run on the same App. The old code installed
+/// the swarm FallbackErrorHandler BEFORE compile(), so the rejected
+/// run left it wrapped with a dead run id — the next run's system
+/// Errs were then routed to a chain that resolved to nothing.
+#[test]
+fn le321_system_err_captured_after_compile_reject() {
+    let mut app = App::new();
+    app.add_plugins(PlaytestPlugin);
+    app.add_systems(Update, || -> Result<(), bevy::ecs::error::BevyError> {
+        Err(bevy::ecs::error::BevyError::warning("le321 boom"))
+    });
+    // Rejected run: component typo → compile() Err. In the old code
+    // this happened AFTER the handler was installed.
+    let bad: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.05,"invariants":[
+            {"name":"t","rule":"custom","path":"Component:Nope.hp","check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    assert!(run_scenario(&mut app, &bad).is_err(), "typo must reject");
+    // Next run: the system Err MUST still be captured.
+    let good: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
+    )
+    .unwrap();
+    let rep = run_scenario(&mut app, &good).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "bevy_warning"),
+        "system Err must be captured after a compile-rejected run; got {:?}",
         rep.violations
             .iter()
             .map(|v| v.rule.as_str())
