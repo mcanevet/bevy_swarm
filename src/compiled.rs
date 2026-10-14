@@ -126,52 +126,121 @@ fn compile_accessor(world: &mut World, inv: &Invariant) -> Result<Option<Accesso
     // le3.13 (RF14): Component: paths must be validated at load —
     // typos must reject before any frame runs. Before #84 the old
     // EntityField accessor did this; now we restore it explicitly.
+    // le3.19 (RF23): validation must accept EVERY form the runtime
+    // (oracles::resolve_world_percept) accepts: #count, `.field#sum/
+    // min/max` aggregates, `{Name}`/`@id`/`[i]` addressing, and
+    // registered-but-not-yet-spawned types (the runtime folds #sum
+    // of an unspawned type to 0). Only true typos — unregistered
+    // types and malformed selectors — reject.
     if let Some(rest) = path.strip_prefix("Component:") {
-        // Parse "Type.field" or "Type#count" or aggregates.
-        let (type_path, selector) =
-            rest.split_once(['.', '#'])
-                .ok_or_else(|| ScenarioError::InvalidComponent {
-                    name: path.to_string(),
-                    reason: "missing '.' or '#' in Component:<Type>.<selector>".into(),
-                })?;
-        // If the separator was '#', the selector must be recombined
-        // with it (aggregate form: count/sum/min/max).
-        let selector_owned;
-        let selector = if !rest.contains('.') && rest.contains('#') {
-            selector_owned = format!("#{}", selector);
-            selector_owned.as_str()
-        } else {
-            selector
-        };
-        // Resolve type_id (reject unregistered types).
-        let registry = world.resource::<AppTypeRegistry>().0.read();
-        let components = world.components();
-        let Some(_comp_id) = resolve_type_id(type_path, &registry, components)? else {
+        if rest.is_empty() {
             return Err(ScenarioError::InvalidComponent {
-                name: type_path.into(),
-                reason: "type not registered".into(),
-            });
-        };
-        drop(registry);
-        // Validate selector: #count, #sum, #min, #max, or a field path.
-        if selector.starts_with('#') {
-            // Aggregate form — accept any valid aggregate keyword.
-            match selector {
-                "#count" | "#sum" | "#min" | "#max" => (),
-                other => {
-                    return Err(ScenarioError::InvalidComponent {
-                        name: path.to_string(),
-                        reason: format!("unknown aggregate '{}'", other),
-                    });
-                }
-            }
-        } else {
-            // Field path — parse it (reject malformed).
-            ParsedPath::parse(selector).map_err(|e| ScenarioError::InvalidComponent {
                 name: path.to_string(),
-                reason: format!("invalid field path: {:?}", e),
-            })?;
+                reason: "empty Component: path".into(),
+            });
         }
+        // #count form: "Type#count" — everything before '#' is the type.
+        if let Some(type_path) = rest.strip_suffix("#count") {
+            validate_component_type(type_path, world)?;
+            return Ok(None);
+        }
+        // Aggregate form: "Type.<field>#sum|min|max" — split at the
+        // LAST '#' (fields may contain none, so the first '.' after
+        // the type boundary separates type from field path).
+        if let Some((body, _agg)) = ["sum", "min", "max"].iter().find_map(|k| {
+            rest.strip_suffix(&format!("#{k}"))
+                .map(|b| (b.to_string(), *k))
+        }) {
+            let (type_path, field) =
+                body.split_once('.')
+                    .ok_or_else(|| ScenarioError::InvalidComponent {
+                        name: path.to_string(),
+                        reason: "aggregate missing '.' between type and field".into(),
+                    })?;
+            validate_component_type(type_path, world)?;
+            if field.is_empty() {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "aggregate with empty field path".into(),
+                });
+            }
+            return Ok(None);
+        }
+        // Field addressing forms: "{Name}", "@id", "[i]", or plain
+        // first-candidate. Strip the addressing, then validate the
+        // remaining field path.
+        let (type_path, field) = if let Some(brace) = rest.find('{') {
+            let Some(close) = rest[brace..].find('}').map(|i| i + brace) else {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "unterminated '{' in Component: path".into(),
+                });
+            };
+            let Some(field) = rest.get(close + 1..).and_then(|f| f.strip_prefix('.')) else {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "missing '.<field>' after {Name}".into(),
+                });
+            };
+            (&rest[..brace], field)
+        } else if let Some(at) = rest.find('@') {
+            let (sid_str, field) =
+                rest[at + 1..]
+                    .split_once('.')
+                    .ok_or_else(|| ScenarioError::InvalidComponent {
+                        name: path.to_string(),
+                        reason: "missing '.<field>' after @<id>".into(),
+                    })?;
+            if sid_str.parse::<u64>().is_err() {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: format!("@ selector '{sid_str}' is not a stable id (u64)"),
+                });
+            }
+            (&rest[..at], field)
+        } else if let Some(bracket) = rest.find('[') {
+            let Some(idx_end) = rest[bracket..].find(']').map(|i| i + bracket) else {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "unterminated '[' in Component: path".into(),
+                });
+            };
+            let idx = &rest[bracket + 1..idx_end];
+            if idx.parse::<usize>().is_err() {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: format!("[{idx}] is not an entity index (usize)"),
+                });
+            }
+            let Some(field) = rest.get(idx_end + 1..).and_then(|f| f.strip_prefix('.')) else {
+                return Err(ScenarioError::InvalidComponent {
+                    name: path.to_string(),
+                    reason: "missing '.<field>' after [<i>]".into(),
+                });
+            };
+            (&rest[..bracket], field)
+        } else {
+            let (type_path, field) =
+                rest.split_once('.')
+                    .ok_or_else(|| ScenarioError::InvalidComponent {
+                        name: path.to_string(),
+                        reason: "missing '.' or '#' in Component:<Type>.<selector>".into(),
+                    })?;
+            (type_path, field)
+        };
+        validate_component_type(type_path, world)?;
+        if field.is_empty() {
+            return Err(ScenarioError::InvalidComponent {
+                name: path.to_string(),
+                reason: "empty field path".into(),
+            });
+        }
+        // Field path — parse it (reject malformed) via the same
+        // grammar the runtime's reflect_path uses.
+        ParsedPath::parse(field).map_err(|e| ScenarioError::InvalidComponent {
+            name: path.to_string(),
+            reason: format!("invalid field path: {:?}", e),
+        })?;
         // Component: paths are not yet implemented as Accessor variants
         // — return None but VALIDATE (the test confirms rejection at load).
         return Ok(None);
@@ -273,6 +342,22 @@ fn resolve_type_id(
             reason: "type not registered".into(),
         })?;
     Ok(components.get_valid_id(reg.type_id()))
+}
+
+/// le3.19 (RF23): load-time type validation checks REGISTRATION
+/// only — a registered-but-not-yet-spawned component is VALID (the
+/// runtime folds `#sum` over an unspawned type to 0, and entity
+/// selectors legitimately target entities that spawn mid-run). Only
+/// unregistered types (typos) reject.
+fn validate_component_type(type_path: &str, world: &World) -> Result<(), ScenarioError> {
+    let registry = world.resource::<AppTypeRegistry>().0.read();
+    if registry.get_with_short_type_path(type_path).is_none() {
+        return Err(ScenarioError::InvalidComponent {
+            name: type_path.into(),
+            reason: "type not registered".into(),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
