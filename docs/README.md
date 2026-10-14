@@ -34,18 +34,28 @@ four quadrants by purpose.
 - [Report schema](report-schema.json) — the output contract
 - [Scenario Cookbook](scenarios.md) — six annotated example
   scenarios
+- [Golden snapshots](reference-golden.md) — Z11 snapshot testing
+- [Robustness margins](reference-robustness.md) — J1 ρ semantics
+- [Invariant DSL](reference-invariant-dsl.md) — canonical wire forms
+- [Security (agent)](reference-security.md) — threat model, token
+- [Usage/API](reference-usage.md) — single-scenario API, env vars,
+  features
 - API reference: [docs.rs/bevy_swarm](https://docs.rs/bevy_swarm)
 
 ## Explanation — understanding-oriented
 
 - [The zero-contract philosophy](explanation-zero-contract.md) —
   why invariants beat scripted tests, why the tiers are optional
+- [Coverage: what it catches](explanation-coverage.md) — failure
+  classes, panic/log capture, limitations
 - [Determinism strategy](explanation-determinism.md) — why replay
   needs determinism, and how the entropy hook provides it
 - [Architecture](explanation-architecture.md) — how the harness
   executes inside your Bevy app, code map
+- [Agent vs Bevy E2E](explanation-agent-vs-bevy-e2e.md) — design
+  decision: the `agent` feature alongside Bevy's own testing goal
 
 ## Project conventions
 
 Workspace layout, artifact paths, update modes, vocabulary —
-[conventions.md](conventions.md) (single source of truth).
+[reference-workspace.md](reference-workspace.md) (single source of truth).

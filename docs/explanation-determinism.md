@@ -95,6 +95,47 @@ wall clock, state not covered by resets), you get an explicit
 This honesty matters more than the minimization itself: a tool that
 lies about reproduction wastes more debugging time than no tool.
 
+## The hook, precisely
+
+Enable the `deterministic-entropy` feature AND set the cfg (they go
+together — a `cargo swarm run` wrapper that sets both automatically
+is planned):
+
+```sh
+RUSTFLAGS='--cfg getrandom_backend="custom"' \
+  cargo test --features bevy_swarm/deterministic-entropy
+```
+
+The custom backend hook (`__getrandom_v03_custom`) intercepts all
+`getrandom` calls — including `rand::rng()`, `uuid::Uuid::new_v4`,
+`bevy_rand` — and draws from a deterministic stream seeded from the
+scenario seed. Calls outside `enter_run()` draw from a process-global
+fallback stream and increment the `entropy_unattributed_draws`
+informational rule counter — you learn your game draws entropy at odd
+times without failing spuriously.
+
+The signature must match exactly:
+
+```rust,ignore
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom::Error>
+```
+
+Using `extern "C"` or returning `Result<(), ()>` is undefined behavior
+(UB) and will abort the process on panic.
+
+And the `ThreadRng` caveat bears repeating: `rand::rng()` caches a
+`ThreadRng` per thread, so **each scenario must run on a fresh
+thread** to guarantee determinism across runs. The matrix runner
+(`run_scenarios_parallel`) does this automatically; direct
+`run_scenario` callers must either (a) spawn a fresh thread per call,
+or (b) accept documented risk of cross-run ThreadRng state leakage.
+The `InProcess` runner calls `enter_run` before the app factory so
+plugin-build draws are seeded.
+
 ## Related
 
 - [Deterministic entropy](../README.md#z14-deterministic-entropy-hook)
