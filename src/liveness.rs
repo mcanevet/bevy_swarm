@@ -96,19 +96,14 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     let window_frames = timeout_frames.max(quarter * 2);
 
     let now = now_tick(world);
-    // FX1: window in FRAMES, not raw change ticks (the tick counter
-    // advances per system run, dozens per frame, so `now - k` spans
-    // microseconds). Compare against the frame-start tick recorded
-    // `window_frames` frames ago.
-    //
-    // Default liveness scope: components on Gameplay entities. The
-    // TestApi resource is deliberately EXCLUDED by default: games
-    // commonly sync it every frame (write without value change), which
-    // would mask a genuinely frozen world.
-    //
-    // Warmup: insufficient frame history → treat as LIVE (never flags
-    // a young world frozen).
-    let changed = {
+    // le3.23 (RF27): VALUE-based liveness. The old change-tick scan
+    // counted same-value RE-writes as "alive" (a system assigning an
+    // unchanged transform every frame kept a frozen world live —
+    // same-value-write blindness). Compare the canonical state digest
+    // instead: only actual VALUE changes reset the freeze timer.
+    // Change ticks remain the cheap pre-filter: if nothing was even
+    // WRITTEN in the window, the world is trivially unchanged.
+    let written = {
         let state = world.resource::<PlaytestState>();
         match state
             .frame_start_ticks
@@ -116,17 +111,40 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             .rev()
             .nth(window_frames.saturating_sub(1) as usize)
         {
-            // FX1: liveness scope includes game-owned RESOURCES (Z6
-            // GameTypes prefixes) — fixtures like regression_pair keep
-            // all state in resources; entity-component scanning alone
-            // saw a permanently frozen world. TestApi stays EXCLUDED
-            // (games sync it every frame; that masks real freezes).
             Some(&t) => {
                 let since = Tick::new(t);
                 gameplay_changed_since(world, since, now)
                     || game_resource_changed_since(world, since, now)
             }
-            None => true,
+            // Warmup: insufficient frame history → treat as LIVE
+            // (never flags a young world frozen).
+            None => return,
+        }
+    };
+    let changed = if !written {
+        false
+    } else {
+        // Something was written — but was the VALUE actually different?
+        // If there's no observable state (no Gameplay entities, no
+        // GameTypes), fall back to change-tick semantics to avoid
+        // false positives on games with no tracked state.
+        let has_observed = world.iter_entities().any(|e| {
+            e.contains::<crate::contract::Gameplay>()
+                || e.contains::<crate::game_types::InferredGameplay>()
+        }) || world
+            .get_resource::<crate::game_types::GameTypes>()
+            .is_some();
+        if !has_observed {
+            true
+        } else {
+            let digest = format!("{:?}", crate::determinism::canonical_state(world));
+            let state = world.resource::<PlaytestState>();
+            if digest != state.liveness_digest {
+                world.resource_mut::<PlaytestState>().liveness_digest = digest;
+                true
+            } else {
+                false
+            }
         }
     };
 

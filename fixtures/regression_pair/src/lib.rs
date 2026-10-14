@@ -7,7 +7,8 @@
 
 use bevy::prelude::*;
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
 pub struct Damage(pub f64);
 
 fn setup(mut commands: Commands) {
@@ -31,7 +32,8 @@ fn damage_system(mut damage: ResMut<Damage>, time: Res<Time>) {
 /// v2_slow_menu only lengthens a MENU animation — it must NOT diverge
 /// game state (the Z11 state-anchoring contract). Represented by a
 /// slower cosmetic MenuAnim resource, never touching Damage.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
 pub struct MenuAnim {
     pub speed: f32,
 }

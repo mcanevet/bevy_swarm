@@ -173,6 +173,10 @@ pub struct PlaytestState {
     pub frozen_frames: u64,
     /// Last frame where any liveness signal was observed (I4).
     pub last_alive_frame: u64,
+    /// le3.23 (RF27): value-based liveness — digest of the canonical
+    /// gameplay state at the previous sample. Same-value RE-writes
+    /// produce an identical digest and count as frozen.
+    pub liveness_digest: String,
     /// Last frame where an intent/action was consumed (I4 turn-based mode).
     pub last_intent_frame: Option<u64>,
     /// Consecutive liveness-sample quanta with NO state change after
@@ -460,6 +464,7 @@ impl PlaytestState {
             eventually_state: HashMap::default(),
             frozen_frames: 0,
             last_alive_frame: 0,
+            liveness_digest: String::new(),
             last_intent_frame: None,
             stuck_after_intent_quanta: 0,
             inference_last_archetype_len: 0,
