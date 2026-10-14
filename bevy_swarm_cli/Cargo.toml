@@ -15,4 +15,6 @@ bevy_swarm = { path = ".." }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+jsonschema = { version = "0.30", default-features = false }
+
 [dev-dependencies]

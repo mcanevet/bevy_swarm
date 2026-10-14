@@ -398,3 +398,78 @@ fn report_no_sections_when_absent() {
         assert!(!stdout.contains("warnings"), "stdout: {stdout}");
     });
 }
+
+/// zp2: `cargo swarm validate` — planted typos produce suggestions,
+/// valid cookbook scenarios pass. Uses the repo's example files.
+#[test]
+fn validate_catches_typos_with_suggestions() {
+    let bad = std::env::temp_dir().join("zp2-validate-bad.json");
+    std::fs::write(
+        &bad,
+        r#"{"bot":{"type":"synthetic_keyboard","key_presses":[{"frame":1,"key":"Spaxe"}]},"duration_s":5}"#,
+    )
+    .unwrap();
+    let out = Command::new(cli_bin())
+        .arg("validate")
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("did you mean 'Space'"), "stderr: {stderr}");
+    let _ = std::fs::remove_file(&bad);
+}
+
+#[test]
+fn validate_accepts_cookbook_examples() {
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/scenarios");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&examples).unwrap().flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let out = Command::new(cli_bin())
+            .arg("validate")
+            .arg(&p)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{} failed: {}",
+            p.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        checked += 1;
+    }
+    assert!(checked >= 5, "expected cookbook examples, saw {checked}");
+}
+
+#[test]
+fn validate_reports_unknown_field() {
+    let bad = std::env::temp_dir().join("zp2-validate-unknown.json");
+    std::fs::write(
+        &bad,
+        r#"{"bot":{"type":"chaos"},"duration_s":5,"typo_field":1}"#,
+    )
+    .unwrap();
+    let out = Command::new(cli_bin())
+        .arg("validate")
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("typo_field"), "stderr: {stderr}");
+    let _ = std::fs::remove_file(&bad);
+}
+
+#[test]
+fn validate_missing_file_is_an_error() {
+    let out = Command::new(cli_bin())
+        .arg("validate")
+        .arg("/nonexistent/scenario.json")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+}

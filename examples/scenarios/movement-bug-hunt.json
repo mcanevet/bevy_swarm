@@ -1,0 +1,40 @@
+{
+  "name": "movement-bug-hunt",
+  "bot": {
+    "type": "chaos",
+    "seed": 1337,
+    "input_rate_hz": 12,
+    "persona": "aggressive",
+    "raw_surface": {
+      "keys": ["KeyW", "KeyA", "KeyS", "KeyD", "Space", "ShiftLeft"],
+      "mouse_buttons": true,
+      "wheel": true
+    }
+  },
+  "duration_s": 30,
+  "single_threaded": true,
+  "invariants": [
+    {
+      "name": "player-inside-arena",
+      "rule": "nodes_in_bounds",
+      "targets": ["Player"],
+      "min_x": -500.0,
+      "max_x": 500.0,
+      "min_z": -500.0,
+      "max_z": 500.0
+    },
+    {
+      "name": "hp-never-negative",
+      "rule": "custom",
+      "path": "TestApi.player_hp",
+      "check": "ge",
+      "value": 0
+    },
+    {
+      "name": "fps-stays-playable",
+      "rule": "fps_floor",
+      "value": 50
+    }
+  ],
+  "check_determinism": 3
+}

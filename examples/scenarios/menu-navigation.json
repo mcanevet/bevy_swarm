@@ -1,0 +1,22 @@
+{
+  "name": "menu-navigation",
+  "bot": {
+    "type": "synthetic_pointer",
+    "pointer_clicks": [
+      { "frame": 10, "target": "ButtonSettings", "require_actionable": true },
+      { "frame": 90, "target": "ButtonAudio", "require_actionable": true },
+      { "frame": 170, "target": "ButtonSliderMaster", "hold_frames": 30 }
+    ]
+  },
+  "duration_s": 12,
+  "invariants": [
+    {
+      "name": "reaches-options-menu",
+      "rule": "custom",
+      "path": "TestApi.menu_phase",
+      "check": "equals",
+      "value": "options",
+      "eventually_s": 8
+    }
+  ]
+}

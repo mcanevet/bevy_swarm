@@ -106,3 +106,26 @@ fn schema_doc_is_generated() {
          regenerating. Run: BEVY_SWARM_UPDATE=schema cargo test --test schema_doc"
     );
 }
+
+/// zp2: cookbook examples validate against the schema (the CLI
+/// validate command uses the same runtime generator).
+#[test]
+fn schema_validates_cookbook_examples() {
+    let schema = schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scenarios");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        validator
+            .validate(&v)
+            .unwrap_or_else(|e| panic!("{} fails schema: {e}", p.display()));
+        checked += 1;
+    }
+    assert!(checked >= 5);
+}

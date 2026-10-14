@@ -1,0 +1,58 @@
+{
+  "name": "goal-directed-exploration",
+  "bot": {
+    "type": "planner",
+    "goals": {
+      "kind": "seq",
+      "children": [
+        {
+          "kind": "primitive",
+          "path": "TestApi.room_visited",
+          "check": "equals",
+          "value": "atrium",
+          "emit": [{ "intent": "move", "dir": [0.0, 1.0] }]
+        },
+        {
+          "kind": "any",
+          "children": [
+            {
+              "kind": "primitive",
+              "path": "TestApi.door_locked",
+              "check": "equals",
+              "value": false,
+              "emit": [{ "intent": "move", "dir": [1.0, 0.0] }]
+            },
+            {
+              "kind": "primitive",
+              "path": "TestApi.has_key",
+              "check": "equals",
+              "value": true,
+              "emit": [{ "intent": "choice", "index": 0 }]
+            }
+          ]
+        },
+        {
+          "kind": "repeat",
+          "max_s": 10,
+          "child": {
+            "kind": "primitive",
+            "path": "TestApi.score",
+            "check": "ge",
+            "value": 10,
+            "emit": [{ "intent": "select", "target": "Chest" }]
+          }
+        }
+      ]
+    }
+  },
+  "duration_s": 45,
+  "invariants": [
+    {
+      "name": "room-sequence-holds",
+      "rule": "custom",
+      "path": "TestApi.room_count",
+      "check": "le",
+      "value": 16
+    }
+  ]
+}
