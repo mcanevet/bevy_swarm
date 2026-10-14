@@ -221,6 +221,7 @@ fn z4_autotest_finds_dead_left_key_with_discovery() {
     .unwrap();
     let config = bevy_swarm::autotest::AutotestConfig {
         num_seeds: 1,
+        duration_s: 20.0,
         parallel: 1,
         base_scenario: sc,
         ..bevy_swarm::autotest::AutotestConfig::default()

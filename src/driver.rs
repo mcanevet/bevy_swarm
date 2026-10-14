@@ -1401,18 +1401,24 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             }
         }
     }
+    // dbt: strict_warnings escalates the warning-class informational
+    // rules (bevy_warning, log_warn) back to gating severity.
+    let escalated: &[crate::rules::Rule] = if scenario.strict_warnings {
+        &[crate::rules::Rule::BevyWarning, crate::rules::Rule::LogWarn]
+    } else {
+        &[]
+    };
+    let is_gating = |rule: &str| {
+        !crate::state::Violations::INFORMATIONAL_RULES
+            .iter()
+            .any(|r| r.name() == rule)
+            || escalated.iter().any(|r| r.name() == rule)
+    };
     // le3.10 (RF6): informational rules NEVER gate the run status.
     // A run whose only violations are informational (fps_floor,
     // frame_time_*, dead_widget, perf_budget, entropy_unattributed)
     // is Pass.
-    let gating = snap
-        .iter()
-        .filter(|e| {
-            !crate::state::Violations::INFORMATIONAL_RULES
-                .iter()
-                .any(|r| r.name() == e.rule)
-        })
-        .count();
+    let gating = snap.iter().filter(|e| is_gating(&e.rule)).count();
     let status = if crash_detected {
         crate::enums::PlaytestStatus::Crash
     } else if gating == 0 {
@@ -1518,7 +1524,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                 detail: format!(
                     "{} actions injected (top: {}) but no effect on the game. Suggested \
                      causes: a menu needs a click the monkey can't find; input is gated \
-                     behind a state; broken headless build.",
+                     behind a state; broken headless build. Next step: run surface \
+                     discovery to see what inputs your game actually reacts to: \
+                     `bevy_swarm::discover::discover_surface` (or `cargo swarm discover`) \
+                     on your app builder, then target the discovered verbs in the \
+                     scenario's bot config.",
                     total_actions,
                     top_keys.join(", ")
                 ),

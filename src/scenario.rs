@@ -40,6 +40,13 @@ pub struct Scenario {
     /// games have benign ambiguities.
     #[serde(default)]
     pub deny_ambiguities: bool,
+    /// dbt: escalate warning-class violations (bevy_warning, log_warn)
+    /// to gating severity. Default false: those rules are informational
+    /// because headless runs routinely trip render/audio warnings that
+    /// are benign without a GPU or audio device. Opt in when your game
+    /// should never log warnings.
+    #[serde(default)]
+    pub strict_warnings: bool,
     #[serde(default = "default_duration")]
     pub duration_s: f32,
     #[serde(default)]

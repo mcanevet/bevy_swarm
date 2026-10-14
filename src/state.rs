@@ -125,6 +125,10 @@ impl Violations {
         crate::rules::Rule::BevySuppressed,
         crate::rules::Rule::UnusedInput,
         crate::rules::Rule::UndrivableGame,
+        // dbt: informational by default; escalate opt-in via
+        // Scenario::strict_warnings (see driver escalation set).
+        crate::rules::Rule::BevyWarning,
+        crate::rules::Rule::LogWarn,
     ];
 }
 

@@ -277,6 +277,7 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
         simulated_time: scenario.simulated_time,
         single_threaded: scenario.single_threaded,
         deny_ambiguities: scenario.deny_ambiguities,
+        strict_warnings: scenario.strict_warnings,
         setup: scenario.setup.clone(),
         duration_s,
         bot: BotConfig {

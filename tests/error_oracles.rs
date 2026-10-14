@@ -10,17 +10,37 @@ fn scenario_json() -> Scenario {
         .unwrap()
 }
 
+fn scenario_json_strict() -> Scenario {
+    serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[],"strict_warnings":true}"#,
+    )
+    .unwrap()
+}
+
 #[test]
 fn fallible_system_error_reported() {
     // A game system returns Err on every frame: must surface as a
-    // bevy_error violation naming the system, status Fail (not Crash).
+    // bevy_warning violation naming the system. dbt: warning-class
+    // rules are informational by default (status Pass); opt-in
+    // strict_warnings escalates them to gating (status Fail).
     let mut app = App::new();
     app.add_plugins(PlaytestPlugin);
     app.add_systems(Update, || -> Result<(), bevy::ecs::error::BevyError> {
         Err(bevy::ecs::error::BevyError::warning("boom"))
     });
     let rep = run_scenario(&mut app, &scenario_json()).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Fail);
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Pass,
+        "bevy_warning must be informational by default"
+    );
+    let strict = scenario_json_strict();
+    let rep = run_scenario(&mut app, &strict).unwrap();
+    assert_eq!(
+        rep.status,
+        PlaytestStatus::Fail,
+        "strict_warnings must escalate bevy_warning"
+    );
     let v = rep
         .violations
         .iter()
@@ -168,7 +188,9 @@ fn game_set_error_handler_chains_without_panic() {
         Err(bevy::ecs::error::BevyError::warning("chained boom"))
     });
     let rep = run_scenario(&mut app, &scenario_json()).unwrap();
-    assert_eq!(rep.status, PlaytestStatus::Fail);
+    // dbt: warning-class errors are informational by default — the
+    // run Passes but the violation is still reported.
+    assert_eq!(rep.status, PlaytestStatus::Pass);
     assert!(
         rep.violations
             .iter()
