@@ -44,9 +44,11 @@ impl Rule {
             Rule::UndrivableGame => "The bot's actions had no observable effect; the game may not be drivable by the configured input.",
             Rule::HarnessCouldNotDriveGame => "The harness could not drive the game: enough actions were injected but none had any effect.",
             Rule::BevyError => "Bevy reported an error (bevy_log/LogPlugin error stream).",
-            Rule::BevyWarning => "Bevy reported a warning (bevy_log/LogPlugin warn stream).",
+            Rule::BevyWarning => "Bevy reported a warning (bevy_log/LogPlugin warn stream); \
+informational by default, escalate with scenario strict_warnings.",
             Rule::LogError => "Game code logged at error level (tracing subscriber).",
-            Rule::LogWarn => "Game code logged at warn level (tracing subscriber).",
+            Rule::LogWarn => "Game code logged at warn level (tracing subscriber); \
+informational by default, escalate with scenario strict_warnings.",
             Rule::Panic => "A system panicked during the run (caught by the panic hook).",
             Rule::PlannerGoalUnfinished => "A planner goal tree was abandoned without achieving its goal.",
             Rule::BevySuppressed => "A known-benign Bevy warning was suppressed by the harness's filter list.",
@@ -221,6 +223,13 @@ impl Rule {
                 | Rule::BevySuppressed
                 | Rule::UnusedInput
                 | Rule::UndrivableGame
+                // dbt: warning-severity log rules are informational by
+                // default — headless runs routinely trip render/audio
+                // warnings that are benign without a GPU or audio
+                // device (docs/rules.md "False-positive modes").
+                // Escalate opt-in via Scenario::strict_warnings.
+                | Rule::BevyWarning
+                | Rule::LogWarn
         )
     }
 }

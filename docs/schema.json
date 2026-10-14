@@ -1320,6 +1320,11 @@
       "description": "Run every schedule on Bevy's SingleThreadedExecutor (deterministic\nsystem order for a given schedule graph). Default true: playtests\nvalue reproducibility over throughput. Parallelism comes from\nrunning many scenarios at once, not from threading one App.",
       "type": "boolean"
     },
+    "strict_warnings": {
+      "default": false,
+      "description": "dbt: escalate warning-class violations (bevy_warning, log_warn)\nto gating severity. Default false: those rules are informational\nbecause headless runs routinely trip render/audio warnings that\nare benign without a GPU or audio device. Opt in when your game\nshould never log warnings.",
+      "type": "boolean"
+    },
     "tps": {
       "default": 60,
       "description": "Simulation ticks per second. Each `app.update()` advances simulated\ntime by exactly 1/tps when `simulated_time` is true.",

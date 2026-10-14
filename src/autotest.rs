@@ -44,13 +44,16 @@ const ENV_THREADS: &str = "BEVY_SWARM_THREADS";
 /// environment overrides.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutotestConfig {
-    /// Number of seeds to run (1..N). Default: 16.
+    /// Number of seeds to run (1..N). Default: 4 (dbt: fast first
+    /// `cargo test` — a headless sprite game failed red on its first
+    /// run because 16 seeds x 20s meant 5+ minutes before any signal).
+    /// Use [`AutotestConfig::thorough`] for the release-grade preset.
     pub num_seeds: u64,
     /// Explicit seed list. When set, overrides `num_seeds`
     /// (expectations pin exact seeds like `[42]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seeds: Option<Vec<u64>>,
-    /// Duration per run in seconds. Default: 20.
+    /// Duration per run in seconds. Default: 5.
     pub duration_s: f32,
     /// Parallelism (threads). Default: min(4, available_parallelism).
     pub parallel: usize,
@@ -76,9 +79,9 @@ impl Default for AutotestConfig {
             .min(4);
 
         Self {
-            num_seeds: 16,
+            num_seeds: 4,
             seeds: None,
-            duration_s: 20.0,
+            duration_s: 5.0,
             parallel,
             minimize_failures: false,
             max_failures: Some(10),
@@ -90,6 +93,17 @@ impl Default for AutotestConfig {
 }
 
 impl AutotestConfig {
+    /// dbt: release-grade preset — the pre-dbt defaults (16 seeds ×
+    /// 20s). Use for nightly runs and release gating, where you want
+    /// deeper seed coverage instead of fast `cargo test` feedback.
+    pub fn thorough() -> Self {
+        Self {
+            num_seeds: 16,
+            duration_s: 20.0,
+            ..Self::default()
+        }
+    }
+
     /// Load config with environment overrides applied.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();

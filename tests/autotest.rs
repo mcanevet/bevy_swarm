@@ -193,6 +193,7 @@ fn autotest_finds_dead_left_key_without_adapter() {
     ).unwrap();
     let config = AutotestConfig {
         num_seeds: 1,
+        duration_s: 20.0,
         parallel: 1,
         base_scenario: sc,
         ..AutotestConfig::default()

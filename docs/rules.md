@@ -13,9 +13,9 @@ Expectation files (X2) reference only these names.
 | `undrivable_game` | informational |
 | `harness_could_not_drive_game` | major |
 | `bevy_error` | major |
-| `bevy_warning` | major |
+| `bevy_warning` | informational |
 | `log_error` | major |
-| `log_warn` | major |
+| `log_warn` | informational |
 | `panic` | major |
 | `planner_goal_unfinished` | major |
 | `bevy_suppressed` | informational |
@@ -96,7 +96,7 @@ Expectation files (X2) reference only these names.
 
 ### `bevy_warning`
 
-**Kind:** major (fails the run) — Bevy reported a warning (bevy_log/LogPlugin warn stream).
+**Kind:** informational (reported, never gates run status) — Bevy reported a warning (bevy_log/LogPlugin warn stream); informational by default, escalate with scenario strict_warnings.
 
 **Detects:** WARN-level record routed through the injected Bevy log subscriber.
 
@@ -112,7 +112,7 @@ Expectation files (X2) reference only these names.
 
 ### `log_warn`
 
-**Kind:** major (fails the run) — Game code logged at warn level (tracing subscriber).
+**Kind:** informational (reported, never gates run status) — Game code logged at warn level (tracing subscriber); informational by default, escalate with scenario strict_warnings.
 
 **Detects:** WARN-level tracing event captured by the harness sink.
 

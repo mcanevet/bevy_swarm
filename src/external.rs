@@ -435,7 +435,8 @@ pub fn external_brp_run(config: &ExternalBrpConfig) -> Result<PlaytestReport, Br
                 ),
                 (
                     "invariants".to_string(),
-                    "requires in-process telemetry access".to_string(),
+                    "requires in-process telemetry access — to enable, add bevy_swarm as a dev-dependency and drive the game plugin in-process (see README 'Contract tiers')"
+                        .to_string(),
                 ),
                 (
                     "determinism_replay".to_string(),

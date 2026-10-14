@@ -280,7 +280,9 @@ pub fn compute_run_scope(world: &World, scenario: &crate::scenario::Scenario) ->
     if !has_test_api {
         inactive.push((
             "semantic_invariants".into(),
-            "no TestApi or Resolver".into(),
+            "no TestApi or Resolver — to enable semantic invariants, insert a TestApi resource \
+             exposing game-state probes (see README 'Contract tiers')"
+                .into(),
         ));
     }
 
@@ -297,7 +299,10 @@ pub fn compute_run_scope(world: &World, scenario: &crate::scenario::Scenario) ->
         // No gameplay entities — intent_effect may be vacuous.
         inactive.push((
             "intent_effect".into(),
-            "no gameplay state to observe".into(),
+            "no gameplay state to observe — to enable intent-effect tracking, insert a \
+             GameTypes resource (auto-provided by headless_app) or mark gameplay entities \
+             with the Gameplay component (see README 'Contract tiers')"
+                .into(),
         ));
     }
 
