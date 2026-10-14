@@ -29,7 +29,11 @@ use bevy::app::PluginGroupBuilder;
 /// Strip the render family (plus UI widgets) from a plugin group.
 ///
 /// All disables are `contains`-guarded: correct for any bevy feature
-/// combination, panic-free when a plugin is absent.
+/// combination, panic-free when a plugin is absent. Without bevy's
+/// `render` feature the family cannot be present, so this is a no-op
+/// (and the render-family paths don't compile) — the call site gates
+/// on `render` accordingly.
+#[cfg(feature = "render")]
 pub(crate) fn strip_render_family(group: PluginGroupBuilder) -> PluginGroupBuilder {
     macro_rules! strip {
         ($g:expr, $($p:ty),+ $(,)?) => {{
@@ -83,7 +87,7 @@ pub(crate) fn strip_render_family(group: PluginGroupBuilder) -> PluginGroupBuild
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "render"))]
 mod tests {
     use super::*;
     use bevy::app::PluginGroup;

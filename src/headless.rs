@@ -20,6 +20,7 @@
 //! `gilrs`, `log`). Under each `#[cfg(feature)]`, we guard disables with
 //! `contains::<T>()` to avoid panics when the plugin isn't present.
 
+#[cfg(feature = "render")]
 use crate::headless_strip::strip_render_family;
 use bevy::app::{App, Plugin, PluginGroupBuilder};
 use bevy::prelude::*;
