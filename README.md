@@ -258,9 +258,7 @@ token setup, and the design decision context.
 ## Contributing
 
 Contributions are welcome! By submitting a contribution you agree it is
-licensed under **MIT OR Apache-2.0**, at the option of the project. There is
-no CLA; this preserves the project's freedom to adjust licensing of future
-versions (existing versions remain MIT/Apache-2.0 forever).
+licensed under **MIT OR Apache-2.0**, at the option of the project.
 
 ## License
 
@@ -277,11 +275,6 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the
 Apache-2.0 license, shall be dual licensed as above, without any
 additional terms or conditions.
-
-bevy_swarm is a **permanent open-core library**: the core crate stays
-MIT/Apache-2.0 forever. Any future commercial surface (hosted runners,
-LLM backends, portals) would live in separate companion products with
-their own licenses — never a relicense of this crate.
 
 ## Sponsor
 
