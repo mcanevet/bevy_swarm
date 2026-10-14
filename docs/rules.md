@@ -465,4 +465,4 @@ Expectation files (X2) reference only these names.
 Notes:
 - `crash` is a report **status**, not a rule.
 - Informational rules are excluded from digests, failure signatures,
-fingerprint gating and sweep pass/fail (see docs/conventions.md §8).
+fingerprint gating and sweep pass/fail (see docs/reference-workspace.md §8).

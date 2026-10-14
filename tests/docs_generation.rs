@@ -51,7 +51,7 @@ fn generate_rules_md() -> String {
     out.push_str("- `crash` is a report **status**, not a rule.\n");
     out.push_str(
         "- Informational rules are excluded from digests, failure signatures,\n\
-         fingerprint gating and sweep pass/fail (see docs/conventions.md §8).\n",
+         fingerprint gating and sweep pass/fail (see docs/reference-workspace.md §8).\n",
     );
     out
 }

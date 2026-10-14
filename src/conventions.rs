@@ -1,7 +1,7 @@
 //! Conventions module: paths, environment variables, schema helpers.
 //!
 //! This module encodes the workspace conventions documented in
-//! `docs/conventions.md`. Every bead must use these helpers instead of
+//! `docs/reference-workspace.md`. Every bead must use these helpers instead of
 //! hard-coding paths or env var names.
 
 use std::path::PathBuf;

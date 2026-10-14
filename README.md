@@ -83,7 +83,7 @@ the action log tells you exactly which input sequence got you there.
 ## Integration modes: on-ramp vs depth
 
 Two paths, positioned as a funnel (full table in
-[docs/conventions.md §0](docs/conventions.md)):
+[docs/reference-workspace.md §0](docs/reference-workspace.md)):
 
 1. **On-ramp — zero-touch external BRP tier**: smoke-test any Bevy game
    in ~30 seconds with one documented build flag
@@ -140,106 +140,32 @@ Games with none of these still work: reflection-based percepts and
 auto-discovery calibration kick in, and the harness fails loudly rather
 than passing vacuously when a contract piece it needs is missing.
 
-## Conventions
+## Documentation
+
+Docs are organized by the [Diataxis](https://diataxis.fr) framework — see [docs/README.md](docs/README.md) for the full index:
+
+- **Tutorials:** [your first playtest](docs/tutorial-first-playtest.md), [wire your game's TestApi](docs/tutorial-wiring-testapi.md)
+- **How-to:** [debug a failing run](docs/howto-debug-failure.md), [add an invariant](docs/howto-add-invariant.md), [run in CI](docs/howto-ci-integration.md), [suppress known failures](docs/howto-suppress-known-failure.md), [smoke-test a third-party game](docs/howto-smoke-external-game.md)
+- **Reference:** [rule catalog](docs/reference-rules.md), [contract tiers](docs/reference-contract-tiers.md), [scenario schema](docs/schema.json), [Scenario Cookbook](docs/scenarios.md)
+- **Explanation:** [zero-contract philosophy](docs/explanation-zero-contract.md), [determinism strategy](docs/explanation-determinism.md), [architecture](docs/explanation-architecture.md)
 
 Workspace layout, artifact paths, update mode (`BEVY_SWARM_UPDATE`), versioning,
-rule-name registry, and vocabulary are governed by [docs/conventions.md](docs/conventions.md)
-— the single source of truth. Oracle rule names live in the generated
-[rule catalog](docs/rules.md) (`bevy_swarm::rules`); the scenario format
-is specified by the generated [schema](docs/schema.json).
-
-## Gameplay Snapshot Testing (Z11)
-
-Record and compare per-frame state digests to detect gameplay regressions across versions:
-
-```rust,no_run
-use bevy_swarm::golden::{record_golden, check_golden, GoldenSet, Tolerance};
-use bevy_swarm::scenario::Scenario;
-use bevy::prelude::App;
-
-# fn main() {
-// Record a baseline (once):
-let scenarios: Vec<Scenario> = vec![];
-record_golden(|| App::new(), &scenarios, "tests/swarm/golden").unwrap();
-
-// Check against goldens (in CI or tests):
-let set = GoldenSet::load("tests/swarm/golden").unwrap();
-let report = check_golden(|| App::new(), &set, &Tolerance::default()).unwrap();
-assert!(report.all_same(), "no regressions");
-# }
-```
-
-- **Approval workflow**: Set `BEVY_SWARM_UPDATE=golden` (or `all`) to rewrite golden files; commit the diff for review. `BEVY_SWARM_UPDATE` unset means read-only.
-- **Determinism required**: Run `check_determinism` first; nondeterministic scenarios are flagged.
-- **Tolerance**: float tolerance smooths timing/platform noise; same-platform digest mismatches are still failures (platform is not compared separately).
-- **Readable diffs**: If your game exposes state via `TestApi`, diffs show field names/values instead of raw hashes.
+rule-name registry, and vocabulary are governed by
+[docs/reference-workspace.md](docs/reference-workspace.md) — the single source of truth.
 
 ## What it does
 
-- **Typed intent bots** — chaos (with uniform/aggressive/curious/idle personas), replay, pursuit, planner (aplib-style goal trees), synthetic_pointer and synthetic_keyboard (drive the REAL input chain through picking/ButtonInput, not shortcuts)
-- **Invariant DSL** — scenario JSON with bounds checks, TestApi predicates, eventual assertions, query-target entity counts, differential rules (no_decrease/no_increase), rate limits, expert-rule oracles (WHEN/REQUIRE)
-- **Oracles** — frozen-world soft-lock detection, Welford frame-time anomaly detection, true rolling p99, readiness gate, finite-transform NaN check (all entities, not only Gameplay)
-- **CA² system coverage** — which registered systems actually executed, with zero instrumentation (wrap-safe schedule tick-age snapshots)
-- **Failure minimization** — ddmin over the structured action log shrinks ANY failure (crashes and invariant violations) to a ready-to-save regression scenario with a trimmed duration, and fails honestly with `NotReproducible` when the log alone cannot reproduce the failure
-- **Calibration** — `diagnostics::calibrate_world` runs a chaos session and derives suggested invariants from archetype-count envelopes, with zero game annotations (library API; there is no CLI flag)
-- **Loud contracts** — missing picking backends, unresolved TestApi paths, vacuous setups REJECT the scenario instead of silently passing
+See the [coverage explanation](docs/explanation-coverage.md) for the full
+failure-class breakdown and capture mechanics.
 
-## What we capture (panics, logs, background threads)
+Quick links to reference pages:
 
-- **ECS-thread panics** — systems, observers, commands: fully captured
-  with system-name attribution (via the tracing span when built with
-  `trace`), severity, and location.
-- **bevy_tasks pool-thread panics** (IoTaskPool, AsyncComputeTaskPool,
-  ComputeTaskPool) — captured and reported with target `pool_thread`.
-  Game code routinely detaches background work (asset decode,
-  pathfinding); those panics used to escape the harness entirely.
-- **Logs** — WARN/ERROR records from any thread with a run active.
-- **At run end** the harness waits a bounded grace window (300 ms) for
-  detached pool work to land before draining sinks, so late panics
-  aren't lost.
-- **Known limitation (cross-seed stragglers)**: task pools are
-  process-global and never shut down between seeds. A straggler task
-  from seed N that completes during seed N+1 is attributed to the
-  run active when it lands. For strict isolation, use the external
-  subprocess tiers (smoke / BRP-driven).
-
-## Usage (single scenario)
-
-```rust,no_run
-use bevy_swarm::harness::{run_scenario, Scenario};
-
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-let scenario: Scenario = serde_json::from_str(
-    r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"above","value":3,"emit":[{"intent":"choice","index":0}]}},"duration_s":1.0,"invariants":[]}"#,
-)?;
-
-let mut app = build_your_headless_app(); // your game's plugins + PlaytestPlugin
-let report = run_scenario(&mut app, &scenario)?;
-assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
-# Ok(())
-# }
-# fn build_your_headless_app() -> bevy::prelude::App { unimplemented!() }
-```
-
-## Game-side contract (deliberately thin)
-
-See "Contract tiers" above for the full picture.
-
-## Feature flags
-
-- `agent` — BRP-based resident agent for live inspection and intent injection
-
-## Feature-gated modes
-
-In-process mode (Quick start above) is the primary integration. The
-external/subprocess tiers are on the roadmap (see docs/conventions.md
-§0 for the full modes table); on current Bevy 0.20 the external
-observe-only BRP tier works with `--features bevy/bevy_remote` on the
-game side.
-
-## Architecture
-
-At its core, the data flow per frame:
+- **Golden snapshots** → [docs/reference-golden.md](docs/reference-golden.md)
+- **Robustness margins (J1)** → [docs/reference-robustness.md](docs/reference-robustness.md)
+- **Invariant DSL** → [docs/reference-invariant-dsl.md](docs/reference-invariant-dsl.md)
+- **Security (agent)** → [docs/reference-security.md](docs/reference-security.md)
+- **Single-scenario API** → [docs/reference-usage.md](docs/reference-usage.md)
+- **Feature flags** → [docs/reference-usage.md](docs/reference-usage.md#feature-flags)
 
 ```mermaid,ignore
 flowchart LR
@@ -257,18 +183,8 @@ flowchart LR
 
 ## Invariant DSL (primary API)
 
-The **JSON invariant language** in scenarios is the ONE supported way
-to express checks (`check`, `value`, `query`, `path`, windows
-`after_s`/`before_s`/`eventually_s`). It parses into one `CheckOp`
-enum everywhere: wire format `lt`, `le`, `gt`, `ge`, `equals`, `ne`
-(legacy aliases `below` = `le`, `above` = `ge`, `eq` = `equals`; all
-inclusive boundaries). Calibration output
-(`generate_invariants_from_calibration`) emits exactly this dialect —
-round-trip guaranteed by test.
-
-`bevy_swarm::typed` (Rust-native oracle/predicate/policy systems) is
-**experimental**: usable, but expect breaking changes without a major
-version bump; the JSON DSL is the stable surface for v0.1.
+See the [reference](docs/reference-invariant-dsl.md) for canonical wire forms and
+aliases. The Rust-native `typed` system is experimental; JSON is stable for v0.1.
 
 ## CI integration (JUnit XML)
 
@@ -280,11 +196,12 @@ std::fs::write("target/swarm-junit.xml", matrix.to_junit("swarm"))?;
 ```
 
 Upload `target/swarm-junit.xml` as a CI artifact; autotest runs also
-write `runs/<run-id>/junit.xml` automatically.
+write `runs/<run-id>/junit.xml` automatically. See
+[howto-ci-integration.md](docs/howto-ci-integration.md) for gate semantics.
 
 ## Testing
 
-Two loops (see docs/conventions.md):
+Two loops (see [reference-workspace.md](docs/reference-workspace.md)):
 
 - **Outer loop (acceptance):** plain fixture games with ZERO bevy_swarm
   plumbing (`fixtures/*`) + JSON expectation files
@@ -314,11 +231,8 @@ Requires Bevy 0.20 with the `debug` feature for real system names.
 
 ## Determinism
 
-Replay, minimization, and seed sweeps are only trustworthy if a scenario is
-deterministic. `check_determinism` verifies it (ggrs-SyncTest style): the
-scenario runs multiple times on fresh `App`s and per-frame canonical state
-digests are compared. On divergence you get the first divergent frame and
-the differing fields (e.g. `Gameplay[Ball].translation.x`):
+See the [determinism explanation](docs/explanation-determinism.md) for the full
+strategy, entropy hook, and sharp edges.
 
 ```rust,ignore
 let report = bevy_swarm::determinism::check_determinism(build_app, &scenario, 2)?;
@@ -331,113 +245,20 @@ Games contribute custom digest parts (RNG state, AI blackboards) via the
 `DigestHooks` resource. Normal runs pay nothing — digests are only recorded
 when a `StateTrace` resource is present.
 
-### Z14: Deterministic Entropy Hook
-
-Enable the `deterministic-entropy` feature and set the `getrandom_backend` cfg:
-
-```bash
-RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_swarm/deterministic-entropy
-```
-
-(planned: a `cargo swarm run` wrapper that sets both automatically)
-
-The custom backend hook (`__getrandom_v03_custom`) intercepts all `getrandom`
-calls (including `rand::rng()`, `uuid::Uuid::new_v4`, `bevy_rand`) and draws
-from a deterministic stream seeded from the scenario seed. Calls outside
-`enter_run()` draw from a process-global fallback stream and increment the
-`entropy_unattributed_draws` informational rule counter.
-
-**Important**: `rand::rng()` uses `ThreadRng`, which is cached per thread.
-To guarantee determinism across runs, **each scenario must run on a fresh
-thread**. The matrix runner (`run_scenarios_parallel`) does this
-automatically. Direct callers of `run_scenario` must either: (a) spawn a
-fresh thread per call, or (b) document that they accept the risk of
-cross-run ThreadRng state leakage. The `InProcess` runner now calls
-`enter_run` before the factory so plugin-build draws are seeded.
-
-**Important**: The hook signature must match exactly:
-```rust,ignore
-#[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn __getrandom_v03_custom(
-    dest: *mut u8,
-    len: usize,
-) -> Result<(), getrandom::Error>
-```
-
-Using `extern "C"` or returning `Result<(), ()>` is undefined behavior (UB)
-and will abort the process on panic.
-
 ## Robustness margins (J1)
 
-Every invariant carries a **signed robustness ρ** — the STL-style distance to
-violation: positive when satisfied ("never violated, but came within 0.3 of the
-bound"), negative when violated. `report.robustness` holds:
-
-- `per_invariant`: for each invariant, `(min ρ over run, frame of worst, normalized min)`
-- `overall`: min of normalized mins across all invariants (< 0 iff the run failed)
-
-Units normalize via an optional `scale` field (default `max(|threshold|, 1.0)`;
-bounds use the half-width) so pixel-scale bounds don't swamp HP-scale ones.
-
-**Semantics by invariant kind:**
-
-| Invariant | Robustness ρ |
-|-----------|-------------|
-| `below`/`le` thr | `thr - v` |
-| `above`/`ge` thr | `v - thr` |
-| `lt`/`gt` | same as `le`/`ge` (strictness matters at ρ = …) |
-| `equals` thr | `-(distance)` (0 when exact) |
-| text `equals` | `+1` if equal, else `-1` (boolean lift) |
-| `bounds` (per entity) | `min over axes of min(v - lo, hi - v)`; aggregated `min` over entities |
-| `count` query | threshold margin on the count |
-| `no_decrease` | `v_t - v_{t-1}` (min over run) |
-| `max_delta_per_sec` | `max_dps - rate` |
-| `eventually` (deadline D) | `max over t≤D of ρ_inner(t)` (best value so far) |
-| expert `WHEN→REQUIRE` | `max(-ρ_W, ρ_R)` (anti-masking) |
-| always-mode (default) | run-level ρ = `min over t of ρ(t)` |
-
-Boolean verdict is exactly `ρ < 0` (or `ρ ≤ 0` for strict ops); this equivalence
-is enforced by `debug_assert!` in the oracle so semantics can't drift.
-
-```json
-{"invariants": [{"name": "hp_floor", "rule": "custom", "path": "TestApi.hp",
-                 "check": "above", "value": 10, "scale": 100}]}
-```
-
-This continuous signal is the substrate for future guided search (choice
-mutation, Go-Explore) and LLM falsifiers.
+See the [robustness reference](docs/reference-robustness.md) for the full ρ
+semantics by invariant kind.
 
 ## Security (agent feature)
 
-The `agent` feature exposes BRP (arbitrary world reads and **mutation**) over
-HTTP. Threat model: **the agent is an open debugger gated by a shared secret,
-safe on loopback only**. Remote use additionally requires a TLS-terminating
-proxy — the HTTP transport is plaintext.
-
-- Binds to `127.0.0.1:15702` by default; non-loopback addresses are refused
-  unless `AgentConfig { allow_remote: true, .. }` is set explicitly.
-- **Default-deny**: a token is ALWAYS required for `playtest/*` methods.
-  Configure one via `AgentConfig::token` or the `BEVY_SWARM_AGENT_TOKEN`
-  env var. When neither is set, a cryptographically random session token
-  is generated and printed to stderr at startup (eprintln, so it survives
-  even when the plugin is added before `LogPlugin`).
-- Token comparison is constant-time; an explicitly-empty configured token
-  is treated as unset and does not authenticate `{token: ""}`.
-- Release builds with the agent active log a loud warning; set
-  `deny_in_release: true` to panic instead. Never ship agent-enabled builds.
-
-**Experimental features** (known limitations, see docs):
-- `autotest()` — false positives on default intent keys and static games (RF8)
-- raw input (gamepad/pointer injection) — gamepad actions not in the audit log (RF16)
-- `ClickEntity`/pointer picking — `NoViewportSize` failures without a camera (RF11)
-- deterministic entropy — `rand::rng()` not reproducible on the same thread (RF10)
+See the [security reference](docs/reference-security.md) for threat model,
+token setup, and the design decision context.
 
 ## Contributing
 
 Contributions are welcome! By submitting a contribution you agree it is
-licensed under **MIT OR Apache-2.0**, at the option of the project. There is
-no CLA; this preserves the project's freedom to adjust licensing of future
-versions (existing versions remain MIT/Apache-2.0 forever).
+licensed under **MIT OR Apache-2.0**, at the option of the project.
 
 ## License
 
@@ -454,11 +275,6 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the
 Apache-2.0 license, shall be dual licensed as above, without any
 additional terms or conditions.
-
-bevy_swarm is a **permanent open-core library**: the core crate stays
-MIT/Apache-2.0 forever. Any future commercial surface (hosted runners,
-LLM backends, portals) would live in separate companion products with
-their own licenses — never a relicense of this crate.
 
 ## Sponsor
 

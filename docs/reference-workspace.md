@@ -1,4 +1,4 @@
-# bevy_swarm Conventions
+# Reference: Workspace Conventions
 
 This document is the single source of truth for workspace layout, artifact paths,
 update mode, versioning, rule names, report schema governance, and vocabulary.
@@ -48,11 +48,6 @@ a cargo feature at build time (e.g. `bevy_remote`) is a *thin build-time
 contract* — much lighter than a semantic contract, but must not be advertised
 as "zero contract".
 
-**Important:** "Zero hand-written lines" (CLI scaffolding) is convenience, not a
-contract claim. Whether a human or `cargo swarm init` writes the test file, a new
-file enters the repo either way. The zero-contract guarantee is about *semantic*
-requirements (no TestApi, no IntentSurface), not about typing effort.
-
 ---
 
 ## 1. Cargo Workspace
@@ -60,7 +55,7 @@ requirements (no TestApi, no IntentSurface), not about typing effort.
 **Members:**
 - `.` — the `bevy_swarm` library crate (publishable)
 - `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_swarm dependency)
-- `bevy_swarm_cli/` (planned, Z10) — optional CLI binary for scaffolding (`cargo swarm init`); convenience only, not part of the zero-contract guarantee
+- `bevy_swarm_cli/` — optional CLI binary for scaffolding (`cargo swarm init`); convenience only, not part of the zero-contract guarantee
 
 **Shared dependencies** (single place to pin, per Z0):
 
@@ -130,11 +125,11 @@ Every persisted file and every report has a top-level `schema_version: <int>`.
 - After that, breaking changes bump it.
 - Sub-reports (determinism, golden, sweep, run summary, mutation) are **embedded**
   in the report JSON under named keys, not separate files.
-- Report schema: `docs/report-schema.json` (owned by X1's schema test).
-- Scenario schema: `docs/schema.json` — GENERATED from `Scenario` via
+- Report schema: [report-schema.json](report-schema.json) (owned by X1's schema test).
+- Scenario schema: [schema.json](schema.json) — GENERATED from `Scenario` via
   schemars; regenerate with
   `BEVY_SWARM_UPDATE=schema cargo test --test schema_doc` (drift-guarded).
-- Rule catalog: `docs/rules.md` — GENERATED from the `Rule` enum; regenerate
+- Rule catalog: [rules.md](rules.md) — GENERATED from the `Rule` enum; regenerate
   with `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.
 
 ## 5. Update Mode
@@ -149,6 +144,7 @@ Environment variables read by the harness (full table):
 |---|---|
 | `BEVY_SWARM_UPDATE` | categories allowed to rewrite goldens/expectations |
 | `BEVY_SWARM_SEEDS` | override seed sweep range |
+| `BEVY_SWARM_SEED` | pin ONE exact seed for reproduction (wins over SEEDS) |
 | `BEVY_SWARM_DURATION` | override default scenario duration |
 | `BEVY_SWARM_THREADS` | parallel worker count for matrix runs |
 | `BEVY_SWARM_AGENT_TOKEN` | auth token for the agent feature |
@@ -162,7 +158,7 @@ Environment variables read by the harness (full table):
 
 ## 6. Rule-Name Registry
 
-- Registry doc: `docs/rules.md`
+- Registry doc: [rules.md](rules.md)
 - Code constants: `bevy_swarm::rules`
 
 Every oracle emits a registry constant; X2 expectations reference only registry
