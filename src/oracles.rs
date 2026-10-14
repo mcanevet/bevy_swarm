@@ -932,6 +932,9 @@ pub(crate) fn check_custom_system(world: &mut World) {
         // inverted the semantics (WHEN false reported a violation,
         // and the requires section was never reached). The text WHEN
         // guard is evaluated in the expert-rule section below.
+        // le3.18 (RF22): text-WHEN expert rules were SKIPPED entirely
+        // (line 999 continued before reaching the expert-rule section).
+        // Only skip text-standalone rules; expert rules must fall through.
         let text_expert_rule = inv.requires_path.is_some()
             && string_val.is_some()
             && inv.value.as_ref().is_some_and(|v| v.is_string());
@@ -992,6 +995,89 @@ pub(crate) fn check_custom_system(world: &mut World) {
                     format!("{} = {} ({} {})", path, sv, check, expect),
                     frame,
                 );
+            }
+            continue;
+        }
+
+        // le3.18 (RF22): text-WHEN expert rules must NOT continue past
+        // this point before the expert-rule section runs — they have
+        // no numeric WHEN, so the old `let Some(current) = numeric
+        // else { continue }` silently swallowed them (always pass).
+        // Route them straight to the expert-rule section.
+        if text_expert_rule {
+            // Text WHEN guard; the numeric threshold machinery below
+            // does not apply. The expert-rule section handles both the
+            // violation reporting and the J1 robustness.
+            if let (Some(req_path), Some(req_check), Some(req_value)) =
+                (&inv.requires_path, &inv.requires_check, &inv.requires_value)
+            {
+                // WHEN guard: text compare (Equals/Ne).
+                let when_holds = match (string_val.as_deref(), inv.check) {
+                    (Some(sv), Some(c)) => inv
+                        .value
+                        .as_ref()
+                        .and_then(|v| v.as_str())
+                        .map(|wv| c.holds_text(sv, wv).unwrap_or(false))
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                // Resolve requires_path through the SAME entry point.
+                let (req_num, req_str) = resolve_field(world, req_path);
+                // J1: implication robustness ρ = max(-ρ_W, ρ_R).
+                // Text WHEN lifts to ±1 (boolean, no graded distance)
+                // — NOT 0.0/∞: the old 0.0 gave WHEN-false ∧
+                // REQUIRE-false ρ = max(-0, -1) = -0 (not < 0, no
+                // violation) while the run failed, and WHEN-true ∧
+                // REQUIRE-false ρ = -0 likewise. le3.18 (RF22).
+                let rho_w: f64 = if when_holds { 1.0 } else { -1.0 };
+                if let (Some(rc), Some(r_thr)) = (req_num, req_value.as_f64()) {
+                    let rho_r = crate::robustness::threshold_margin(*req_check, rc, r_thr);
+                    let rho_implication = (-rho_w).max(rho_r);
+                    let scale = inv
+                        .scale
+                        .unwrap_or_else(|| crate::robustness::default_scale(r_thr));
+                    world
+                        .resource_mut::<crate::robustness::RobustnessTracker>()
+                        .observe(&inv.name, frame, rho_implication, scale);
+                } else if let (Some(rs), Some(rexp)) = (req_str.as_deref(), req_value.as_str()) {
+                    let holds = req_check.holds_text(rs, rexp).unwrap_or(false);
+                    let rho_text = if holds { 1.0 } else { -1.0 };
+                    let rho_implication = (-rho_w).max(rho_text);
+                    world
+                        .resource_mut::<crate::robustness::RobustnessTracker>()
+                        .observe(&inv.name, frame, rho_implication, 1.0);
+                }
+                world
+                    .resource_mut::<PlaytestState>()
+                    .coverage
+                    .test_api_paths_read
+                    .insert(req_path.clone());
+                let violated = match (req_num, req_value.as_f64()) {
+                    (Some(v), Some(thr)) => !req_check.holds(v, thr),
+                    _ => match (&req_str, req_value.as_str()) {
+                        (Some(s), Some(exp)) => !req_check.holds_text(s, exp).unwrap_or(true),
+                        _ => false,
+                    },
+                };
+                if when_holds && violated {
+                    let when_desc = string_val
+                        .clone()
+                        .map(|s| format!("{} = {}", path, s))
+                        .unwrap_or_else(|| path.clone());
+                    let actual = req_num
+                        .map(|n| n.to_string())
+                        .or_else(|| req_str.clone())
+                        .unwrap_or_else(|| "<unresolved>".into());
+                    world.resource_mut::<Violations>().report_named(
+                        &inv.name,
+                        req_path,
+                        format!(
+                            "expert rule violated: when {}, {} = {} (required: {} {})",
+                            when_desc, req_path, actual, req_check, req_value
+                        ),
+                        frame,
+                    );
+                }
             }
             continue;
         }
@@ -1254,7 +1340,31 @@ pub(crate) fn check_custom_system(world: &mut World) {
                 // le3.9 (RF5): text REQUIRE — boolean ±1 robustness, so
                 // overall<0 iff the run fails on a text policy rule.
                 let holds = req_check.holds_text(rs, rexp).unwrap_or(false);
-                let rho_w_text = if when_holds { 0.0 } else { f64::INFINITY };
+                // le3.18 (RF22): the old 0.0/∞ WHEN lift broke the J1
+                // property: WHEN true ∧ REQUIRE false gave
+                // max(-0, -1) = -0 which is NOT < 0 while the run
+                // failed. WHEN's numeric ρ_W (±≥0, 0 only exactly at
+                // the boundary) flows through the implication like any
+                // numeric guard: ρ = max(-ρ_W, ρ_text).
+                let rho_w_text = match (
+                    inv.check,
+                    numeric,
+                    inv.value.as_ref().and_then(|v| v.as_f64()),
+                ) {
+                    (Some(wc), Some(cur), Some(w_thr)) => {
+                        crate::robustness::threshold_margin(wc, cur, w_thr)
+                    }
+                    _ => {
+                        // Text or unconditional WHEN: vacuously
+                        // satisfied when false (guard lifts to ∞), +1
+                        // margin when it holds.
+                        if when_holds {
+                            1.0
+                        } else {
+                            f64::INFINITY
+                        }
+                    }
+                };
                 let rho_text = if holds { 1.0 } else { -1.0 };
                 let rho_implication = (-rho_w_text).max(rho_text);
                 world

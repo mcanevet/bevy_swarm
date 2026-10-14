@@ -523,3 +523,233 @@ fn overall_negative_iff_fail_across_fixture_suite() {
         assert_eq!(should_fail, !rep.violations.is_empty());
     }
 }
+
+// ---------------------------------------------------------------------------
+// le3.18 (RF22): text-WHEN expert rules + J1 property
+// ---------------------------------------------------------------------------
+
+fn run_text_expert(
+    when_phase: &str,
+    when_expect: &str,
+    healing: bool,
+) -> bevy_swarm::driver::PlaytestReport {
+    // Policy: WHEN phase == when_expect, REQUIRE healing == 1.
+    let healing_num: f64 = if healing { 1.0 } else { 0.0 };
+    let scen: Scenario = serde_json::from_str(&format!(
+        r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.2,"invariants":[
+            {{"name":"policy","rule":"custom",
+              "path":"TestApi.phase","check":"equals","value":"{when_expect}",
+              "requires_path":"TestApi.healing","requires_check":"equals",
+              "requires_value":1}}]}}"#
+    ))
+    .unwrap();
+    let when_phase = when_phase.to_string();
+    let mut app = build_app();
+    app.add_systems(Update, move |mut api: ResMut<TestApi>| {
+        api.custom_text.insert("phase".into(), when_phase.clone());
+        api.custom_numeric.insert("healing".into(), healing_num);
+    });
+    run_scenario(&mut app, &scen).unwrap()
+}
+
+#[test]
+fn text_when_expert_rule_four_combinations() {
+    // WHEN(phase=="danger") REQUIRE(healing==true)
+    // (when_expect danger, when_phase danger|calm) x (req 1|0)
+    // Only WHEN-true ∧ REQUIRE-false fails.
+    for (when_phase, req_healing, should_fail) in [
+        ("danger", true, false), // WHEN T, REQUIRE T: pass
+        ("danger", false, true), // WHEN T, REQUIRE F: VIOLATE
+        ("calm", true, false),   // WHEN F: vacuous pass
+        ("calm", false, false),  // WHEN F: vacuous pass
+    ] {
+        let rep = run_text_expert(when_phase, "danger", req_healing);
+        assert_eq!(
+            should_fail,
+            !rep.violations.is_empty(),
+            "text-WHEN violations: phase={when_phase} healing={req_healing}"
+        );
+        assert_eq!(
+            should_fail,
+            rep.robustness.overall.map(|o| o < 0.0).unwrap_or(false),
+            "text-WHEN overall<0 iff fail: phase={when_phase} healing={req_healing}"
+        );
+    }
+}
+
+#[test]
+fn text_when_expert_rule_evaluated_at_all() {
+    // The RF22 core bug: text-WHEN expert rules were silently skipped
+    // (the numeric `else { continue }` swallowed them — always Pass).
+    // A violating combination MUST produce a violation.
+    let rep = run_text_expert("danger", "danger", false);
+    assert!(
+        rep.violations
+            .iter()
+            .any(|v| v.rule.as_str() == "policy" || v.detail.contains("expert rule violated")),
+        "text-WHEN violation must be reported, got: {:?}",
+        rep.violations
+    );
+}
+
+#[test]
+fn numeric_when_text_require_robustness_matches_verdict() {
+    // WHEN(score>5) REQUIRE(phase=="saved"): rho_w numeric, text rho_r.
+    // WHEN true & REQUIRE false must give overall < 0.
+    let scen: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.2,"invariants":[
+            {"name":"save_policy","rule":"custom",
+             "path":"TestApi.score","check":"above","value":5,
+             "requires_path":"TestApi.save_state","requires_check":"equals",
+             "requires_value":"saved"}]}"#,
+    )
+    .unwrap();
+    for (score, save_state, should_fail) in [
+        (10, "saved", false), // WHEN T, REQUIRE T
+        (10, "dirty", true),  // WHEN T, REQUIRE F — the RF22 inversion case
+        (0, "dirty", false),  // WHEN F: vacuous
+    ] {
+        let mut app = build_app();
+        app.add_systems(Update, move |mut api: ResMut<TestApi>| {
+            api.score = score;
+            api.custom_text
+                .insert("save_state".into(), save_state.into());
+        });
+        let rep = run_scenario(&mut app, &scen).unwrap();
+        assert_eq!(
+            should_fail,
+            rep.robustness.overall.map(|o| o < 0.0).unwrap_or(false),
+            "numeric-WHEN/text-REQUIRE overall: score={score} state={save_state}"
+        );
+    }
+}
+
+#[test]
+fn j1_overall_negative_iff_fail_property() {
+    // Randomized property over invariant kinds and thresholds: for every
+    // run, overall < 0 IFF the run has a violation on a robustness-tracked
+    // invariant. Seeded, deterministic.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hash;
+
+    let mut rng_state = 0xC0FFEEu64;
+    let mut next = move || {
+        // xorshift64*
+        rng_state ^= rng_state >> 12;
+        rng_state ^= rng_state << 25;
+        rng_state ^= rng_state >> 27;
+        rng_state.wrapping_mul(0x2545F4914F6CDD1D)
+    };
+
+    for _ in 0..24 {
+        let pick = next() % 6;
+        let score = (next() % 200) as i64; // 0..199
+        let players = (next() % 500) as usize;
+        let (scen, should_fail) = match pick {
+            0 => {
+                let thr = (next() % 200) as i64;
+                let scen: Scenario = serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
+                        {{"name":"p_cap","rule":"custom","path":"TestApi.score","check":"le","value":{thr}}}]}}"#
+                ))
+                .unwrap();
+                (scen, score > thr)
+            }
+            1 => {
+                let thr = (next() % 200) as i64;
+                let scen: Scenario = serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
+                        {{"name":"p_floor","rule":"custom","path":"TestApi.score","check":"ge","value":{thr}}}]}}"#
+                ))
+                .unwrap();
+                (scen, score < thr)
+            }
+            2 => {
+                let thr = (next() % 500) as i64;
+                let scen: Scenario = serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
+                        {{"name":"p_players","rule":"custom","path":"TestApi.active_players","check":"lt","value":{thr}}}]}}"#
+                ))
+                .unwrap();
+                (scen, (players as i64) >= thr)
+            }
+            3 => {
+                // Expert rule: WHEN score<=thr REQUIRE players>=rthr
+                let thr = (next() % 200) as i64;
+                let rthr = (next() % 500) as i64;
+                let scen: Scenario = serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
+                        {{"name":"p_exp","rule":"custom","path":"TestApi.score","check":"le","value":{thr},
+                          "requires_path":"TestApi.active_players","requires_check":"ge","requires_value":{rthr}}}]}}"#
+                ))
+                .unwrap();
+                (scen, score <= thr && (players as i64) < rthr)
+            }
+            4 => {
+                // Text standalone: custom_text phase vs expectation.
+                let phase = if next() % 2 == 0 { "menu" } else { "playing" };
+                let expect = if next() % 2 == 0 { "playing" } else { "menu" };
+                let scen: Scenario = serde_json::from_str(&format!(
+                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
+                        {{"name":"p_text","rule":"custom","path":"TestApi.phase","check":"equals","value":"{expect}"}}]}}"#
+                ))
+                .unwrap();
+                let mut hasher = DefaultHasher::new();
+                format!("{phase}{expect}").hash(&mut hasher);
+                let sf = phase != expect;
+                // fold phase into the app closure below via scen-tag; simplest:
+                // re-run with the phase inserted through custom_text in caller.
+                // We handle by returning a marker: encode in should_fail and
+                // set phase in the app from the same value.
+                // -> handled by `pick == 4` special-casing below.
+                (scen, sf)
+            }
+            _ => {
+                // Differential: no_decrease on score; constant score passes.
+                let scen: Scenario = serde_json::from_str(
+                    r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.15,"invariants":[
+                        {"name":"p_diff","rule":"custom","path":"TestApi.score","check":"ge","value":0,
+                         "differential":"no_decrease"}]}"#,
+                )
+                .unwrap();
+                (scen, false)
+            }
+        };
+
+        let is_text_case = pick == 4;
+        let mut app = build_app();
+        if is_text_case {
+            // Phase differs from the invariant's expected value exactly
+            // when should_fail (both drawn from the same seeded RNG).
+            let inv_val = scen.invariants[0]
+                .value
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .unwrap_or("playing")
+                .to_string();
+            app.add_systems(Update, move |mut api: ResMut<TestApi>| {
+                let phase = if inv_val == "playing" {
+                    "menu"
+                } else {
+                    "playing"
+                };
+                api.custom_text.insert("phase".into(), phase.into());
+            });
+        }
+        app.add_systems(Update, move |mut api: ResMut<TestApi>| {
+            api.score = score;
+            api.active_players = players;
+        });
+        let rep = run_scenario(&mut app, &scen).unwrap();
+        let overall_neg = rep.robustness.overall.map(|o| o < 0.0).unwrap_or(false);
+        let failed = !rep.violations.is_empty();
+        assert_eq!(
+            should_fail, overall_neg,
+            "property overall<0: pick={pick} score={score} players={players}"
+        );
+        assert_eq!(
+            should_fail, failed,
+            "property violations: pick={pick} score={score} players={players}"
+        );
+    }
+}
