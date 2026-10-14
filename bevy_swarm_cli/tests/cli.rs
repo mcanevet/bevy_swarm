@@ -43,6 +43,18 @@ fn hash_dir(dir: &Path) -> Vec<(PathBuf, u128)> {
     out
 }
 
+/// Run f with a fresh empty temp dir (no fixture copy).
+fn with_tmp(f: impl FnOnce(&Path)) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("bbb-report-{}-{seq}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    f(&tmp);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 /// Run init in a COPY of the fixture (never mutate the committed one).
 /// Includes a per-call counter so parallel tests never share a temp dir.
 fn with_copy(fixture_name: &str, f: impl FnOnce(&Path)) {
@@ -296,5 +308,93 @@ fn init_and_run_flow() {
             .join(dir.trim())
             .join("report.json");
         assert!(report.exists(), "no report at {}", report.display());
+    });
+}
+
+/// swarm-bbb: `cargo swarm report` must surface scope.inactive entries
+/// (family + reason) and warnings — golden test with a synthetic report.
+#[test]
+fn report_prints_inactive_scope_and_warnings() {
+    with_tmp(|tmp| {
+        let runs = tmp.join("target/bevy_swarm/runs");
+        std::fs::create_dir_all(runs.join("golden")).unwrap();
+        let report = serde_json::json!({
+            "status": "fail",
+            "contract_tier": "zero",
+            "harness_mode": "in_process",
+            "scope": {
+                "seeds_run": 2,
+                "total_duration_s": 10.0,
+                "inactive": [
+                    ["semantic_invariants", "no TestApi/Resolver in world: add bevy_swarm as a dev-dependency"],
+                    ["intent_effect", "no gameplay state to observe"]
+                ]
+            },
+            "warnings": ["stderr: thread 'main' panicked at src/foo.rs:3:5"],
+            "failures": [],
+            "runs": []
+        });
+        std::fs::write(
+            runs.join("golden/report.json"),
+            serde_json::to_string_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(runs.join("last"), "golden").unwrap();
+
+        let out = Command::new(cli_bin())
+            .arg("report")
+            .current_dir(tmp)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("inactive checks (2)"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("[semantic_invariants] no TestApi/Resolver"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("[intent_effect] no gameplay state"),
+            "stdout: {stdout}"
+        );
+        assert!(stdout.contains("warnings (1)"), "stdout: {stdout}");
+        assert!(
+            stdout.contains("thread 'main' panicked"),
+            "stdout: {stdout}"
+        );
+    });
+}
+
+/// swarm-bbb: no regression — reports WITHOUT inactive entries and
+/// warnings render exactly as before (no new sections).
+#[test]
+fn report_no_sections_when_absent() {
+    with_tmp(|tmp| {
+        let runs = tmp.join("target/bevy_swarm/runs");
+        std::fs::create_dir_all(runs.join("plain")).unwrap();
+        let report = serde_json::json!({
+            "status": "pass",
+            "contract_tier": "zero",
+            "harness_mode": "in_process",
+            "scope": { "seeds_run": 1, "total_duration_s": 1.0 },
+            "failures": [],
+            "runs": []
+        });
+        std::fs::write(
+            runs.join("plain/report.json"),
+            serde_json::to_string_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(runs.join("last"), "plain").unwrap();
+
+        let out = Command::new(cli_bin())
+            .arg("report")
+            .current_dir(tmp)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(!stdout.contains("inactive checks"), "stdout: {stdout}");
+        assert!(!stdout.contains("warnings"), "stdout: {stdout}");
     });
 }
