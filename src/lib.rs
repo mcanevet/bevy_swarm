@@ -35,6 +35,17 @@
 #[doc = include_str!("../README.md")]
 struct _ReadmeDoctests;
 
+// le3.25 (RF29): the docs/reference-*.md snippets are part of the
+// doctest suite — `rust,no_run` blocks are still COMPILED (only
+// execution is skipped), so reference examples can never rot either.
+#[cfg(doctest)]
+#[doc = include_str!("../docs/reference-usage.md")]
+struct _ReferenceUsageDoctests;
+
+#[cfg(doctest)]
+#[doc = include_str!("../docs/reference-golden.md")]
+struct _ReferenceGoldenDoctests;
+
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod autotest;

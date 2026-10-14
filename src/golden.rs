@@ -172,6 +172,14 @@ fn sanitize_entry_name(name: &str) -> String {
     no_dots.trim().to_string()
 }
 
+/// Records golden trajectories for the given scenarios (Z11
+/// version-to-version differential testing).
+///
+/// Builds a fresh App per scenario via `app_factory`, runs each with
+/// per-frame state digests + periodic snapshots, and persists the
+/// resulting [`GoldenSet`] under `output_dir` (keyed by platform).
+/// Intended for checked-in baselines: run once to record, then use
+/// [`check_golden`] on later code revisions to detect divergence.
 pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
     app_factory: F,
     scenarios: &[Scenario],

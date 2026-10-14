@@ -58,6 +58,9 @@ exclude = [
     ".codex/",
     ".agents/",
     ".beads.gate.lock",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "tests/",
 ]
 
 [dependencies]
