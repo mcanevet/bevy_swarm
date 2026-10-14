@@ -189,7 +189,7 @@ fn autotest_finds_dead_left_key_without_adapter() {
     // 60Hz over 6s: 360 samples, ~45 per key — well past the 10-sample
     // dead_verb threshold for the dead keys.
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"liveness":{"timeout_s":5.0},"deny_ambiguities":false,"single_threaded":true}"#,
     ).unwrap();
     let config = AutotestConfig {
         num_seeds: 1,
@@ -211,7 +211,7 @@ fn autotest_finds_dead_left_key_without_adapter() {
 #[serial]
 fn autotest_clean_walker_passes() {
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"liveness":{"timeout_s":5.0},"deny_ambiguities":false,"single_threaded":true}"#,
     ).unwrap();
     let config = AutotestConfig {
         num_seeds: 1,
@@ -697,7 +697,7 @@ fn z18_junit_xml_strict_parse() {
 fn failure_summary_lists_violations_and_repro() {
     let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"liveness":{"timeout_s":5.0},"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
     let config = AutotestConfig {
@@ -722,7 +722,7 @@ fn failure_summary_lists_violations_and_repro() {
 #[serial]
 fn passing_report_has_no_failure_summary_content() {
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":5.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":5.0,"invariants":[],"liveness":{"timeout_s":5.0},"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
     let config = AutotestConfig {
@@ -744,7 +744,7 @@ fn passing_report_has_no_failure_summary_content() {
 fn minimized_failure_written_as_standalone_file() {
     let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
     let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
-        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"liveness":{"timeout_s":5.0},"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
     let output_dir = std::path::PathBuf::from(format!("smu-regression-{}", std::process::id()));
