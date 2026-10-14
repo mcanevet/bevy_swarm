@@ -139,9 +139,9 @@ jobs:
       - name: Install Linux dependencies (bevy_render + winit backends)
         run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
       
-      - name: Free disk space
+      - name: Free disk space (telemetry)
         run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          time sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
           df -h /
 
       - name: Cache
@@ -165,6 +165,10 @@ jobs:
       
       - name: Build examples
         run: cargo build --examples --all-features
+
+      - name: 'Disk usage (post-build telemetry)'
+        if: always()
+        run: df -h /
 
   docs:
     runs-on: ubuntu-latest
