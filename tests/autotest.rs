@@ -687,3 +687,102 @@ fn z18_junit_xml_strict_parse() {
     });
     assert!(has_failure, "failing run must yield <failure> elements");
 }
+
+// ---- smu: inline failure summary + standalone regression files ----
+
+/// smu: a failing autotest produces a failure_summary() with seed,
+/// violation details, and a repro hint — printable without opening JSON.
+#[test]
+#[serial]
+fn failure_summary_lists_violations_and_repro() {
+    let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
+    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+    )
+    .unwrap();
+    let config = AutotestConfig {
+        num_seeds: 1,
+        duration_s: 20.0,
+        parallel: 1,
+        base_scenario: sc,
+        ..AutotestConfig::default()
+    };
+    let report = autotest(fixture_walker::WalkerGamePlugin, config).expect("autotest runs");
+    assert!(!report.passed(), "walker with dead_left_key must fail");
+    let summary = report.failure_summary();
+    assert!(summary.contains("FAILED:"), "{summary}");
+    assert!(summary.contains("seed "), "{summary}");
+    assert!(summary.contains("dead_verb"), "{summary}");
+    assert!(summary.contains("Repro: BEVY_SWARM_SEED="), "{summary}");
+}
+
+/// smu: a passing report has an empty-concept failure summary — i.e.
+/// passing runs never print it (write_report guards on !passed()).
+#[test]
+#[serial]
+fn passing_report_has_no_failure_summary_content() {
+    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":5.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+    )
+    .unwrap();
+    let config = AutotestConfig {
+        num_seeds: 1,
+        duration_s: 5.0,
+        parallel: 1,
+        base_scenario: sc,
+        output_dir: std::path::PathBuf::from("smu-pass-check"),
+        ..AutotestConfig::default()
+    };
+    let report = autotest(fixture_walker::WalkerGamePlugin, config).expect("autotest runs");
+    assert!(report.passed(), "clean walker must pass");
+}
+
+/// smu: minimized failures emit standalone regression scenario files
+/// next to the report (run_dir/regression-<seed>-<rule>.json).
+#[test]
+#[serial]
+fn minimized_failure_written_as_standalone_file() {
+    let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
+    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
+    )
+    .unwrap();
+    let output_dir = std::path::PathBuf::from(format!("smu-regression-{}", std::process::id()));
+    let config = AutotestConfig {
+        num_seeds: 1,
+        duration_s: 20.0,
+        parallel: 1,
+        base_scenario: sc,
+        minimize_failures: true,
+        output_dir: output_dir.clone(),
+        ..AutotestConfig::default()
+    };
+    let report = autotest(fixture_walker::WalkerGamePlugin, config).expect("autotest runs");
+    assert!(
+        !report.minimized.is_empty(),
+        "dead_left_key run must minimize: {:?}",
+        report.minimized.len()
+    );
+    // Locate the run dir: target/<output_dir>/<run_id>/
+    let runs_root = std::path::Path::new("target").join(&output_dir);
+    let run_id = report.run_id.clone().expect("run id set");
+    let run_dir = runs_root.join(&run_id);
+    let mut found_regression = false;
+    for entry in std::fs::read_dir(&run_dir).expect("run dir exists") {
+        let name = entry.unwrap().file_name().to_string_lossy().to_string();
+        if name.starts_with("regression-") && name.ends_with(".json") {
+            found_regression = true;
+            let raw = std::fs::read_to_string(run_dir.join(&name)).unwrap();
+            let parsed: bevy_swarm::scenario::Scenario =
+                serde_json::from_str(&raw).expect("standalone regression parses as Scenario");
+            bevy_swarm::scenario::validate_scenario(&parsed)
+                .expect("standalone regression validates");
+        }
+    }
+    assert!(
+        found_regression,
+        "expected regression-*.json in {}",
+        run_dir.display()
+    );
+    let _ = std::fs::remove_dir_all(runs_root);
+}

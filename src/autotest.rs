@@ -39,6 +39,8 @@ use crate::state::Coverage;
 const ENV_SEEDS: &str = "BEVY_SWARM_SEEDS";
 const ENV_DURATION: &str = "BEVY_SWARM_DURATION";
 const ENV_THREADS: &str = "BEVY_SWARM_THREADS";
+/// smu: pin ONE exact seed (reproduction). Wins over ENV_SEEDS.
+const ENV_SEED: &str = "BEVY_SWARM_SEED";
 
 /// Configuration for `autotest()` — single source of defaults with
 /// environment overrides.
@@ -251,6 +253,12 @@ pub struct MinimizedFailureSummary {
     /// Length of the minimal replay-input subsequence (0 = failure
     /// reproduces with no player input at all).
     pub minimal_inputs_len: usize,
+    /// smu: the standalone minimal regression scenario (replay bot,
+    /// trimmed duration). Written next to the report as
+    /// `regression-<seed>-<rule>.json` so it can be committed as a
+    /// regression test directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_scenario: Option<crate::scenario::Scenario>,
 }
 
 impl AutotestReport {
@@ -394,6 +402,66 @@ impl AutotestReport {
         )
     }
 
+    /// smu: formatted inline failure summary printed to stderr when
+    /// the suite fails. Per-violation details with frames, plus
+    /// fingerprint classification and a one-line repro hint — enough
+    /// to understand and locally reproduce the failure without
+    /// opening report.json.
+    pub fn failure_summary(&self) -> String {
+        let mut out = String::new();
+        let failing_runs = self.runs.iter().filter(|r| r.status != "pass").count();
+        out.push_str(&format!(
+            "FAILED: {} failing runs ({} unique fingerprints)\n",
+            failing_runs,
+            self.failures.len()
+        ));
+        for run in self.runs.iter().filter(|r| r.status != "pass") {
+            out.push_str(&format!(
+                "seed {}: {} ({} violation{})\n",
+                run.seed,
+                run.status,
+                run.violations_count,
+                if run.violations_count == 1 { "" } else { "s" }
+            ));
+            // Show up to 3 violations inline with detail text.
+            for v in run.violations.iter().take(3) {
+                let known = if self.gate.classification.known.contains(
+                    v.fingerprint
+                        .as_ref()
+                        .unwrap_or(&Fingerprint(String::new())),
+                ) {
+                    " [known]"
+                } else if self.gate.classification.muted.contains(
+                    v.fingerprint
+                        .as_ref()
+                        .unwrap_or(&Fingerprint(String::new())),
+                ) {
+                    " [muted]"
+                } else if self.gate.classification.regressed.contains(
+                    v.fingerprint
+                        .as_ref()
+                        .unwrap_or(&Fingerprint(String::new())),
+                ) {
+                    " [REGRESSED]"
+                } else {
+                    " [NEW]"
+                };
+                out.push_str(&format!("  [{}] {}{}\n", v.rule, v.detail, known));
+            }
+            if run.violations.len() > 3 {
+                out.push_str(&format!(
+                    "  ... and {} more (see report.json)\n",
+                    run.violations.len() - 3
+                ));
+            }
+            out.push_str(&format!(
+                "  Repro: BEVY_SWARM_SEED={} cargo test --test <your swarm test>\n",
+                run.seed
+            ));
+        }
+        out
+    }
+
     /// Whether the entire suite passed the T13 gate: no New/Regressed
     /// fingerprints (known/muted issues do not fail CI) AND every run
     /// passed.
@@ -461,6 +529,14 @@ where
         .and_then(|v| v.parse::<u64>().ok())
     {
         config.num_seeds = n;
+    }
+    // smu: exact-seed pinning (BEVY_SWARM_SEED=N) — the repro path
+    // for `cargo swarm reproduce` and CI failure hints.
+    if let Some(seed) = std::env::var(ENV_SEED)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        config.seeds = Some(vec![seed]);
     }
     if let Some(d) = std::env::var(ENV_DURATION)
         .ok()
@@ -736,6 +812,7 @@ where
                     rule,
                     seed: *seed,
                     minimal_inputs_len: out.minimal_inputs.len(),
+                    regression_scenario: Some(out.regression_scenario.clone()),
                 });
             }
         }
@@ -828,6 +905,12 @@ fn write_report(
     output_dir: &Path,
     per_seed: Vec<(u64, crate::driver::PlaytestReport)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // smu: inline failure summary to stderr BEFORE the report is
+    // written — a failing CI run's console output alone must suffice
+    // to understand and locally reproduce the failure.
+    if !report.passed() {
+        eprint!("{}", report.failure_summary());
+    }
     // Z18.B: honour CARGO_TARGET_DIR (U1 layout: runs/<run-id>/, no
     // autotest- prefix — the run id itself identifies the mode).
     let target_dir = std::env::var("CARGO_TARGET_DIR")
@@ -850,6 +933,27 @@ fn write_report(
     for (seed, rep) in per_seed {
         let path = run_dir.join(format!("seed-{seed}.json"));
         std::fs::write(path, serde_json::to_string_pretty(&rep)?)?;
+    }
+
+    // smu: minimized failures emit standalone runnable regression
+    // scenarios next to the report (not only embedded in report JSON) —
+    // commit them as regression tests directly.
+    for m in &report.minimized {
+        if let Some(scenario) = &m.regression_scenario {
+            let safe_rule: String = m
+                .rule
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect();
+            let path = run_dir.join(format!("regression-{}-{safe_rule}.json", m.seed));
+            std::fs::write(path, serde_json::to_string_pretty(scenario)?)?;
+        }
     }
 
     // cj8.14 (E2): JUnit XML for CI dashboards, per U1 convention
@@ -966,5 +1070,69 @@ mod tests {
             ..passing
         };
         assert!(!crashed.passed());
+    }
+
+    /// smu: failure_summary format — violations inline with detail
+    /// text and a repro hint per failing run.
+    #[test]
+    fn autotest_report_failure_summary_format() {
+        let report = AutotestReport {
+            runs: vec![RunSummary {
+                seed: 42,
+                status: "fail".to_string(),
+                violations_count: 2,
+                frame_count: 214,
+                duration_ms: 5000,
+                violations: vec![
+                    RunViolation {
+                        rule: "stuck_after_intent".to_string(),
+                        detail: "no liveness within 0.5s after intent choice#2".to_string(),
+                        fingerprint: None,
+                    },
+                    RunViolation {
+                        rule: "bounds_violation".to_string(),
+                        detail: "Entity \"player\" translation.y = -15.3 (min: -10.0)".to_string(),
+                        fingerprint: None,
+                    },
+                ],
+            }],
+            schema_version: crate::conventions::SCHEMA_VERSION,
+            contract_tier: crate::contract::ContractTier::Zero,
+            harness_mode: "in_process".to_string(),
+            scope: crate::contract::CheckedScope::default(),
+            budget: BudgetSummary {
+                seeds_run: 4,
+                total_duration_s: 20.0,
+                parallelism: 1,
+            },
+            failures: vec![],
+            minimized: vec![],
+            early_stop: false,
+            coverage: None,
+            timing: TimingSummary {
+                start: "".to_string(),
+                end: "".to_string(),
+                elapsed_ms: 5000,
+            },
+            run_id: None,
+            discovered_surface: None,
+            regressions: vec![],
+            gate: AutotestGateSummary {
+                classification: crate::issues::GateSummary::default(),
+                passed: false,
+            },
+        };
+        let s = report.failure_summary();
+        assert!(s.contains("FAILED: 1 failing runs"), "{s}");
+        assert!(s.contains("seed 42: fail (2 violations)"), "{s}");
+        assert!(
+            s.contains("[stuck_after_intent] no liveness within 0.5s"),
+            "{s}"
+        );
+        assert!(
+            s.contains("[bounds_violation] Entity \"player\" translation.y = -15.3"),
+            "{s}"
+        );
+        assert!(s.contains("Repro: BEVY_SWARM_SEED=42"), "{s}");
     }
 }

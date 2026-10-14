@@ -473,3 +473,128 @@ fn validate_missing_file_is_an_error() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
 }
+
+/// smu: `cargo swarm reproduce --report <path>` — resolves the
+/// failing seed from a report and (dry) verifies env pinning. We
+/// can't run the full cargo test here (no game crate); test the
+/// resolution path by pointing at a synthetic report and letting
+/// the spawned cargo fail, checking the "reproducing seed" line.
+#[test]
+fn reproduce_resolves_failing_seed_from_report() {
+    with_tmp(|tmp| {
+        let runs = tmp.join("target/bevy_swarm/runs");
+        std::fs::create_dir_all(runs.join("r1")).unwrap();
+        let report = serde_json::json!({
+            "status": "fail",
+            "budget": { "seeds_run": 2, "total_duration_s": 5.0, "parallelism": 1 },
+            "runs": [
+                { "seed": 41, "status": "pass", "violations_count": 0,
+                  "frame_count": 300, "duration_ms": 5000, "violations": [] },
+                { "seed": 42, "status": "fail", "violations_count": 1,
+                  "frame_count": 300, "duration_ms": 5000,
+                  "violations": [
+                    { "rule": "dead_verb", "detail": "left key is dead",
+                      "fingerprint": "abc123" }
+                  ] }
+            ]
+        });
+        let path = runs.join("r1/report.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&report).unwrap()).unwrap();
+
+        // cargo test will fail (no tests/swarm.rs in tmp) but the
+        // seed-resolution line proves the lookup worked.
+        let out = Command::new(cli_bin())
+            .args(["reproduce", "--report"])
+            .arg(&path)
+            .current_dir(tmp)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("reproducing seed 42"), "stdout: {stdout}");
+    });
+}
+
+/// smu: reproduce --fingerprint selects the run carrying that fingerprint.
+#[test]
+fn reproduce_selects_by_fingerprint() {
+    with_tmp(|tmp| {
+        let runs = tmp.join("target/bevy_swarm/runs");
+        std::fs::create_dir_all(runs.join("r1")).unwrap();
+        let report = serde_json::json!({
+            "budget": { "seeds_run": 2, "total_duration_s": 5.0, "parallelism": 1 },
+            "runs": [
+                { "seed": 7, "status": "fail", "violations_count": 1,
+                  "frame_count": 10, "duration_ms": 100,
+                  "violations": [ { "rule": "a", "detail": "d", "fingerprint": "fpa" } ] },
+                { "seed": 9, "status": "fail", "violations_count": 1,
+                  "frame_count": 10, "duration_ms": 100,
+                  "violations": [ { "rule": "b", "detail": "d", "fingerprint": "fpb" } ] }
+            ]
+        });
+        let path = runs.join("r1/report.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&report).unwrap()).unwrap();
+        let out = Command::new(cli_bin())
+            .args(["reproduce", "--fingerprint", "fpb", "--report"])
+            .arg(&path)
+            .current_dir(tmp)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("reproducing seed 9"), "stdout: {stdout}");
+    });
+}
+
+/// smu: report command shows full violation details and
+/// classification (extends the bbb golden coverage).
+#[test]
+fn report_shows_violation_details_and_classification() {
+    with_tmp(|tmp| {
+        let runs = tmp.join("target/bevy_swarm/runs");
+        std::fs::create_dir_all(runs.join("r2")).unwrap();
+        let report = serde_json::json!({
+            "status": "fail",
+            "contract_tier": "zero",
+            "harness_mode": "in_process",
+            "scope": { "seeds_run": 1, "total_duration_s": 5.0 },
+            "runs": [
+                { "seed": 42, "status": "fail", "violations_count": 1,
+                  "frame_count": 300, "duration_ms": 5000,
+                  "violations": [
+                    { "rule": "dead_verb", "detail": "ArrowLeft: no effect in 45 frames",
+                      "fingerprint": "abc123" }
+                  ] }
+            ],
+            "gate": { "classification": {
+                "new": ["abc123"], "regressed": [], "known": [], "muted": []
+            }, "passed": false },
+            "coverage": {
+                "intents_emitted": { "press_arrow_left": 45, "press_space": 10 },
+                "test_api_paths_read": ["TestApi.hp"]
+            }
+        });
+        std::fs::write(
+            runs.join("r2/report.json"),
+            serde_json::to_string_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(runs.join("last"), "r2").unwrap();
+
+        let out = Command::new(cli_bin())
+            .arg("report")
+            .current_dir(tmp)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("[dead_verb] ArrowLeft: no effect"),
+            "{stdout}"
+        );
+        assert!(stdout.contains("NEW (1): abc123"), "{stdout}");
+        assert!(
+            stdout.contains("coverage: intents [press_arrow_left x45"),
+            "{stdout}"
+        );
+        assert!(stdout.contains("TestApi.hp"), "{stdout}");
+    });
+}

@@ -103,6 +103,78 @@ pub fn report() -> Result<i32, String> {
                 r.get("frame_count").and_then(|x| x.as_u64()).unwrap_or(0),
                 r.get("duration_ms").and_then(|x| x.as_u64()).unwrap_or(0)
             );
+            // smu: full violation details with fingerprint classification.
+            if let Some(violations) = r.get("violations").and_then(|vs| vs.as_array()) {
+                for viol in violations {
+                    let rule = viol.get("rule").and_then(|x| x.as_str()).unwrap_or("?");
+                    let detail = viol.get("detail").and_then(|x| x.as_str()).unwrap_or("");
+                    println!("    [{rule}] {detail}");
+                }
+            }
+        }
+    }
+    // smu: fingerprint classification (new/known/muted/regressed).
+    if let Some(gate) = v.get("gate").and_then(|g| g.get("classification")) {
+        for (key, label) in [
+            ("new", "NEW"),
+            ("regressed", "REGRESSED"),
+            ("known", "known"),
+            ("muted", "muted"),
+        ] {
+            if let Some(list) = gate.get(key).and_then(|l| l.as_array()) {
+                if !list.is_empty() {
+                    let fps: Vec<String> = list
+                        .iter()
+                        .filter_map(|f| f.as_str().map(|s| s.to_string()))
+                        .collect();
+                    println!("{label} ({}): {}", fps.len(), fps.join(", "));
+                }
+            }
+        }
+    }
+    // smu: coverage summary (intents exercised, TestApi paths read).
+    if let Some(cov) = v.get("coverage") {
+        let intents = cov
+            .get("intents_emitted")
+            .and_then(|i| i.as_object())
+            .map(|m| {
+                m.iter()
+                    .map(|(k, c)| format!("{k} x{}", c.as_u64().unwrap_or(0)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        if !intents.is_empty() {
+            println!("coverage: intents [{}]", intents);
+        }
+        let paths = cov
+            .get("test_api_paths_read")
+            .and_then(|p| p.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        if !paths.is_empty() {
+            println!("coverage: test api paths [{}]", paths);
+        }
+    }
+    // smu: discovered surface summary.
+    if let Some(surface) = v.get("discovered_surface") {
+        let keys = surface
+            .get("keys")
+            .and_then(|k| k.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|k| k.get(0).and_then(|x| x.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        if !keys.is_empty() {
+            println!("discovered surface: keys [{}]", keys);
         }
     }
     Ok(0)

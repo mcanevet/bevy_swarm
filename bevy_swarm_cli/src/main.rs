@@ -27,6 +27,7 @@ fn main() {
         Some("init") => cmd_init(&args[1..]),
         Some("run") => cmd_run(&args[1..]),
         Some("validate") => cmd_validate(&args[1..]),
+        Some("reproduce") => cmd_reproduce(&args[1..]),
         Some("report") => cmd_report(),
         Some("--help") | Some("help") | Some("-h") | None => {
             print_usage();
@@ -52,6 +53,7 @@ fn print_usage() {
          \x20   init    Detect the game's root plugin and generate tests/swarm.rs\n\
          \x20   run     Run the generated swarm test (env overrides)\n\
          \x20   validate <file>  Check a scenario JSON without running the game\n\
+         \x20   reproduce  Re-run a failing seed from the last report\n\
          \x20   report  Pretty-print the last autotest report\n\
          \n\
          OPTIONS (init):\n\
@@ -245,6 +247,105 @@ fn cmd_validate(args: &[String]) -> i32 {
             eprintln!("  - {e}");
         }
         1
+    }
+}
+
+/// smu: `cargo swarm reproduce [--fingerprint <fp>] [--report <path>]`
+/// — load the last (or given) report, pick the failing run matching
+/// the fingerprint (or the first failing run), re-run the generated
+/// test with the EXACT seed pinned via BEVY_SWARM_SEED. The harness's
+/// inline failure summary prints to stderr on failure.
+fn cmd_reproduce(args: &[String]) -> i32 {
+    let mut fingerprint: Option<String> = None;
+    let mut report_path: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--fingerprint" => fingerprint = it.next().cloned(),
+            "--report" => report_path = it.next().cloned(),
+            other => {
+                eprintln!("reproduce: unknown flag {other}");
+                return 2;
+            }
+        }
+    }
+
+    let path = match report_path {
+        Some(p) => PathBuf::from(p),
+        None => report::last_report_path(),
+    };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("reproduce: cannot read report {}: {e}", path.display());
+            return 1;
+        }
+    };
+    let v: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("reproduce: report is not valid JSON: {e}");
+            return 1;
+        }
+    };
+
+    // Pick the seed: fingerprint match first, else first failing run.
+    let seed = if let Some(fp) = &fingerprint {
+        let hit = v["runs"].as_array().and_then(|runs| {
+            runs.iter().find_map(|r| {
+                let matches = r["violations"]
+                    .as_array()
+                    .is_some_and(|vs| vs.iter().any(|x| x["fingerprint"] == fp.as_str()));
+                if matches {
+                    r["seed"].as_u64()
+                } else {
+                    None
+                }
+            })
+        });
+        match hit {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "reproduce: no run in {} has fingerprint '{fp}'",
+                    path.display()
+                );
+                return 1;
+            }
+        }
+    } else {
+        v["runs"]
+            .as_array()
+            .and_then(|runs| {
+                runs.iter()
+                    .find(|r| r["status"].as_str().is_some_and(|s| s != "pass"))
+                    .and_then(|r| r["seed"].as_u64())
+            })
+            .unwrap_or_else(|| {
+                eprintln!("reproduce: no failing run found in {}", path.display());
+                std::process::exit(0);
+            })
+    };
+
+    println!("reproducing seed {seed} from {}", path.display());
+    let duration = v["budget"]["total_duration_s"].as_f64().map(|d| d as f32);
+    let mut cmd =
+        std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    cmd.args(["test", "--test", "swarm", "--", "--nocapture"])
+        .env("BEVY_SWARM_SEED", seed.to_string())
+        .env("BEVY_SWARM_SEEDS", "1");
+    if let Some(d) = duration {
+        cmd.env("BEVY_SWARM_DURATION", d.to_string());
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("cargo test failed to start: {e}"));
+    match status {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("reproduce: {e}");
+            1
+        }
     }
 }
 
