@@ -155,6 +155,23 @@ fn same_seed_reproduces_across_two_apps() {
                 drawn.push(u64::from_ne_bytes(buf));
             }
         });
+        // dde: the dev-dep graph (fixture-runner -> multithread_panic)
+        // unifies bevy's `multi_threaded` feature into this build, so
+        // the default schedule executor is multi-threaded and systems
+        // run on task-pool threads — without the thread-local entropy
+        // stream the draws fall back to the global stream and
+        // same-seed runs diverge. Real harness runs force the
+        // single-threaded executor (driver: force_single_threaded,
+        // AFTER all systems are registered so lazily-created schedules
+        // are covered); mirror that here.
+        let mut schedules = app
+            .world_mut()
+            .remove_resource::<bevy::ecs::schedule::Schedules>()
+            .expect("schedules");
+        for (_label, sched) in schedules.iter_mut() {
+            sched.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+        }
+        app.world_mut().insert_resource(schedules);
         app.update();
         bevy_swarm::entropy::exit_run();
         app.world_mut().resource::<Drawn>().0.clone()

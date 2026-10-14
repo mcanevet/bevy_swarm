@@ -11,6 +11,7 @@ members = [
     "fixtures/bin_only",
     "fixtures/bin_only_clean",
     "fixtures/brp",
+    "fixtures/multithread_panic",
     "tests/fixture-runner",
     "bevy_swarm_cli",
 ]

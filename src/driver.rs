@@ -421,6 +421,34 @@ fn normalize_sink_message(msg: &str) -> String {
 /// currently registered. Call BEFORE the readiness gate and before
 /// snapshot_systems (which initializes schedules). Schedules created
 /// lazily afterward keep the default executor (document this caveat).
+/// dde: bounded grace period for detached bevy_tasks work at run end.
+///
+/// Task pools are process-global and never shut down between seeds;
+/// games routinely detach background work (asset decode, pathfinding).
+/// A detached task that panics AFTER we cleared the run ids would be
+/// lost entirely (or attributed to the next run via GLOBAL_RUN).
+/// Detached futures can't be joined, and the pools expose no
+/// pending-count API, so we sleep a short bounded window — but ONLY
+/// when the process actually initialized the global pools (pure
+/// unit-test runs without TaskPoolPlugin pay nothing).
+///
+/// NOTE: this sleep affects real-time oracle timing; keep it minimal
+/// to avoid flaky tests (parallel_matches_sequential). 50ms is enough
+/// for most asset decodes / small async tasks; stragglers beyond that
+/// are rare and will be attributed to the next run (documented).
+const POOL_DRAIN_BUDGET_MS: u64 = 50;
+
+fn drain_pending_pool_work() {
+    use bevy::tasks::{AsyncComputeTaskPool, ComputeTaskPool, IoTaskPool};
+    if IoTaskPool::try_get().is_none()
+        && ComputeTaskPool::try_get().is_none()
+        && AsyncComputeTaskPool::try_get().is_none()
+    {
+        return;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(POOL_DRAIN_BUDGET_MS));
+}
+
 fn force_single_threaded(app: &mut App) -> Result<(), ScenarioError> {
     let Some(mut schedules) = app
         .world_mut()
@@ -576,6 +604,10 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // layer) exists before the run emits any events.
     crate::sinks::ensure_global_subscriber();
     crate::sinks::set_current_run(run_id);
+    // dde: also set the process-global run so bevy_tasks pool threads
+    // (IoTaskPool, AsyncComputeTaskPool — no thread-local run id)
+    // attribute panics/logs/errors to this run.
+    crate::sinks::set_global_run(run_id);
     // le3.11 (RF7): the swarm error handler and the run-id are BOTH
     // guarded by a single drop guard — a scenario rejected after the
     // handler is installed no longer leaves it half-installed (the
@@ -772,16 +804,17 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             prev: prev_resource,
         });
     }
-    struct HandlerGuard;
+    struct HandlerGuard(crate::sinks::RunId);
     impl Drop for HandlerGuard {
         fn drop(&mut self) {
             // Runs on success AND on every early Err return AFTER
             // the handler install point (load-time validation all
             // happens BEFORE the install, so no half-installed state).
             crate::sinks::clear_current_run();
+            crate::sinks::clear_global_run(self.0);
         }
     }
-    let _handler_guard = HandlerGuard;
+    let _handler_guard = HandlerGuard(run_id);
 
     let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
     // RF8: populate declared_keys from scenario.bot.raw_surface (tier-0
@@ -1091,7 +1124,15 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // Z7: drain the error/log/panic sink into the snapshot as
     // bevy_error / log_error / panic violations. Dedupe by
     // (rule, context) via Violations semantics.
+    // dde: the run is over, but bevy_tasks pool work the game
+    // detached may STILL be executing on process-global pool
+    // threads. Give straggler panics a brief grace period to land in
+    // the sink BEFORE we clear the global run id and drain —
+    // otherwise a panic landing after the drain is lost (or worse,
+    // attributed to the NEXT run via GLOBAL_RUN).
+    drain_pending_pool_work();
     crate::sinks::clear_current_run();
+    crate::sinks::clear_global_run(run_id);
     // Restore the game's original FallbackErrorHandler so a subsequent
     // run on the same App (with a possibly different scenario) doesn't
     // inherit the swarm wrapper.

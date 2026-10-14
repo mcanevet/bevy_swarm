@@ -746,7 +746,9 @@ fn clean_fixtures_pass_long() {
         // Z19: bin-only fixtures are external smoke binaries, not
         // in-process adapter fixtures (no fixture-runner support).
         // Z20: likewise the BRP fixture (external subprocess tier).
-        .filter(|f| !f.starts_with("bin_only") && f != "brp")
+        // dde: multithread_panic is scaffold:none only (plain game
+        // plugin, no adapter) — covered by dde_clean_multithread_game_passes.
+        .filter(|f| !f.starts_with("bin_only") && f != "brp" && f != "multithread_panic")
         .collect();
     fixtures.sort();
     assert!(
@@ -1155,5 +1157,76 @@ fn liveness_ring_cap_scales_with_tps() {
     assert!(
         frozen,
         "frozen_world must fire at tps=1000; ring-cap regression?"
+    );
+}
+
+/// dde: pool-thread panics (bevy_tasks AsyncComputeTaskPool) are
+/// captured via the process-global run id fallback and attributed to
+/// "pool_thread" instead of escaping capture entirely.
+#[test]
+fn dde_pool_thread_panic_is_captured() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 2.0,
+        "invariants": [],
+        "setup": {},
+        "liveness": {"mode": "real_time", "timeout_s": 2.0}
+    })
+    .to_string();
+    let (report, out_dir) = run_case_with_scenario(
+        "multithread_panic",
+        "bug_panic",
+        &scenario,
+        &serde_json::json!({"status": "fail", "scaffold": "none"}),
+    );
+    let run_violations = report["runs"][0]["violations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let has_panic = run_violations
+        .iter()
+        .any(|v| v.get("rule").and_then(|r| r.as_str()) == Some("panic"));
+    assert!(
+        has_panic,
+        "pool-thread panic must be captured in run violations"
+    );
+    // Attribution ("pool_thread" target) lives on the per-seed
+    // PlaytestReport violations, not the run summary. Check the seed
+    // report written next to report.json.
+    let seed_report_path = out_dir.join("seed-1.json").to_string_lossy().to_string();
+    let seed_json = std::fs::read_to_string(&seed_report_path)
+        .unwrap_or_else(|e| panic!("read seed report {}: {}", seed_report_path, e));
+    let seed_report: serde_json::Value =
+        serde_json::from_str(&seed_json).expect("seed report is valid JSON");
+    let seed_viol_str = serde_json::to_string(&seed_report["violations"]).unwrap_or_default();
+    assert!(
+        seed_viol_str.contains("pool_thread"),
+        "pool-thread panic must be attributed to pool_thread; seed violations: {}",
+        seed_viol_str
+    );
+}
+
+/// dde: clean multithread fixture — background tasks that DON'T
+/// panic must not produce phantom violations (false-positive guard).
+#[test]
+fn dde_clean_multithread_game_passes() {
+    let scenario = serde_json::json!({
+        "bot": {"type": "chaos", "seed": 1},
+        "duration_s": 2.0,
+        "invariants": [],
+        "setup": {}
+    })
+    .to_string();
+    let (report, _) = run_case_with_scenario(
+        "multithread_panic",
+        "clean",
+        &scenario,
+        &serde_json::json!({"status": "pass", "scaffold": "none"}),
+    );
+    let viol_str = serde_json::to_string(&report["violations"]).unwrap_or_default();
+    assert!(
+        !viol_str.contains("panic"),
+        "clean multithread game must not report panic; violations: {}",
+        viol_str
     );
 }

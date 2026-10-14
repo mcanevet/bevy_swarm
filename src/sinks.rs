@@ -41,8 +41,74 @@ thread_local! {
     static CURRENT_RUN: Cell<Option<RunId>> = const { Cell::new(None) };
 }
 
+/// dde: process-global active runs. Game systems run on the driver
+/// thread (thread-local `CURRENT_RUN` set), but bevy_tasks pool
+/// threads (IoTaskPool, AsyncComputeTaskPool — and the multi-threaded
+/// ECS executor's worker threads) have no thread-local — a panic
+/// there previously escaped capture entirely. The driver registers
+/// each run here at start and deregisters at end.
+///
+/// Attribution is thread-name-gated (only "... Task Pool (N)" threads)
+/// AND single-run-gated: with MULTIPLE concurrent runs (parallel
+/// matrices, autotest parallelism), a pool-thread panic cannot be
+/// attributed reliably — capturing it would poison an innocent run
+/// (observed as a real flake: a system panic from run A landing in
+/// run B's violations). In that case we deliberately drop the
+/// ambiguity: a lost panic in concurrent mode beats a fabricated
+/// violation. Sequential single-run mode (the default) attributes
+/// exactly.
+/// Caveat (documented in README): a straggler task from seed N that
+/// panics during seed N+1 is attributed to the active run — pools are
+/// process-global and never shut down between seeds.
+static GLOBAL_RUNS: Mutex<std::collections::BTreeSet<RunId>> =
+    Mutex::new(std::collections::BTreeSet::new());
+
+/// True when the current thread looks like a bevy_tasks pool worker.
+fn on_pool_thread() -> bool {
+    std::thread::current()
+        .name()
+        .map(|n| n.contains("Task Pool"))
+        .unwrap_or(false)
+}
+
+/// Resolve the run to attribute an event to: the thread-local run if
+/// set (driver/ECS threads), else — for pool workers only, and only
+/// when exactly one run is active — that run.
+fn resolve_run() -> Option<RunId> {
+    if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
+        return Some(run_id);
+    }
+    if !on_pool_thread() {
+        return None;
+    }
+    let runs = GLOBAL_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+    if runs.len() == 1 {
+        runs.iter().next().copied()
+    } else {
+        None
+    }
+}
+
+/// Register the run as process-globally active (driver thread, run
+/// start). Pool-thread events attribute to it while it is the only
+/// active run.
+pub fn set_global_run(run_id: RunId) {
+    GLOBAL_RUNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(run_id);
+}
+
+/// Deregister a run (run end / drop guard).
+pub fn clear_global_run(run_id: RunId) {
+    GLOBAL_RUNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&run_id);
+}
+
 /// Unique run identifier.
-#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct RunId(u64);
 
 impl RunId {
@@ -220,15 +286,27 @@ pub fn swarm_panic_hook_inner(
     // Bevy's executor wraps system runs in spans named after the system.
     let system = thread_local_system_name();
 
+    // dde: pool threads (IoTaskPool, AsyncComputeTaskPool) have no
+    // thread-local CURRENT_RUN; resolve_run() falls back to the
+    // process-global run. Tag those panics distinctly (no system span,
+    // no driver-thread run id) so the driver reports "pool_thread" as
+    // the target instead of a misleading "world".
+    let on_pool_thread = CURRENT_RUN.with(Cell::get).is_none() && system.is_none();
+    let system = if on_pool_thread {
+        Some("pool_thread".to_string())
+    } else {
+        system
+    };
+
     // Push to the global sink if a run is active.
-    if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
+    if let Some(run_id) = resolve_run() {
         {
             let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
             map.entry(run_id).or_default().push(Captured::Panic {
                 message: message.clone(),
                 location: location.clone(),
                 backtrace: backtrace.clone(),
-                system: system.clone(),
+                system,
             });
         }
     }
@@ -278,7 +356,7 @@ pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
     let context = ctx.name().to_string();
     let message = err.to_string();
     let frame = current_frame();
-    if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
+    if let Some(run_id) = resolve_run() {
         let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(run_id).or_default().push(Captured::BevyError {
             severity,
@@ -314,7 +392,7 @@ pub fn clear_previous_handler(run_id: RunId) {
 
 /// Look up the chained previous handler for the run active on this thread.
 fn chained_previous() -> Option<bevy::ecs::error::ErrorHandler> {
-    let run_id = CURRENT_RUN.with(Cell::get)?;
+    let run_id = resolve_run()?;
     HANDLER_CHAIN
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -404,6 +482,60 @@ mod tests {
         set_current_frame(4242);
         assert_eq!(current_frame(), 4242);
         set_current_frame(0);
+    }
+
+    #[test]
+    fn global_run_fallback_for_pool_threads() {
+        // dde: pool workers (by thread name) fall back to the single
+        // process-global active run; unrelated threads never do.
+        clear_current_run();
+        let run_id = RunId::new();
+        set_global_run(run_id);
+        std::thread::Builder::new()
+            .name("Async Compute Task Pool (3)".into())
+            .spawn(move || {
+                // Under parallel test execution other runs may be
+                // concurrently active, making attribution ambiguous
+                // (fallback refuses). The sole-run case must attribute
+                // exactly.
+                let resolved = resolve_run();
+                assert!(resolved.is_none() || resolved == Some(run_id));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        // Non-pool thread with no thread-local run: global run must
+        // NOT be picked up (misattribution guard).
+        std::thread::Builder::new()
+            .name("some game worker".into())
+            .spawn(move || {
+                assert_eq!(resolve_run(), None);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        // Second concurrent active run: attribution becomes
+        // ambiguous, the pool-worker fallback must refuse.
+        let other = RunId::new();
+        set_global_run(other);
+        std::thread::Builder::new()
+            .name("IO Task Pool (0)".into())
+            .spawn(move || {
+                assert_eq!(resolve_run(), None);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        // Thread-local always wins over the global fallback.
+        set_current_run(other);
+        assert_eq!(resolve_run(), Some(other));
+
+        clear_current_run();
+        clear_global_run(run_id);
+        clear_global_run(other);
     }
 
     #[test]
