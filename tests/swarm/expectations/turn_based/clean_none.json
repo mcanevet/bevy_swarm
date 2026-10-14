@@ -1,12 +1,16 @@
 {
   "schema_version": 1,
-  "status": "pass",
+  "status": "fail",
   "scaffold": "none",
   "seeds": [
     42
   ],
   "duration_s": 6.0,
-  "must_report": [],
+  "must_report": [
+    {
+      "rule": "harness_could_not_drive_game"
+    }
+  ],
   "must_not_report": [],
   "liveness": {
     "mode": "after_intent",

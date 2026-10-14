@@ -1424,6 +1424,70 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     }
     // dbt: strict_warnings escalates the warning-class informational
     // rules (bevy_warning, log_warn) back to gating severity.
+    // Z1 rule 3: vacuity guard. Enough actions injected but ZERO effect
+    // across all of them => the harness could not drive the game.
+    // False-positive guard (spec): a tier-0 game with no observable
+    // gameplay state (no Gameplay entities, no GameTypes) cannot
+    // ATTRIButE effects at all — recorded as scope.inactive, not a
+    // failure.
+    let observable_gameplay = app.world().iter_entities().any(|e| {
+        e.contains::<crate::contract::Gameplay>()
+            || e.contains::<crate::game_types::InferredGameplay>()
+    }) || app
+        .world()
+        .get_resource::<crate::game_types::GameTypes>()
+        .is_some();
+    if let Some(rate) = crate::effects::overall_effect_rate(app.world()) {
+        let total_actions: u64 = app
+            .world()
+            .get_resource::<crate::effects::ActionEffects>()
+            .map(|e| e.rates.values().map(|r| r.total).sum())
+            .unwrap_or(0);
+        if rate == 0.0 && total_actions >= VACUITY_MIN_ACTIONS && observable_gameplay {
+            let top_keys: Vec<String> = app
+                .world()
+                .get_resource::<crate::effects::ActionEffects>()
+                .map(|e| {
+                    let mut v: Vec<(u64, String)> =
+                        e.rates.iter().map(|(k, r)| (r.total, k.clone())).collect();
+                    v.sort_by_key(|(total, _)| std::cmp::Reverse(*total));
+                    v.into_iter().take(3).map(|(_, k)| k).collect()
+                })
+                .unwrap_or_default();
+            let last_frame = app
+                .world()
+                .get_resource::<crate::state::PlaytestState>()
+                .map(|s| s.frame)
+                .unwrap_or(0);
+            snap.push(ViolationEntry {
+                rule: crate::rules::Rule::HarnessCouldNotDriveGame.to_string(),
+                target: "harness".to_string(),
+                first_frame: 0,
+                last_frame,
+                count: 1,
+                detail: format!(
+                    "{} actions injected (top: {}) but no effect on the game. Suggested \
+                     causes: a menu needs a click the monkey can't find; input is gated \
+                     behind a state; broken headless build. Next step: run surface \
+                     discovery to see what inputs your game actually reacts to: \
+                     `bevy_swarm::discover::discover_surface` (or `cargo swarm discover`) \
+                     on your app builder, then target the discovered verbs in the \
+                     scenario's bot config.",
+                    total_actions,
+                    top_keys.join(", ")
+                ),
+                last_detail: format!("{total_actions} actions injected with zero effect"),
+                fingerprint: Some(crate::fingerprint::default_normalizer().fingerprint(
+                    "vacuity",
+                    crate::rules::Rule::HarnessCouldNotDriveGame.name(),
+                    &[],
+                    &format!("{total_actions} actions with zero effect"),
+                )),
+                fingerprint_scheme: 1,
+            });
+        }
+    }
+
     let escalated: &[crate::rules::Rule] = if scenario.strict_warnings {
         &[crate::rules::Rule::BevyWarning, crate::rules::Rule::LogWarn]
     } else {
@@ -1500,65 +1564,6 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
 
     // Z1: checked scope — tier + oracle families + actuators.
     let scope = crate::diagnostics::compute_run_scope(app.world(), scenario);
-
-    // Z1 rule 3: vacuity guard. Enough actions injected but ZERO effect
-    // across all of them => the harness could not drive the game.
-    // False-positive guard (spec): a tier-0 game with no observable
-    // gameplay state (no Gameplay entities, no GameTypes) cannot
-    // ATTRIButE effects at all — recorded as scope.inactive, not a
-    // failure.
-    let observable_gameplay = app.world().iter_entities().any(|e| {
-        e.contains::<crate::contract::Gameplay>()
-            || e.contains::<crate::game_types::InferredGameplay>()
-    }) || app
-        .world()
-        .get_resource::<crate::game_types::GameTypes>()
-        .is_some();
-    if let Some(rate) = crate::effects::overall_effect_rate(app.world()) {
-        let total_actions: u64 = app
-            .world()
-            .get_resource::<crate::effects::ActionEffects>()
-            .map(|e| e.rates.values().map(|r| r.total).sum())
-            .unwrap_or(0);
-        if rate == 0.0 && total_actions >= VACUITY_MIN_ACTIONS && observable_gameplay {
-            let top_keys: Vec<String> = app
-                .world()
-                .get_resource::<crate::effects::ActionEffects>()
-                .map(|e| {
-                    let mut v: Vec<(u64, String)> =
-                        e.rates.iter().map(|(k, r)| (r.total, k.clone())).collect();
-                    v.sort_by_key(|(total, _)| std::cmp::Reverse(*total));
-                    v.into_iter().take(3).map(|(_, k)| k).collect()
-                })
-                .unwrap_or_default();
-            let last_frame = app
-                .world()
-                .get_resource::<crate::state::PlaytestState>()
-                .map(|s| s.frame)
-                .unwrap_or(0);
-            snap.push(ViolationEntry {
-                rule: crate::rules::Rule::HarnessCouldNotDriveGame.to_string(),
-                target: "harness".to_string(),
-                first_frame: 0,
-                last_frame,
-                count: 1,
-                detail: format!(
-                    "{} actions injected (top: {}) but no effect on the game. Suggested \
-                     causes: a menu needs a click the monkey can't find; input is gated \
-                     behind a state; broken headless build. Next step: run surface \
-                     discovery to see what inputs your game actually reacts to: \
-                     `bevy_swarm::discover::discover_surface` (or `cargo swarm discover`) \
-                     on your app builder, then target the discovered verbs in the \
-                     scenario's bot config.",
-                    total_actions,
-                    top_keys.join(", ")
-                ),
-                last_detail: format!("{total_actions} actions injected with zero effect"),
-                fingerprint: None,
-                fingerprint_scheme: 1,
-            });
-        }
-    }
 
     // Auto-minimization on crash is NOT done inline — the harness cannot
     // rebuild the game's App from inside run_scenario. Instead, the

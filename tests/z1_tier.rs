@@ -6,6 +6,7 @@ use bevy_swarm::contract::{
     CheckedScope, ContractTier, Gameplay, IntentSurface, SurfaceVariant, TestConventionsPlugin,
 };
 use bevy_swarm::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
+use bevy_swarm::enums::PlaytestStatus;
 use bevy_swarm::scenario::Scenario;
 
 fn scenario_json(bot: &str) -> Scenario {
@@ -127,6 +128,73 @@ fn vacuity_guard_fails_undrivable_game() {
     assert!(
         vacuous,
         "expected harness_could_not_drive_game; violations: {:?}",
+        report.violations
+    );
+    // le3.22 (RF26): the vacuity guard must affect STATUS (computed
+    // after the guard, not before) and carry a fingerprint (was None,
+    // excluded from autotest aggregation).
+    assert_eq!(
+        report.status,
+        PlaytestStatus::Fail,
+        "vacuity guard must gate status"
+    );
+    let entry = report
+        .violations
+        .iter()
+        .find(|v| v.rule == "harness_could_not_drive_game")
+        .unwrap();
+    assert!(
+        entry.fingerprint.is_some(),
+        "vacuity guard entry must be fingerprinted"
+    );
+}
+
+/// le3.22 (RF26): a game frozen from FRAME 0 (never live after
+/// readiness) with inputs ATTEMPTED must report the GATING
+/// frozen_world rule — not be downgraded to informational
+/// undrivable_game. The old downgrade triggered on effect_rate==0
+/// regardless of whether the world was ever alive, hiding startup
+/// deadlocks behind a status Pass.
+#[test]
+fn frozen_from_frame_0_with_inputs_fails_not_downgraded() {
+    // A game with observable gameplay entities that NEVER change and
+    // never respond to inputs (startup deadlock shape).
+    #[derive(Clone, Default)]
+    struct DeadGamePlugin;
+    impl Plugin for DeadGamePlugin {
+        fn build(&self, _app: &mut App) {}
+    }
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::input::InputPlugin,
+        bevy::transform::TransformPlugin,
+        DeadGamePlugin,
+        PlaytestPlugin,
+    ));
+    // IntentSurface so the chaos bot ATTEMPTS inputs; the game
+    // ignores them all (effect rate 0).
+    app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Move]));
+    // Observable gameplay state that never changes.
+    app.world_mut().spawn((Gameplay, Transform::default()));
+
+    let scenario = scenario_json(
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":60},"duration_s":1.5,"invariants":[],"liveness":{"timeout_s":0.2}}"#,
+    );
+    let report = run_scenario(&mut app, &scenario).unwrap();
+    let entry = report
+        .violations
+        .iter()
+        .find(|v| v.rule == "frozen_world" || v.rule == "undrivable_game")
+        .expect("expected a freeze violation");
+    assert_eq!(
+        entry.rule, "frozen_world",
+        "a world never live after readiness must stay frozen_world, not be downgraded to undrivable_game"
+    );
+    assert_ne!(
+        report.status,
+        PlaytestStatus::Pass,
+        "a frozen-from-frame-0 world with inputs attempted must not Pass; violations: {:?}",
         report.violations
     );
 }
