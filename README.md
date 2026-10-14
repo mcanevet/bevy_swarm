@@ -9,9 +9,13 @@ An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.
 ## Quick start (10 minutes)
 
 bevy_swarm runs your game headlessly, drives it with bots, and checks
-generic oracles (crashes, log errors, soft-locks, NaNs, liveness) — with
-**zero semantic contract**: no `TestApi`, no `IntentSurface`, no game-code
-changes.
+generic oracles — automated checks that watch the world for known
+failure classes (crashes, log errors, soft-locks, NaNs, liveness) —
+with **zero semantic contract**: no `TestApi`, no `IntentSurface`, no
+game-code changes.
+
+A *seed* fixes the bot's random input sequence: same seed, same
+replayable run. Different seeds explore different input sequences.
 
 **One line of test code, zero semantic contract:**
 
@@ -25,9 +29,10 @@ use bevy_swarm::autotest::{autotest, AutotestConfig};
 #     fn build(&self, _: &mut App) {}
 # }
 # fn main() {
-// tests/playtest.rs — runs 16 seeds × 20s of chaos with tier-0 oracles
+// tests/playtest.rs — runs 4 seeds × 5s of chaos with tier-0 oracles
+// (AutotestConfig::thorough() = 16 seeds × 20s for release-grade runs)
 let report = autotest(MyGamePlugin, AutotestConfig::default()).unwrap();
-assert!(report.failures.is_empty(), "{}", report.summary());
+assert!(report.passed(), "{}", report.summary());
 # }
 ```
 
@@ -36,8 +41,10 @@ Requirements for the in-process mode (stated up front):
 - Your game needs a `src/lib.rs` exposing its root plugin, so an
   integration test can import it. (Binary-only crate? Promote your
   `main.rs` plugin setup into `lib.rs` — a mechanical refactor.)
-- `headless_app()` strips the render/window/audio backends; systems
-  reading window state need a guard or the subprocess tier.
+- `headless_app()` strips the render/window/audio backends; your game
+  systems still run each frame, they just have no window to draw to.
+  Systems reading `Window` or camera output need a guard or the
+  subprocess tier.
 - Add bevy_swarm as a dev-dependency:
 
 ```toml
@@ -45,10 +52,14 @@ Requirements for the in-process mode (stated up front):
 bevy_swarm = "0.1"
 ```
 
-Then `cargo test --test playtest` — that's the whole wiring. The
-[scenario JSON](docs/schema.json) tells the harness WHAT to check; the
-[Scenario Cookbook](docs/scenarios.md) walks through realistic examples,
-and [`ScenarioBuilder`](src/builder.rs) is the same thing in Rust.
+Then `cargo test --test playtest` — that's the whole wiring. A passing
+run prints a summary line like
+`autotest: 4 seeds, 0 failing runs (0 unique), 20s total, 100%, gate: pass`.
+
+Once your first run passes, customize WHAT to check: the
+[scenario JSON](docs/schema.json) tells the harness your invariants, and
+the [Scenario Cookbook](docs/scenarios.md) walks through realistic examples.
+[`ScenarioBuilder`](src/builder.rs) is the same thing in type-checked Rust.
 Validate any scenario offline with `cargo swarm validate <file>` —
 typos get did-you-mean suggestions before the game even builds:
 
@@ -85,7 +96,7 @@ the action log tells you exactly which input sequence got you there.
 Two paths, positioned as a funnel (full table in
 [docs/reference-workspace.md §0](docs/reference-workspace.md)):
 
-1. **On-ramp — zero-touch external BRP tier**: smoke-test any Bevy game
+1. **On-ramp — zero-touch external BRP (Bevy Remote Protocol) tier**: smoke-test any Bevy game
    in ~30 seconds with one documented build flag
    (`--features bevy/bevy_remote`). Ceiling is observe-only
    (crash/error/log/liveness/state-digest) — that ceiling is the
@@ -101,16 +112,18 @@ and typed oracles.
 ## Contract tiers (what "zero-contract" means)
 
 The harness detects how deep your game's test contract goes and states
-it in every report (`report.scope.tier`), along with the oracle
-families that ran vs. could not run (`scope.active` /
-`scope.inactive`, each with a reason) and how the harness drove the
-game (`scope.actuators`: `intents`, `raw_input`, `ui_monkey`).
+the resulting **tier** in every report (`report.scope.tier`):
 
 | Tier | Requires | What you get |
 |------|----------|--------------|
 | `zero` | nothing — the game's plugin alone | raw-input chaos (arrows/WASD default surface), inferred gameplay entities, generic oracles (panic, liveness, NaN, bounds, frame-time) |
 | `observable` | `Name` on gameplay entities, or `GameTypes` registered, or reflect-registered components | stable entity identity in reports/replays, per-entity percept paths, effect attribution |
 | `semantic` | any of: `TestApi`/`TestApiResolver`, non-empty `IntentSurface`, typed oracles, `ResetHooks`/`CheatHooks`/`NamedIntents` | intent bots, typed oracles, planner goals, reset/cheat hooks, `TestApi.*` invariants |
+
+Reports also list the oracle families that ran vs. could not run
+(`scope.active` / `scope.inactive`, each with a reason) and how the
+harness drove the game (`scope.actuators`: `intents`, `raw_input`,
+`ui_monkey`).
 
 - **zero-contract** = no semantic hooks required from the game. NOT a
   claim about typing effort: enabling a cargo feature (e.g.
