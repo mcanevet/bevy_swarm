@@ -209,7 +209,12 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
             let world_live = {
                 let state = world.resource::<PlaytestState>();
                 let timeout_frames = (liveness_timeout_s * state.tps as f32) as u64;
-                frame.saturating_sub(state.last_alive_frame) <= timeout_frames.max(window * 4)
+                // The world must have been alive at least ONCE (a
+                // never-alive world belongs to the liveness oracle's
+                // undrivable_game diagnosis) and recently on the
+                // liveness timescale.
+                state.last_alive_frame > 0
+                    && frame.saturating_sub(state.last_alive_frame) <= timeout_frames
             };
             // RF8: at tier 0 the default surface is a GUESS. An
             // ineffective key only gates when the game/scenario

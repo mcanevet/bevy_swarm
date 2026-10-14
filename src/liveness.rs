@@ -105,18 +105,24 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     // WRITTEN in the window, the world is trivially unchanged.
     let written = {
         let state = world.resource::<PlaytestState>();
-        match state
+        // Anchor on the tick from `window_frames` ago; if history is
+        // shorter than the window (young run / long timeout), anchor on
+        // the OLDEST recorded frame instead — a partial window beats
+        // no evaluation at all (skipping entirely left short runs
+        // unevaluated and last_alive_frame permanently 0).
+        let anchor = state
             .frame_start_ticks
             .iter()
             .rev()
             .nth(window_frames.saturating_sub(1) as usize)
-        {
+            .or_else(|| state.frame_start_ticks.front());
+        match anchor {
             Some(&t) => {
                 let since = Tick::new(t);
                 gameplay_changed_since(world, since, now)
                     || game_resource_changed_since(world, since, now)
             }
-            // Warmup: insufficient frame history → treat as LIVE
+            // No history at all (first frames) → treat as LIVE
             // (never flags a young world frozen).
             None => return,
         }
@@ -161,8 +167,14 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     if !turn_based {
         // Real-time: the FULL timeout window observed with zero liveness
         // → frozen. (changed=false above means nothing changed in the
-        // last window_frames = timeout_s of frames.)
-        if !changed && timeout_frames > 0 {
+        // last window_frames = timeout_s of frames.) Fire only when the
+        // frame history actually COVERS the full window — a run shorter
+        // than the timeout can't demonstrate "frozen for timeout_s".
+        let full_window = {
+            let state = world.resource::<PlaytestState>();
+            state.frame_start_ticks.len() as u64 >= window_frames
+        };
+        if !changed && timeout_frames > 0 && full_window {
             // RF8: if the actuator produced ZERO effective inputs, the
             // game is undrivable, not necessarily buggy. Downgrade to
             // informational.
@@ -170,8 +182,22 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             // le3.22 (RF26): downgrade to undrivable_game only when the world
             // WAS live after readiness (last_alive_frame > 0). A world that
             // never responds from frame 0 is a pure soft-lock → FrozenWorld.
+            // Exception: a world with NO observable gameplay state at all
+            // (no Gameplay entities, no GameTypes) can't meaningfully be
+            // "stuck" — there is nothing to freeze. Zero-effect inputs on
+            // such a world are undrivable-game territory (RF8).
             let was_live_after_readiness = world.resource::<PlaytestState>().last_alive_frame > 0;
-            let rule = if effect_rate == 0.0 && was_live_after_readiness {
+            // Observable = actual digest-visible state, not merely
+            // registered types: the harness auto-registers GameTypes
+            // prefixes even for a game with no state at all. A world
+            // whose canonical digest holds nothing beyond the census
+            // has nothing to freeze.
+            let digest_rows = crate::determinism::canonical_state(world)
+                .keys()
+                .filter(|k| !k.starts_with("census."))
+                .count();
+            let has_observable = digest_rows > 0;
+            let rule = if effect_rate == 0.0 && (was_live_after_readiness || !has_observable) {
                 crate::rules::Rule::UndrivableGame
             } else {
                 crate::rules::Rule::FrozenWorld
