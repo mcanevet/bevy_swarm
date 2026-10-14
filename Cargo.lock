@@ -1766,10 +1766,12 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbd8116f12dc50bde3758a72fba85e1f4c00e6c66d0ad58bdc46c0c0690829a8"
 dependencies = [
+ "async-channel",
  "async-executor",
  "async-task",
  "atomic-waker",
  "bevy_platform",
+ "concurrent-queue",
  "crossbeam-queue",
  "derive_more",
  "futures-lite",
@@ -2753,6 +2755,7 @@ dependencies = [
  "bevy",
  "bevy_swarm",
  "fixture_lone",
+ "fixture_multithread_panic",
  "fixture_regression_pair",
  "fixture_spawner",
  "fixture_spinner",
@@ -2785,6 +2788,13 @@ dependencies = [
 
 [[package]]
 name = "fixture_lone"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "fixture_multithread_panic"
 version = "0.1.0"
 dependencies = [
  "bevy",

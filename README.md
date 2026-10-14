@@ -180,6 +180,25 @@ assert!(report.all_same(), "no regressions");
 - **Calibration** — `diagnostics::calibrate_world` runs a chaos session and derives suggested invariants from archetype-count envelopes, with zero game annotations (library API; there is no CLI flag)
 - **Loud contracts** — missing picking backends, unresolved TestApi paths, vacuous setups REJECT the scenario instead of silently passing
 
+## What we capture (panics, logs, background threads)
+
+- **ECS-thread panics** — systems, observers, commands: fully captured
+  with system-name attribution (via the tracing span when built with
+  `trace`), severity, and location.
+- **bevy_tasks pool-thread panics** (IoTaskPool, AsyncComputeTaskPool,
+  ComputeTaskPool) — captured and reported with target `pool_thread`.
+  Game code routinely detaches background work (asset decode,
+  pathfinding); those panics used to escape the harness entirely.
+- **Logs** — WARN/ERROR records from any thread with a run active.
+- **At run end** the harness waits a bounded grace window (300 ms) for
+  detached pool work to land before draining sinks, so late panics
+  aren't lost.
+- **Known limitation (cross-seed stragglers)**: task pools are
+  process-global and never shut down between seeds. A straggler task
+  from seed N that completes during seed N+1 is attributed to the
+  run active when it lands. For strict isolation, use the external
+  subprocess tiers (smoke / BRP-driven).
+
 ## Usage (single scenario)
 
 ```rust,no_run

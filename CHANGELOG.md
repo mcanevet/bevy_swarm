@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **dde**: pool-thread panics are now captured. Background work spawned on bevy_tasks pools (IoTaskPool, AsyncComputeTaskPool — common in real games) previously escaped all panic capture because routing was thread-local on the driver thread. Now a process-global run registry (`GLOBAL_RUNS`) attributes pool-thread events to the sole active run (thread-name-gated; multiple concurrent runs refuse ambiguous attribution instead of poisoning an innocent run — a real observed flake mode), panics on pool threads report target `pool_thread`, and a bounded 50ms grace at run end lets detached straggler work land before sinks drain. Known limitation (documented): stragglers from seed N panicking during seed N+1 attribute to the active run; task pools are process-global. New fixture `multithread_panic` (pure Bevy, plugin + binary) with regression coverage.
 - **x4k**: liveness oracle false-negative at high TPS (tps > 300). The history-ring cap was computed with a hardcoded 60 fps, so the lookback window exceeded the ring and `nth()` was always None → `frozen_world`/`undrivable_game` could never fire. Fixed: cap now scales with `scenario.tps`. Regression tests added at tps=480 and tps=1000. Also: loud warning when frame history evicts before an intent frame (fallback to the weaker frame heuristic).
 
 ### Added

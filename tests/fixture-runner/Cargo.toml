@@ -17,6 +17,7 @@ fixture_spawner = { path = "../../fixtures/spawner" }
 fixture_turn_based = { path = "../../fixtures/turn_based" }
 fixture_regression_pair = { path = "../../fixtures/regression_pair" }
 fixture_lone = { path = "../../fixtures/lone" }
+fixture_multithread_panic = { path = "../../fixtures/multithread_panic" }
 
 [[bin]]
 name = "fixture-runner"

@@ -1,0 +1,12 @@
+[package]
+name = "fixture_multithread_panic"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fixture_multithread_panic"
+test = false
+bench = false
+
+[dependencies]
+bevy = { version = "0.20", default-features = false, features = ["std", "multi_threaded"] }

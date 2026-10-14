@@ -124,6 +124,9 @@ fn main() {
         }
         match fixture.as_str() {
             "lone" => plain_autotest!(fixture_lone::LoneGamePlugin),
+            "multithread_panic" => {
+                plain_autotest!(fixture_multithread_panic::MultithreadPanicGamePlugin)
+            }
             "walker" => plain_autotest!(fixture_walker::WalkerGamePlugin),
             "spinner" => plain_autotest!(fixture_spinner::SpinnerGamePlugin),
             "spawner" => plain_autotest!(fixture_spawner::SpawnerGamePlugin),
