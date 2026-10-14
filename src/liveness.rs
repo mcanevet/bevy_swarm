@@ -149,7 +149,11 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             // game is undrivable, not necessarily buggy. Downgrade to
             // informational.
             let effect_rate = crate::effects::overall_effect_rate(world).unwrap_or(1.0);
-            let rule = if effect_rate == 0.0 {
+            // le3.22 (RF26): downgrade to undrivable_game only when the world
+            // WAS live after readiness (last_alive_frame > 0). A world that
+            // never responds from frame 0 is a pure soft-lock → FrozenWorld.
+            let was_live_after_readiness = world.resource::<PlaytestState>().last_alive_frame > 0;
+            let rule = if effect_rate == 0.0 && was_live_after_readiness {
                 crate::rules::Rule::UndrivableGame
             } else {
                 crate::rules::Rule::FrozenWorld
