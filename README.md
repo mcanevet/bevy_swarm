@@ -140,7 +140,14 @@ Games with none of these still work: reflection-based percepts and
 auto-discovery calibration kick in, and the harness fails loudly rather
 than passing vacuously when a contract piece it needs is missing.
 
-## Conventions
+## Documentation
+
+Docs are organized by the [Diataxis](https://diataxis.fr) framework — see [docs/README.md](docs/README.md) for the full index:
+
+- **Tutorials:** [your first playtest](docs/tutorial-first-playtest.md), [wire your game's TestApi](docs/tutorial-wiring-testapi.md)
+- **How-to:** [debug a failing run](docs/howto-debug-failure.md), [add an invariant](docs/howto-add-invariant.md), [run in CI](docs/howto-ci-integration.md), [suppress known failures](docs/howto-suppress-known-failure.md), [smoke-test a third-party game](docs/howto-smoke-external-game.md)
+- **Reference:** [rule catalog](docs/reference-rules.md), [contract tiers](docs/reference-contract-tiers.md), [scenario schema](docs/schema.json), [Scenario Cookbook](docs/scenarios.md)
+- **Explanation:** [zero-contract philosophy](docs/explanation-zero-contract.md), [determinism strategy](docs/explanation-determinism.md), [architecture](docs/explanation-architecture.md)
 
 Workspace layout, artifact paths, update mode (`BEVY_SWARM_UPDATE`), versioning,
 rule-name registry, and vocabulary are governed by [docs/conventions.md](docs/conventions.md)
