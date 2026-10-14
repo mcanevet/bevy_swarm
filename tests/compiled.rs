@@ -151,3 +151,108 @@ fn never_spawned_component_counts_as_zero() {
         Err(e) => panic!("scenario must run, got: {e:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// le3.19 (RF23): Component-path validation accepts all runtime-valid forms
+// ---------------------------------------------------------------------------
+
+#[derive(bevy::reflect::Reflect, bevy::prelude::Component)]
+#[reflect(Component)]
+struct Health {
+    hp: f64,
+}
+
+#[test]
+fn component_aggregate_sum_loads_even_unspawned() {
+    // "Component:Health.hp#sum" on a type that's registered but never spawned.
+    // The runtime folds this to 0; load-time must NOT reject.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"agg","rule":"custom","path":"Component:Health.hp#sum",
+             "check":"equals","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    // Health is NOT spawned, but registered via TestConventionsPlugin.
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(rep.is_ok(), "aggregate on unspawned type must load and run");
+}
+
+#[test]
+fn component_name_addressing_loads() {
+    // "Component:Health{Enemy}.hp" — {Name} addressing.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"named","rule":"custom","path":"Component:Health{Enemy}.hp",
+             "check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scenario);
+    // May return 0 if no entity named "Enemy" exists, but must NOT reject at load.
+    assert!(rep.is_ok(), "{:?} should not reject at load", rep.err());
+}
+
+#[test]
+fn component_stable_id_addressing_loads() {
+    // "Component:Health@123.hp" — stable id addressing (I1).
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"stableid","rule":"custom","path":"Component:Health@123.hp",
+             "check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(rep.is_ok(), "@ addressing must not reject at load");
+}
+
+#[test]
+fn component_index_addressing_loads() {
+    // "Component:Health[0].hp" — index addressing.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"idx","rule":"custom","path":"Component:Health[0].hp",
+             "check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(rep.is_ok(), "[i] addressing must not reject at load");
+}
+
+#[test]
+fn component_typo_still_rejected() {
+    // Actual typos must still reject at load.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"typo","rule":"custom","path":"Component:Heath.hp",
+             "check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    let err = run_scenario(&mut app, &scenario).unwrap_err();
+    match err {
+        ScenarioError::InvalidComponent { name, reason } => {
+            assert_eq!(name, "Heath");
+            assert!(reason.contains("not registered"));
+        }
+        other => panic!("expected InvalidComponent, got: {:?}", other),
+    }
+}
+
+#[test]
+fn component_aggregate_min_max_on_unspawned_returns_none() {
+    // #min/#max of an unspawned type is undefined (runtime returns None).
+    // Load-time must accept it; runtime will yield no value.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
+            {"name":"min_unspawned","rule":"custom","path":"Component:Health.hp#min",
+             "check":"ge","value":0}]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    // Runtime returns None for the percept; the check fails silently (no violation).
+    let rep = run_scenario(&mut app, &scenario);
+    assert!(rep.is_ok(), "unspawned #min/#max must not crash");
+}
