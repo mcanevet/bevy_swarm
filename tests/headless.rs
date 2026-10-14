@@ -55,12 +55,11 @@ impl Plugin for BundledPlatformPlugin {
 
 #[test]
 fn bundled_default_plugins_reports_guidance() {
-    // headless_app installs the headless platform first; the game's bundled
-    // DefaultPlugins then conflicts. Bevy panics with "plugin was already
-    // added"; our builder must convert that into a GameBundlesPlatform-style
-    // message naming the plugin and pointing at the fix.
-    // jeh: AssertUnwindSafe — headless_app's returned builder captures
-    // non-UnwindSafe state; the closure provably doesn't resume with it.
+    // 7rk: headless_app installs the headless platform first; the
+    // game's bundled DefaultPlugins then conflicts. Bevy panics with
+    // "plugin was already added"; our builder must convert that into
+    // structured guidance naming the OFFENDING PLUGIN and listing the
+    // three fixes (split plugin / move to main.rs / subprocess tier).
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let build = headless_app(BundledPlatformPlugin);
         let _app = build();
@@ -69,17 +68,28 @@ fn bundled_default_plugins_reports_guidance() {
         result.is_err(),
         "bundled DefaultPlugins must not succeed silently"
     );
-    // The panic payload should mention guidance (plugin name or migration hint).
     let payload = result.unwrap_err();
     let msg = payload
         .downcast_ref::<String>()
         .cloned()
         .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
         .unwrap_or_default();
+    // Names the offending plugin parsed from bevy's panic (the first
+    // group member to conflict — LogPlugin is disabled by the harness
+    // so the first duplicate is TaskPoolPlugin or a later member).
     assert!(
-        msg.contains("already added") || msg.contains("DefaultPlugins") || msg.contains("Z8"),
-        "unexpected panic message: {msg}"
+        msg.contains("plugin was already added") || msg.contains("Guidance"),
+        "must explain the conflict: {msg}"
     );
+    assert!(
+        msg.contains("Guidance"),
+        "must present the structured guidance block: {msg}"
+    );
+    assert!(
+        msg.contains("PanicHandlerPlugin") || msg.contains("in group DefaultPlugins"),
+        "should name the conflicting plugin or group: {msg}"
+    );
+    assert!(msg.contains("subprocess tier"), "lists the Z8 fix: {msg}");
 }
 
 /// FX4.6: a game built with bevy_winit (x11) runs headless with

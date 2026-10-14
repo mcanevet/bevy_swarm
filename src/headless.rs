@@ -20,6 +20,8 @@
 //! `gilrs`, `log`). Under each `#[cfg(feature)]`, we guard disables with
 //! `contains::<T>()` to avoid panics when the plugin isn't present.
 
+#[cfg(feature = "render")]
+use crate::headless_strip::strip_render_family;
 use bevy::app::{App, Plugin, PluginGroupBuilder};
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
@@ -46,6 +48,36 @@ impl fmt::Display for GameBundlesPlatform {
 }
 
 impl std::error::Error for GameBundlesPlatform {}
+
+/// 7rk: extract the offending plugin name from bevy's duplicate-plugin
+/// panic payload. Bevy panics with
+/// `"Error adding plugin <name> in group <group>: plugin was already
+/// added in application"` (groups) or `"Error adding plugin <name>: :
+/// plugin was already added in application"` (single plugins); the
+/// payload may be a `String` or `&str`. Returns `"unknown"` when the
+/// payload doesn't match either shape.
+pub(crate) fn offending_plugin_from_payload(
+    payload: &Box<dyn std::any::Any + Send>,
+) -> &'static str {
+    let msg = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    const MARKER: &str = "Error adding plugin ";
+    const TAIL: &str = ": plugin was already added";
+    if let Some(rest) = msg.strip_prefix(MARKER) {
+        if let Some(idx) = rest.find(TAIL) {
+            // Group panics embed the group name between the plugin and
+            // the tail: "name in group GroupName:" — keep the plugin
+            // name only.
+            let head = &rest[..idx];
+            let name = head.split(" in group ").next().unwrap_or(head);
+            return Box::leak(name.trim().to_string().into_boxed_str());
+        }
+    }
+    "unknown"
+}
 
 /// Build a headless `DefaultPlugins` group (minus OS/GPU/process-global bits).
 ///
@@ -81,72 +113,11 @@ pub fn headless_platform() -> PluginGroupBuilder {
     };
 
     // Render: requires GPU; disable for headless operation.
-    // FX4 re-review (Z10 e2e): disabling RenderPlugin alone is NOT
-    // enough when the game compiles bevy with default features —
-    // CorePipelinePlugin::build loads a Shader asset (panics without
-    // RenderPlugin's init_asset), and the other pipeline plugins
-    // (Sprite, UI, Pbr, Gizmo, Text, Scene) transitively require
-    // render. Disable the whole render family; games needing meshes
-    // in tests should expose state via TestApi instead.
+    // 7rk: membership isolated in the headless_strip version shim —
+    // see that module's docs for the Bevy-upgrade procedure.
     #[cfg(feature = "render")]
     let group = if group.contains::<bevy_render::RenderPlugin>() {
-        // Disable the entire render family (Z10 e2e): individual
-        // pipeline plugins (CorePipeline, PostProcess, ...) load
-        // Shader assets during build and panic without RenderPlugin's
-        // init_asset; render is impossible headless anyway. `contains`
-        // guards keep this correct for any bevy feature combination.
-        // UiWidgetsPlugins is a nested GROUP (cannot be disabled as a
-        // unit); its widget members are disabled individually instead.
-        macro_rules! strip {
-            ($g:expr, $($p:ty),+ $(,)?) => {{
-                let mut g = $g;
-                $(
-                    g = if g.contains::<$p>() {
-                        g.disable::<$p>()
-                    } else {
-                        g
-                    };
-                )+
-                g
-            }};
-        }
-        strip!(
-            group,
-            bevy_render::RenderPlugin,
-            bevy::image::ImagePlugin,
-            bevy::mesh::MeshPlugin,
-            bevy::camera::CameraPlugin,
-            bevy::light::LightPlugin,
-            bevy_render::pipelined_rendering::PipelinedRenderingPlugin,
-            bevy::core_pipeline::CorePipelinePlugin,
-            bevy::post_process::PostProcessPlugin,
-            bevy::anti_alias::AntiAliasPlugin,
-            bevy::sprite::SpritePlugin,
-            bevy::sprite_render::SpriteRenderPlugin,
-            bevy::text::TextPlugin,
-            bevy::ui::UiPlugin,
-            bevy::ui_render::UiRenderPlugin,
-            bevy::gltf::GltfPlugin,
-            bevy::pbr::PbrPlugin,
-            bevy::animation::AnimationPlugin,
-            bevy::gizmos::GizmoPlugin,
-            bevy::gizmos_render::GizmoRenderPlugin,
-            bevy::scene::ScenePlugin,
-            bevy::ui_widgets::ButtonPlugin,
-            bevy::ui_widgets::CheckboxPlugin,
-            bevy::ui_widgets::TextInputPlugin,
-            bevy::ui_widgets::ListBoxPlugin,
-            bevy::ui_widgets::MenuPlugin,
-            bevy::ui_widgets::DialogPlugin,
-            bevy::ui_widgets::ModalDialogPlugin,
-            bevy_ui_widgets::popover::PopoverPlugin,
-            bevy::ui_widgets::RadioGroupPlugin,
-            bevy::ui_widgets::ScrollAreaPlugin,
-            bevy::ui_widgets::ScrollbarPlugin,
-            bevy::ui_widgets::SliderPlugin,
-            bevy::ui_widgets::TabPlugin,
-            bevy::input_focus::pointer_focus::PointerFocusPlugin,
-        )
+        strip_render_family(group)
     } else {
         group
     };
@@ -231,22 +202,45 @@ where
         // works even when the harness runs in-process (LogPlugin no
         // longer beats ensure_global_subscriber).
         let platform = platform.disable::<bevy::log::LogPlugin>();
-        // Try to add platform plugins; detect bundling conflicts.
-        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            app.add_plugins(platform);
-        })) {
-            let plugin_name = std::any::type_name::<P>();
-            panic!(
-                "Failed to add headless platform plugins. The game may bundle DefaultPlugins.\n\
-                 Consider moving the game plugin ({}) to main.rs and using bevy_swarm's \
-                 headless_app() wrapper, or use the subprocess tier (Z8) for unmodified binaries.\n\
-                 Original panic: {:?}",
-                plugin_name, e
-            );
-        }
+        app.add_plugins(platform);
 
         let plugin = make_plugin();
-        app.add_plugins(plugin);
+        // 7rk: if the game plugin bundles its own DefaultPlugins (or
+        // any group member already added by the headless platform),
+        // bevy panics mid-build ("plugin was already added in
+        // application"). Convert that raw panic into actionable
+        // guidance naming the offending plugin instead of demanding
+        // a game restructure with an opaque message.
+        //
+        // Full auto-sanitize (rebuilding the game's group minus
+        // platform entries) is not possible in-process with bevy
+        // 0.20: the duplicate check fires inside the game plugin's
+        // `build` and aborts the whole build — there is no
+        // interception hook on `PluginGroupBuilder::finish`, and
+        // group membership is not enumerable. The subprocess tier
+        // (Z8) covers unmodified binaries; this structured guidance
+        // is the in-process ceiling.
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            app.add_plugins(plugin);
+        })) {
+            let offending = offending_plugin_from_payload(&e);
+            panic!(
+                "{}\n\
+                 Guidance: the game plugin {} bundles platform plugins that the \
+                 headless harness already provides sanitized versions of.\n\
+                 Fixes (pick one):\n  \
+                 1. Move `DefaultPlugins` out of the game plugin (keep it in \
+                 main.rs) and let the harness provide the headless platform.\n  \
+                 2. Split the gameplay logic into a platform-free plugin and \
+                 pass that to `headless_app`/`autotest`.\n  \
+                 3. Use the subprocess tier to test the unmodified binary.",
+                GameBundlesPlatform {
+                    plugin: offending,
+                    guidance: "bundled platform group detected".into(),
+                },
+                std::any::type_name::<P>(),
+            );
+        }
         // le3.11 (RF7): install LogPlugin with the swarm capture layer
         // as custom_layer — integrates with the game's logging while
         // ensuring our capture layer sees all events.

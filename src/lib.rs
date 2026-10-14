@@ -60,6 +60,7 @@ pub mod game_types;
 pub mod golden;
 pub mod harness;
 pub mod headless;
+pub mod headless_strip;
 pub mod identity;
 pub mod junit;
 pub mod liveness;
