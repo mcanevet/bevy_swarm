@@ -71,7 +71,11 @@
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
 
-# Local-only mode: no git hooks, no commits of .beads/
+# NOTE: no-git-ops disables bd's automatic commit-after-close of
+# .beads/issues.jsonl exports, NOT hook installation or repo tracking.
+# .beads/config.yaml, metadata, README, and hooks ARE tracked in git
+# (see git ls-files .beads/); hooks are installed via core.hooksPath
+# pointing at .beads/hooks. The Dolt DB (.beads/dolt/) is untracked.
 no-git-ops: true
 sync:
     remote: "git+ssh://git@github.com/mcanevet/bevy_swarm.git"
