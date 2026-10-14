@@ -625,6 +625,108 @@ pub struct ResetCall {
 // Load-time validation (reject, never run)
 // ---------------------------------------------------------------------------
 
+/// zp2: "did you mean" suggestions for typos. Levenshtein distance
+/// capped at 2 — good enough for near-miss typos ("keyq" → "KeyQ",
+/// "synthetic_pointer" → "synthetic_pointer") without noisy hits on
+/// genuinely unrelated names.
+pub fn suggest_similar(input: &str, candidates: &[String]) -> Option<String> {
+    let lower = input.to_ascii_lowercase();
+    let mut best: Option<(usize, &String)> = None;
+    for cand in candidates {
+        let d = levenshtein(&lower, &cand.to_ascii_lowercase());
+        if d <= 2 && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, cand));
+        }
+    }
+    best.map(|(_, c)| c.clone())
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            cur[j + 1] = (prev[j + 1] + 1)
+                .min(cur[j] + 1)
+                .min(prev[j] + if ca == cb { 0 } else { 1 });
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// zp2: canonical key names accepted by parse_key_code, for
+/// suggestion output ("Space" not "space", matching the bevy KeyCode
+/// spelling authors see in game code).
+pub const KNOWN_KEY_NAMES: &[&str] = &[
+    "Space",
+    "Enter",
+    "Escape",
+    "Tab",
+    "Backspace",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ShiftLeft",
+    "ControlLeft",
+    "AltLeft",
+    "KeyA",
+    "KeyB",
+    "KeyC",
+    "KeyD",
+    "KeyE",
+    "KeyF",
+    "KeyG",
+    "KeyH",
+    "KeyI",
+    "KeyJ",
+    "KeyK",
+    "KeyL",
+    "KeyM",
+    "KeyN",
+    "KeyO",
+    "KeyP",
+    "KeyQ",
+    "KeyR",
+    "KeyS",
+    "KeyT",
+    "KeyU",
+    "KeyV",
+    "KeyW",
+    "KeyX",
+    "KeyY",
+    "KeyZ",
+];
+
+/// zp2: description of every accepted key spelling, appended to
+/// unknown-key errors.
+fn key_format_help() -> String {
+    "accepted key formats: 'Space'/'space', 'Enter'/'enter', 'Escape', 'Tab', 'Backspace', \
+     'ArrowUp'/'up', 'ArrowDown'/'down', 'ArrowLeft'/'left', 'ArrowRight'/'right', 'Shift', \
+     'Ctrl', 'Alt', single letters ('w') or 'KeyW' style, digits 0-9"
+        .to_string()
+}
+
+/// zp2: unknown-key error with a did-you-mean suggestion. Public so
+/// the CLI validate command and runtime validation share wording.
+pub fn unknown_key_error(key: &str, at: Option<u64>) -> String {
+    let mut msg = format!(
+        "unknown key name '{}'{}",
+        key,
+        at.map(|f| format!(" at frame {f}")).unwrap_or_default()
+    );
+    let cands: Vec<String> = KNOWN_KEY_NAMES.iter().map(|s| s.to_string()).collect();
+    if let Some(sug) = suggest_similar(key, &cands) {
+        msg.push_str(&format!(" — did you mean '{sug}'?"));
+    }
+    msg.push_str(&format!(" ({})", key_format_help()));
+    msg
+}
+
 /// Errors rejecting a scenario before/at run start. Structured so
 /// callers can match on the category (e.g. missing contract pieces)
 /// instead of parsing strings.
@@ -647,26 +749,38 @@ impl std::fmt::Display for ScenarioError {
         match self {
             ScenarioError::Rejected(msg) => write!(f, "scenario rejected: {}", msg),
             ScenarioError::ContractMissing(msg) => write!(f, "contract missing: {}", msg),
-            ScenarioError::UnknownReset { kind, known } => write!(
-                f,
-                "unknown reset kind '{}' — known kinds: {}",
-                kind,
-                if known.is_empty() {
-                    "(none registered)".to_string()
-                } else {
-                    known.join(", ")
-                }
-            ),
-            ScenarioError::UnknownCheat { kind, known } => write!(
-                f,
-                "unknown cheat kind '{}' — known kinds: {}",
-                kind,
-                if known.is_empty() {
-                    "(none registered)".to_string()
-                } else {
-                    known.join(", ")
-                }
-            ),
+            ScenarioError::UnknownReset { kind, known } => {
+                let base = format!(
+                    "unknown reset kind '{}' — known kinds: {}",
+                    kind,
+                    if known.is_empty() {
+                        "(none registered)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                );
+                write!(
+                    f,
+                    "scenario rejected: {base}{}",
+                    suggestion_suffix(kind, known)
+                )
+            }
+            ScenarioError::UnknownCheat { kind, known } => {
+                let base = format!(
+                    "unknown cheat kind '{}' — known kinds: {}",
+                    kind,
+                    if known.is_empty() {
+                        "(none registered)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                );
+                write!(
+                    f,
+                    "scenario rejected: {base}{}",
+                    suggestion_suffix(kind, known)
+                )
+            }
             ScenarioError::InvalidComponent { name, reason } => {
                 write!(f, "invalid component '{}': {}", name, reason)
             }
@@ -675,6 +789,14 @@ impl std::fmt::Display for ScenarioError {
 }
 
 impl std::error::Error for ScenarioError {}
+
+/// zp2: " — did you mean 'X'?" suffix for error Display impls.
+fn suggestion_suffix(input: &str, candidates: &[String]) -> String {
+    match suggest_similar(input, candidates) {
+        Some(s) => format!(" — did you mean '{s}'?"),
+        None => String::new(),
+    }
+}
 
 pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
     // Validate tps and duration_s
@@ -772,9 +894,9 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             }
             for kp in &scenario.bot.key_presses {
                 if parse_key_code(&kp.key).is_none() {
-                    return Err(ScenarioError::Rejected(format!(
-                        "key_presses: unknown key name '{}' at frame {}",
-                        kp.key, kp.frame
+                    return Err(ScenarioError::Rejected(unknown_key_error(
+                        &kp.key,
+                        Some(kp.frame),
                     )));
                 }
             }
@@ -787,10 +909,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
         match actuator.as_str() {
             "auto" | "intents" | "raw" | "ui" => {}
             other => {
-                return Err(ScenarioError::Rejected(format!(
+                // zp2: did-you-mean for near-miss actuators.
+                let known: Vec<String> = ["auto", "intents", "raw", "ui"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let mut msg = format!(
                     "bot.actuator '{other}' is invalid: expected one of \
                      auto | intents | raw | ui"
-                )));
+                );
+                if let Some(sug) = suggest_similar(other, &known) {
+                    msg.push_str(&format!(" — did you mean '{sug}'?"));
+                }
+                return Err(ScenarioError::Rejected(msg));
             }
         }
     }
@@ -906,4 +1037,10 @@ fn walk_goal_checks(goal: &crate::planner::GoalNode, bad: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// zp2: the JSON Schema for Scenario (schemars), for the CLI validate
+/// command and external tooling. Same generator as docs/schema.json.
+pub fn scenario_json_schema() -> serde_json::Value {
+    schemars::schema_for!(Scenario).into()
 }

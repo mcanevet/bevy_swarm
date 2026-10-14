@@ -1,0 +1,35 @@
+{
+  "name": "state-machine-poke",
+  "bot": {
+    "type": "synthetic_keyboard",
+    "key_presses": [
+      { "frame": 15, "key": "Space", "hold_frames": 2 },
+      { "frame": 90, "key": "Escape" },
+      { "frame": 120, "key": "Escape" },
+      { "frame": 200, "key": "Enter", "hold_frames": 5 },
+      { "frame": 320, "key": "Tab" },
+      { "frame": 380, "key": "w", "hold_frames": 45 }
+    ]
+  },
+  "duration_s": 10,
+  "tps": 60,
+  "invariants": [
+    {
+      "name": "never-stuck-in-transition",
+      "rule": "custom",
+      "path": "TestApi.state_machine.transitions_pending",
+      "check": "equals",
+      "value": 0
+    },
+    {
+      "name": "pause-actually-pauses",
+      "rule": "custom",
+      "path": "TestApi.sim_ticks_per_real_s",
+      "check": "le",
+      "value": 1,
+      "after_s": 1.5,
+      "before_s": 3.0
+    }
+  ],
+  "strict_warnings": true
+}

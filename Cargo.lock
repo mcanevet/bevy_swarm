@@ -1756,6 +1756,7 @@ name = "bevy_swarm_cli"
 version = "0.1.0"
 dependencies = [
  "bevy_swarm",
+ "jsonschema",
  "serde",
  "serde_json",
 ]

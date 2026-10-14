@@ -26,6 +26,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("init") => cmd_init(&args[1..]),
         Some("run") => cmd_run(&args[1..]),
+        Some("validate") => cmd_validate(&args[1..]),
         Some("report") => cmd_report(),
         Some("--help") | Some("help") | Some("-h") | None => {
             print_usage();
@@ -50,6 +51,7 @@ fn print_usage() {
          SUBCOMMANDS:\n\
          \x20   init    Detect the game's root plugin and generate tests/swarm.rs\n\
          \x20   run     Run the generated swarm test (env overrides)\n\
+         \x20   validate <file>  Check a scenario JSON without running the game\n\
          \x20   report  Pretty-print the last autotest report\n\
          \n\
          OPTIONS (init):\n\
@@ -150,6 +152,99 @@ fn cmd_run(args: &[String]) -> i32 {
             eprintln!("run failed: {e}");
             1
         }
+    }
+}
+
+fn cmd_validate(args: &[String]) -> i32 {
+    let Some(file) = args.first() else {
+        eprintln!("validate: expected a scenario JSON path");
+        return 2;
+    };
+    if args.len() > 1 {
+        eprintln!("validate: unexpected extra argument '{}'", args[1]);
+        return 2;
+    }
+    let raw = match std::fs::read_to_string(file) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("validate: cannot read {file}: {e}");
+            return 1;
+        }
+    };
+
+    let mut errors: Vec<String> = Vec::new();
+
+    // 1. Syntax: parse the JSON document itself.
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("validate: {file} is not valid JSON: {e}");
+            return 1;
+        }
+    };
+
+    // 2. Schema conformance: unknown fields, wrong types. Collected
+    // per error, not first-abort.
+    let schema = bevy_swarm::scenario::scenario_json_schema();
+    if let Ok(validator) = jsonschema::validator_for(&schema) {
+        if let Err(first) = validator.validate(&value) {
+            // validate() returns only the first error; iter_errors
+            // walks them all. Cap output at 10.
+            let mut schema_errors = 0;
+            for err in validator.iter_errors(&value) {
+                schema_errors += 1;
+                if schema_errors <= 10 {
+                    let at = err.instance_path.to_string();
+                    let at = if at.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" at '{at}'")
+                    };
+                    errors.push(format!("schema: {err}{at}"));
+                }
+            }
+            if schema_errors == 0 {
+                errors.push(format!("schema: {first}"));
+            }
+            if schema_errors > 10 {
+                errors.push(format!(
+                    "schema: ... and {} more errors",
+                    schema_errors - 10
+                ));
+            }
+        }
+    }
+
+    // 3. Semantic checks (validate_scenario): known where possible,
+    // all reported at once.
+    match serde_json::from_value::<bevy_swarm::scenario::Scenario>(value) {
+        Ok(scenario) => {
+            if let Err(e) = bevy_swarm::scenario::validate_scenario(&scenario) {
+                errors.push(
+                    e.to_string()
+                        .trim_start_matches("scenario rejected: ")
+                        .to_string(),
+                );
+            }
+        }
+        Err(e) => {
+            // serde errors are usually covered by schema errors above;
+            // keep them anyway when schema validation was silent.
+            if errors.is_empty() {
+                errors.push(format!("deserialize: {e}"));
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        println!("{file}: OK");
+        0
+    } else {
+        eprintln!("{file}: {} error(s):", errors.len());
+        for e in &errors {
+            eprintln!("  - {e}");
+        }
+        1
     }
 }
 

@@ -43,6 +43,7 @@ pub mod autotest;
 pub use autotest::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
 pub mod bots;
 pub mod branch;
+pub mod builder;
 pub mod choice;
 pub mod compiled;
 pub mod contract;

@@ -1,0 +1,46 @@
+{
+  "name": "invariant-monitoring",
+  "bot": {
+    "type": "chaos",
+    "seed": 7,
+    "input_rate_hz": 5,
+    "persona": "idle"
+  },
+  "duration_s": 60,
+  "invariants": [
+    {
+      "name": "score-never-decreases",
+      "rule": "custom",
+      "path": "TestApi.score",
+      "check": "ge",
+      "value": 0,
+      "differential": "no_decrease"
+    },
+    {
+      "name": "energy-drain-rate",
+      "rule": "custom",
+      "path": "TestApi.energy",
+      "check": "ge",
+      "value": 0,
+      "max_delta_per_sec": 25.0
+    },
+    {
+      "name": "no-enemy-pileup",
+      "rule": "custom",
+      "query": { "with": ["EnemyTag"] },
+      "check": "le",
+      "value": 500
+    },
+    {
+      "name": "low-hp-heals",
+      "rule": "custom",
+      "path": "TestApi.player_hp",
+      "check": "le",
+      "value": 20,
+      "requires_path": "TestApi.healing_active",
+      "requires_check": "equals",
+      "requires_value": true,
+      "after_s": 5.0
+    }
+  ]
+}

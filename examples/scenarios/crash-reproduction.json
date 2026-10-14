@@ -1,0 +1,24 @@
+{
+  "name": "crash-reproduction",
+  "bot": {
+    "type": "replay",
+    "inputs": [
+      { "frame": 0, "intent": { "intent": "move", "dir": [1.0, 0.0] } },
+      { "frame": 45, "intent": { "intent": "select", "target": "EnemyScout" } },
+      { "frame": 60, "intent": { "intent": "wait" } },
+      { "frame": 120, "intent": { "intent": "choice", "index": 2 } },
+      { "frame": 180, "intent": { "intent": "raw", "raw": { "raw": "key", "key": "KeyE", "hold_frames": 1 } } }
+    ]
+  },
+  "duration_s": 5,
+  "deny_ambiguities": false,
+  "setup": {
+    "resets": [{ "kind": "level_3_start" }],
+    "cheats": [
+      { "frame": 0, "kind": "spawn_wave:hard" },
+      { "frame": 150, "kind": "set_hp:1" }
+    ]
+  },
+  "invariants": [],
+  "check_determinism": 2
+}

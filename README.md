@@ -46,7 +46,11 @@ bevy_swarm = "0.1"
 ```
 
 Then `cargo test --test playtest` — that's the whole wiring. The
-[scenario JSON](docs/schema.json) tells the harness WHAT to check:
+[scenario JSON](docs/schema.json) tells the harness WHAT to check; the
+[Scenario Cookbook](docs/scenarios.md) walks through realistic examples,
+and [`ScenarioBuilder`](src/builder.rs) is the same thing in Rust.
+Validate any scenario offline with `cargo swarm validate <file>` —
+typos get did-you-mean suggestions before the game even builds:
 
 ```json
 {

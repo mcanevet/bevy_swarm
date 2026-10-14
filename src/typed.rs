@@ -190,10 +190,19 @@ pub(crate) fn validate_oracle_names(
         .collect();
 
     if !unknown.is_empty() {
+        let known_vec: Vec<String> = known.into_iter().map(str::to_string).collect();
+        // zp2: did-you-mean suggestions per unknown oracle name.
+        let hints: Vec<String> = unknown
+            .iter()
+            .map(|n| match crate::scenario::suggest_similar(n, &known_vec) {
+                Some(sug) => format!("'{n}' — did you mean '{sug}'?"),
+                None => format!("'{n}'"),
+            })
+            .collect();
         return Err(crate::scenario::ScenarioError::Rejected(format!(
-            "unknown oracle(s): {:?}; known: {:?}",
-            unknown,
-            known.into_iter().collect::<Vec<_>>()
+            "unknown oracle(s): {}; known: {:?}",
+            hints.join(", "),
+            known_vec
         )));
     }
 
