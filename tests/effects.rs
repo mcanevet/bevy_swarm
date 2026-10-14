@@ -71,19 +71,21 @@ fn effective_intent_has_full_effect_rate() {
 
 #[test]
 fn dead_verb_detected() {
-    // 10+ Choice intents that the game ignores entirely (no state
-    // change anywhere) → dead_verb for that key. We use Choice instead
-    // of Wait because Wait is a deliberate no-op on many surfaces.
-    let inputs: Vec<String> = (1..=12)
+    // Move intents are handled (increment TestApi.score → digest-visible,
+    // world stays live), Choice intents ignored → dead_verb for intent:choice.
+    // Value-based effect attribution ensures same-value rewrites don't mask.
+    let inputs: Vec<String> = (1..=24)
         .map(|f| {
-            format!(
-                r#"{{"frame":{},"intent":{{"intent":"choice","index":0}}}}"#,
-                f * 4
-            )
+            let intent = if f % 2 == 0 {
+                r#"{"intent":"move","dir":[1.0,0.0]}"#
+            } else {
+                r#"{"intent":"choice","index":0}"#
+            };
+            format!(r#"{{"frame":{},"intent":{}}}"#, f * 20, intent)
         })
         .collect();
     let scenario: Scenario = serde_json::from_str(&format!(
-        r#"{{"bot":{{"type":"replay","inputs":[{}]}},"duration_s":2.0,"invariants":[],"liveness":{{"timeout_s":30.0}}}}"#,
+        r#"{{"bot":{{"type":"replay","inputs":[{}]}},"duration_s":10.0,"invariants":[],"liveness":{{"timeout_s":30.0}}}}"#,
         inputs.join(",")
     ))
     .unwrap();
@@ -91,10 +93,20 @@ fn dead_verb_detected() {
     app.add_systems(bevy::app::Startup, |mut c: Commands| {
         c.spawn((Name::new("P1"), Gameplay, Points(0)));
     });
-    // NO handler: the game ignores Wait entirely. But something must
-    // keep the world alive elsewhere or liveness fires — Points static
-    // is fine here; liveness may complain but the test only cares
-    // about dead_verb.
+    // Handle Move by bumping a digest-visible TestApi custom numeric,
+    // ignore Choice.
+    app.add_systems(
+        Update,
+        |mut reader: bevy::ecs::message::MessageReader<UserIntent>,
+         mut api: bevy::ecs::system::ResMut<bevy_swarm::contract::TestApi>| {
+            for intent in reader.read() {
+                if let UserIntent::Move { .. } = intent {
+                    let e = api.custom_numeric.entry("moves".into()).or_insert(0.0);
+                    *e += 1.0;
+                }
+            }
+        },
+    );
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert!(
         rep.violations.iter().any(|v| v.rule == "dead_verb"),
