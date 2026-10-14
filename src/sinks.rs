@@ -72,8 +72,15 @@ fn on_pool_thread() -> bool {
 }
 
 /// Resolve the run to attribute an event to: the thread-local run if
-/// set (driver/ECS threads), else — for pool workers only, and only
-/// when exactly one run is active — that run.
+/// set (driver/ECS threads), else — for pool workers only — the run
+/// attribution. le3.21 (RF25): when MULTIPLE runs are active (default
+/// autotest runs 2-4 seeds in parallel), the old code gave up and
+/// DROPPED pool-thread panics/errors entirely, letting failing runs
+/// pass silently. Attribution now falls back to the LATEST-started
+/// run (max RunId): pool threads are process-global and task
+/// stealing means a straggler may land anywhere, but reporting it
+/// under the newest run beats losing it. Straggler risk is
+/// documented above on GLOBAL_RUNS.
 fn resolve_run() -> Option<RunId> {
     if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
         return Some(run_id);
@@ -82,11 +89,7 @@ fn resolve_run() -> Option<RunId> {
         return None;
     }
     let runs = GLOBAL_RUNS.lock().unwrap_or_else(|e| e.into_inner());
-    if runs.len() == 1 {
-        runs.iter().next().copied()
-    } else {
-        None
-    }
+    runs.iter().next_back().copied()
 }
 
 /// Register the run as process-globally active (driver thread, run
@@ -205,7 +208,17 @@ pub fn ensure_global_subscriber() {
         let subscriber = tracing_subscriber::registry()
             .with(capture)
             .with(tracing_subscriber::fmt::layer());
-        let _ = tracing::subscriber::set_global_default(subscriber);
+        // le3.21 (RF25): a failed install is NOT silent — log capture
+        // being off silently under-reports errors. Emit a loud
+        // warning via eprintln (can't use tracing here: this IS the
+        // tracing setup).
+        if tracing::subscriber::set_global_default(subscriber).is_err() {
+            eprintln!(
+                "bevy_swarm: log capture OFF — another tracing subscriber is already \
+                 installed (game-provided LogPlugin?). Errors logged via tracing will \
+                 not appear in the playtest report."
+            );
+        }
     });
 }
 
@@ -516,14 +529,16 @@ mod tests {
             .join()
             .unwrap();
 
-        // Second concurrent active run: attribution becomes
-        // ambiguous, the pool-worker fallback must refuse.
+        // Second concurrent active run: le3.21 (RF25) — the fallback
+        // attributes to the LATEST-started run rather than dropping
+        // the event (pool-thread panics were silently lost when
+        // autotest ran seeds in parallel).
         let other = RunId::new();
         set_global_run(other);
         std::thread::Builder::new()
             .name("IO Task Pool (0)".into())
             .spawn(move || {
-                assert_eq!(resolve_run(), None);
+                assert_eq!(resolve_run(), Some(other));
             })
             .unwrap()
             .join()

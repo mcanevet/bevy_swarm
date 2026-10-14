@@ -30,15 +30,22 @@ use crate::state::*;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn chaos_bot_system(
     mut state: ResMut<PlaytestState>,
-    mut choices: ResMut<crate::choice::ChoiceStream>,
+    choices: Option<ResMut<crate::choice::ChoiceStream>>,
     mut intents: MessageWriter<UserIntent>,
     mut violations: ResMut<Violations>,
     surface: Option<Res<IntentSurface>>,
-    raw_queue: ResMut<crate::raw_input::RawActionQueue>,
+    raw_queue: Option<ResMut<crate::raw_input::RawActionQueue>>,
     q: Query<Entity, With<Gameplay>>,
     q_named: Query<(Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
 ) {
+    // le3.21 (RF25): tolerate apps that haven't inserted ChoiceStream
+    // or RawActionQueue (e.g., headless apps without a bot). Graceful
+    // no-op prevents pool-thread panics that leak into sibling runs.
+    let Some(mut choices) = choices else { return };
+    let Some(raw_queue) = raw_queue else {
+        return;
+    };
     // Persona bias (): aggressive = 2x rate + never Wait; curious =
     // strong preference for unseen variants; idle = mostly Wait with rare
     // jabs. Different personas find different bugs.

@@ -180,6 +180,13 @@ impl bevy::app::Plugin for PlaytestPlugin {
         app.init_resource::<crate::raw_input::InputHolds>();
         app.init_resource::<crate::raw_input::VirtualGamepad>();
         app.init_resource::<crate::raw_input::HeadlessWindow>();
+        // le3.21 (RF25): harness systems read these; run_scenario
+        // replaces them per-run, but any app driven by the plugin
+        // (e.g. a test calling app.update() directly) must not panic
+        // on missing params — a pool-thread panic leaks into sibling
+        // runs under parallel autotest.
+        app.init_resource::<crate::robustness::RobustnessTracker>();
+        app.init_resource::<crate::choice::ChoiceStream>();
         // Raw input actuator writes these messages directly; without
         // winit nothing else registers them in a headless app.
         app.add_message::<bevy::input::keyboard::KeyboardInput>();
@@ -769,6 +776,14 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         crate::sinks::set_previous_handler(run_id, bevy::ecs::error::match_severity);
     }
 
+    // le3.21 (RF25): COMPILE FIRST. compile() performs load-time
+    // validation and may reject (component typos, bad paths). A
+    // rejected run must not leave the swarm error handler
+    // half-installed on the App — previously the handler went in
+    // before compile(), so a rejected run kept it installed and
+    // leaked a HANDLER_CHAIN entry keyed by the dead run id.
+    let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
+
     // le3.11 (RF7): DROP-GUARDED handler install. `HandlerGuard`
     // restores the previous FallbackErrorHandler and clears
     // CURRENT_RUN on drop — including every early-return Err path
@@ -808,15 +823,21 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     impl Drop for HandlerGuard {
         fn drop(&mut self) {
             // Runs on success AND on every early Err return AFTER
-            // the handler install point (load-time validation all
-            // happens BEFORE the install, so no half-installed state).
+            // the install point. load-time validation (compile) now
+            // happens BEFORE the install, so a rejected run leaves
+            // nothing behind. Clears both per-thread and global run
+            // registration so the handler resolves to nothing after
+            // the run.
             crate::sinks::clear_current_run();
             crate::sinks::clear_global_run(self.0);
+            // le3.21 (RF25): also drop the run's HANDLER_CHAIN entry
+            // — otherwise rejected/finished runs leak chain slots and
+            // the dead run id can shadow the app's own handler.
+            crate::sinks::clear_previous_handler(self.0);
         }
     }
     let _handler_guard = HandlerGuard(run_id);
 
-    let compiled = crate::compiled::compile(app.world_mut(), scenario)?;
     // RF8: populate declared_keys from scenario.bot.raw_surface (tier-0
     // explicit declarations). Default-surface keys stay unmarked.
     if let Some(raw) = &scenario.bot.raw_surface {
