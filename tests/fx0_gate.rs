@@ -60,7 +60,70 @@ fn load_expectation(fixture: &str, variant: &str) -> Value {
         .join(format!("{}.json", variant));
     let raw =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+    // le3.20 (RF24): typed parse first — unknown keys (typos like
+    // `must_reprot`) must REJECT, not silently skip. Falls back to
+    // Value only for pending-stub cases.
+    let typed: Result<TypedExpectation, _> = serde_json::from_str(&raw);
+    if let Err(e) = typed {
+        panic!(
+            "{}: expectation schema violation (unknown or mistyped key?): {}",
+            path.display(),
+            e
+        );
+    }
     serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e))
+}
+
+/// le3.20 (RF24): typed expectation — a typo'd key like `must_reprot`
+/// previously deserialized fine (extra keys ignored) and the check
+/// silently skipped. deny_unknown_fields makes typos loud.
+/// Fields exist for schema validation only; readers use the Value form.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[expect(dead_code)]
+struct TypedExpectation {
+    #[serde(default)]
+    schema_version: Option<u64>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    scaffold: Option<String>,
+    #[serde(default)]
+    seeds: Option<Vec<u64>>,
+    #[serde(default)]
+    duration_s: Option<f64>,
+    #[serde(default)]
+    invariants: Option<Value>,
+    #[serde(default)]
+    must_report: Option<Vec<TypedMustReport>>,
+    #[serde(default)]
+    must_not_report: Option<Vec<TypedMustReport>>,
+    #[serde(default)]
+    liveness: Option<Value>,
+    #[serde(default)]
+    bot: Option<Value>,
+    #[serde(default)]
+    input_rate_hz: Option<u64>,
+    #[serde(default)]
+    check_determinism: Option<u64>,
+    #[serde(default)]
+    pending: Option<Value>,
+    /// Regressions carry arbitrary metadata — allowed explicitly.
+    #[serde(default)]
+    metadata: Option<Value>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[expect(dead_code)]
+struct TypedMustReport {
+    rule: String,
+    #[serde(default)]
+    detail_contains: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    min_count: Option<u64>,
 }
 
 /// Build a scenario JSON honouring the expectation's overrides
@@ -167,8 +230,6 @@ fn run_fixture(
     enable_bug: bool,
 ) -> bevy_swarm::driver::PlaytestReport {
     let scenario: Scenario = serde_json::from_str(scenario_json).expect("parse scenario");
-    let holder = std::sync::Mutex::new(()); // serialize runs-dir mutations
-    let _g = holder.lock().unwrap();
     let fixture = fixture.to_string();
     let mut env_bug = None;
     if enable_bug {
@@ -221,18 +282,43 @@ fn check_bug_signal(
     seed: u64,
 ) -> Vec<String> {
     let mut errors = Vec::new();
-    let fired = violation_rules(report);
+    let violation_objects: Vec<&bevy_swarm::state::ViolationEntry> =
+        report.violations.iter().collect();
     if let Some(must) = expect.get("must_report").and_then(|m| m.as_array()) {
         for entry in must {
             let rule = entry
                 .get("rule")
                 .and_then(|r| r.as_str())
                 .expect("rule name");
-            if !fired.iter().any(|f| f == rule) {
+            // Match rule name first.
+            let matching: Vec<_> = violation_objects
+                .iter()
+                .filter(|v| v.rule == rule)
+                .collect();
+            if matching.is_empty() {
                 errors.push(format!(
                     "bug seed {} missing must_report rule '{}'",
                     seed, rule
                 ));
+                continue;
+            }
+            // detail_contains filter (same as acceptance).
+            if let Some(want) = entry.get("detail_contains").and_then(|d| d.as_str()) {
+                if !matching.iter().any(|v| v.detail.contains(want)) {
+                    errors.push(format!(
+                        "bug seed {}: must_report '{}' reported but no detail contains {:?}",
+                        seed, rule, want
+                    ));
+                }
+            }
+            // target filter (same as acceptance).
+            if let Some(target) = entry.get("target").and_then(|d| d.as_str()) {
+                if !matching.iter().any(|v| v.target == target) {
+                    errors.push(format!(
+                        "bug seed {}: must_report '{}' reported but not on target {:?}",
+                        seed, rule, target
+                    ));
+                }
             }
         }
     }
@@ -319,6 +405,17 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
             if exp.get("pending").is_some() {
                 continue;
             }
+            // le3.20 (RF24): scaffold:none cases run the PLAIN game via
+            // the fixture-runner binary in the acceptance suite; the
+            // in-process gate cannot reproduce that build (no adapter,
+            // autotest tier), so they are skipped here — covered by
+            // acceptance instead of silently run against the WRONG build.
+            if variant.ends_with("_none") {
+                continue;
+            }
+            if exp.get("pending").is_some() {
+                continue;
+            }
             let mut hits = 0;
             let mut total = 0;
             let mut misses: Vec<String> = Vec::new();
@@ -401,6 +498,17 @@ fn fx0_bug_signals_do_not_fire_with_bug_disabled() {
             if exp.get("pending").is_some() {
                 continue;
             }
+            // le3.20 (RF24): scaffold:none cases run the PLAIN game via
+            // the fixture-runner binary in the acceptance suite; the
+            // in-process gate cannot reproduce that build (no adapter,
+            // autotest tier), so they are skipped here — covered by
+            // acceptance instead of silently run against the WRONG build.
+            if variant.ends_with("_none") {
+                continue;
+            }
+            if exp.get("pending").is_some() {
+                continue;
+            }
             let must: Vec<(String, Option<u64>)> = exp
                 .get("must_report")
                 .and_then(|m| m.as_array())
@@ -425,15 +533,21 @@ fn fx0_bug_signals_do_not_fire_with_bug_disabled() {
             for seed in SEEDS {
                 let scenario = build_scenario_json(&fixture, &variant, *seed);
                 let report = run_fixture(&fixture, &variant, &scenario, false);
-                let fired = violation_rules(&report);
                 for (rule, min_count) in &must {
-                    let occurrences = fired.iter().filter(|f| f.as_str() == rule.as_str()).count();
-                    // le3.7 (RF3): honor min_count — a rule that fires
-                    // FEWER than min_count times on clean is fine (the
-                    // bug pushes it over); must_report entries are
-                    // checked with the same semantics in acceptance.
+                    // le3.20 (RF24): use the SAME counting as acceptance —
+                    // report_named merges repeats per (rule, target) into
+                    // one entry whose `count` field holds the number of
+                    // occurrences. Counting array ENTRIES capped the clean
+                    // game at 1, making the min_count guard unfalsifiable.
+                    let occurrences: u64 = report
+                        .violations
+                        .iter()
+                        .filter(|v| v.rule == *rule)
+                        .map(|v| v.count)
+                        .max()
+                        .unwrap_or(0);
                     let allowed_on_clean = min_count.unwrap_or(1);
-                    if occurrences >= allowed_on_clean as usize {
+                    if occurrences >= allowed_on_clean {
                         total_errors.push(format!(
                             "{}/{}/{}: rule '{}' fired {}x with bug disabled (>= {allowed_on_clean})",
                             fixture, variant, seed, rule, occurrences

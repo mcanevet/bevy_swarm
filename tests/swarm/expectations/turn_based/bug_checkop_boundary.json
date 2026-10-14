@@ -8,18 +8,18 @@
   "duration_s": 6.0,
   "invariants": [
     {
-      "name": "score_is_fifty",
+      "name": "score_above_55",
       "rule": "custom",
-      "check": "eq",
-      "value": 50.0,
-      "path": "TestApi.score"
+      "path": "TestApi.score",
+      "check": "above",
+      "value": 55.0
     }
   ],
   "must_report": [
     {
-      "rule": "score_is_fifty",
-      "detail_contains": "50",
-      "min_count": 2
+      "rule": "score_above_55",
+      "detail_contains": "55",
+      "min_count": 200
     }
   ],
   "must_not_report": [],
