@@ -164,10 +164,12 @@ fn build_app_for(fixture: &str) -> App {
             app.add_plugins(fixture_spinner::SpinnerGamePlugin);
         }
         "walker" => {
-            // le3.23 (RF27): value-based liveness — walker with no Wait
-            // on the surface keeps moving (chaos bot drives it), avoiding
-            // the 2s idle freeze that tick-semantics masked.
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Move]));
+            // le3.33 (RF43): Wait restored — the RF27 removal masked
+            // the frozen_frames/timeout accounting bug.
+            app.insert_resource(IntentSurface::new(vec![
+                SurfaceVariant::Move,
+                SurfaceVariant::Wait,
+            ]));
             app.add_plugins(WalkerAdapterPlugin);
             app.add_plugins(WalkerGamePlugin);
         }

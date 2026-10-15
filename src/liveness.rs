@@ -41,6 +41,84 @@ pub fn gameplay_changed_since(world: &World, since: Tick, now: Tick) -> bool {
     false
 }
 
+/// True if any NON-REFLECTED game component on a Gameplay entity
+/// changed in `(since, now]` (RF43 moderate fallback). Digest-visible
+/// (reflected, non-engine) components are EXCLUDED — for those,
+/// value semantics rule (same-value re-writes are NOT liveness).
+/// Non-reflected game components are invisible to the digest, so a
+/// tick change is the best available signal.
+pub fn non_reflected_gameplay_changed_since(world: &World, since: Tick, now: Tick) -> bool {
+    // RF43 moderate: components invisible to the value digest (plain
+    // #[derive(Component)] game types, never registered in the type
+    // registry) fall back to change-tick semantics. Identified by
+    // COMPONENT NAME: not bevy/bevy_swarm (those are engine/harness —
+    // e.g. GlobalTransform is re-propagated every frame) and not
+    // present in the reflect registry (those follow value semantics
+    // via the digest; re-written-same-value must stay frozen).
+    let reflected: std::collections::HashSet<bevy::ecs::component::ComponentId> = {
+        let mut set = std::collections::HashSet::new();
+        if let Some(registry_arc) = world.get_resource::<bevy::ecs::reflect::AppTypeRegistry>() {
+            let registry = registry_arc.0.read();
+            for type_reg in registry.iter() {
+                if type_reg
+                    .data::<bevy::ecs::reflect::ReflectComponent>()
+                    .is_none()
+                {
+                    continue;
+                }
+                let Some(tid) = registry
+                    .get_with_short_type_path(type_reg.type_info().type_path_table().short_path())
+                else {
+                    continue;
+                };
+                if let Some(cid) = world.components().get_valid_id(tid.type_id()) {
+                    set.insert(cid);
+                }
+            }
+        }
+        set
+    };
+    let is_game_component =
+        |cid: &bevy::ecs::component::ComponentId| match world.components().get_info(*cid) {
+            Some(info) => {
+                let name = info.name();
+                !(name.starts_with("bevy_")
+                    || name.starts_with("bevy::")
+                    || name.starts_with("bevy_swarm"))
+                    && !reflected.contains(cid)
+            }
+            None => false,
+        };
+    let Some(gameplay) = world
+        .components()
+        .get_valid_id(std::any::TypeId::of::<Gameplay>())
+    else {
+        return false;
+    };
+    for arch in world
+        .archetypes()
+        .iter()
+        .filter(|a| a.contains(gameplay) && !a.is_empty())
+    {
+        for e in arch.entities() {
+            let Ok(er) = world.get_entity(e.id()) else {
+                continue;
+            };
+            for cid in arch.components() {
+                if !is_game_component(cid) {
+                    continue;
+                }
+                if let Some(t) = er.get_change_ticks_by_id(*cid) {
+                    if t.is_changed(since, now) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// True if a resource changed in the window `(since, now]` (generic
 /// form; the I4/I5 shared `changed_since(world, scope, tick)` helper).
 pub fn resource_changed_since<R: Resource>(world: &World, since: Tick, now: Tick) -> bool {
@@ -103,7 +181,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     // instead: only actual VALUE changes reset the freeze timer.
     // Change ticks remain the cheap pre-filter: if nothing was even
     // WRITTEN in the window, the world is trivially unchanged.
-    let (written, ()) = {
+    let (written, (), anchor_t) = {
         let state = world.resource::<PlaytestState>();
         // Anchor on the tick from `window_frames` ago; if history is
         // shorter than the window (young run / long timeout), anchor on
@@ -123,6 +201,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
                     gameplay_changed_since(world, since, now)
                         || game_resource_changed_since(world, since, now),
                     (),
+                    t,
                 )
             }
             // No history at all (first frames) → treat as LIVE
@@ -163,12 +242,15 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
             if digest != state.liveness_digest {
                 let first_observation = state.liveness_digest.is_empty();
                 world.resource_mut::<PlaytestState>().liveness_digest = digest;
-                // First observation establishes the BASELINE, it is
-                // not evidence the world is alive: every world
-                // differs from the initial empty digest.
                 !first_observation
             } else {
-                false
+                // Digest unchanged — fall back to change-tick semantics
+                // for NON-REFLECTED gameplay components only (RF43
+                // moderate). A plain #[derive(Component)] mutated every
+                // frame is invisible to the digest but must count as
+                // alive. Reflected components stay under value
+                // semantics (same-value re-writes are not liveness).
+                non_reflected_gameplay_changed_since(world, Tick::new(anchor_t), now)
             }
         }
     };
@@ -187,13 +269,15 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
         // Real-time: the FULL timeout window observed with zero liveness
         // → frozen. (changed=false above means nothing changed in the
         // last window_frames = timeout_s of frames.) Fire only when the
-        // frame history actually COVERS the full window — a run shorter
-        // than the timeout can't demonstrate "frozen for timeout_s".
+        // frame history actually COVERS the full window AND the
+        // accumulated freeze count reaches timeout_frames — a single
+        // quiet quarter in an otherwise live run must not fire.
         let full_window = {
             let state = world.resource::<PlaytestState>();
             state.frame_start_ticks.len() as u64 >= window_frames
         };
-        if !changed && timeout_frames > 0 && full_window {
+        let state = world.resource::<PlaytestState>();
+        if !changed && timeout_frames > 0 && full_window && state.frozen_frames >= timeout_frames {
             // RF8: if the actuator produced ZERO effective inputs, the
             // game is undrivable, not necessarily buggy. Downgrade to
             // informational.

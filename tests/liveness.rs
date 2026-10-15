@@ -17,8 +17,9 @@ fn build_app() -> App {
     app
 }
 
-#[derive(Component, bevy::prelude::Reflect)]
-#[reflect(Component)]
+// le3.33 (RF43): Hand is deliberately NON-REFLECTED — the liveness
+// oracle must see it via the non-reflected-component tick fallback.
+#[derive(Component)]
 struct Hand(u32);
 
 #[test]
@@ -30,7 +31,6 @@ fn card_game_not_frozen() {
     )
     .unwrap();
     let mut app = build_app();
-    app.register_type::<Hand>();
     app.add_systems(bevy::app::Startup, |mut commands: Commands| {
         commands.spawn((Name::new("Dealer"), Gameplay, Hand(0)));
     });
@@ -146,3 +146,79 @@ fn liveness_off_disables_oracle() {
 
 #[derive(Component)]
 struct TurnOnMarks(u32);
+
+// ---------------------------------------------------------------------------
+// le3.33 (RF43)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rf43_quiet_pause_in_old_run_not_frozen() {
+    // Regression (RF43 critical): a bot firing at 2 Hz leaves 0.25s
+    // quarters with NO state change. Once the run is older than
+    // timeout_s, a single quiet quarter must NOT fire frozen_world —
+    // the freeze must ACCUMULATE to timeout_frames. The 0.5s gap
+    // between moves is shorter than the 2s timeout, so it never does.
+    // Runs the real walker fixture in-process (same shape as the bug
+    // report repro).
+    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use fixture_runner::WalkerAdapterPlugin;
+    use fixture_walker::WalkerGamePlugin;
+    for seed in [1u64, 2, 3] {
+        let scenario: Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"chaos","seed":{seed},"input_rate_hz":2}},"duration_s":6.0,"invariants":[],"setup":{{}},"liveness":{{"mode":"real_time","timeout_s":2.0}}}}"#
+        ))
+        .unwrap();
+        let runner = InProcess {
+            factory: || {
+                let mut app = App::new();
+                app.add_plugins((
+                    bevy::MinimalPlugins,
+                    bevy::transform::TransformPlugin,
+                    PlaytestPlugin,
+                    bevy_swarm::contract::TestConventionsPlugin,
+                ));
+                app.insert_resource(bevy_swarm::contract::IntentSurface::new(vec![
+                    bevy_swarm::contract::SurfaceVariant::Move,
+                    bevy_swarm::contract::SurfaceVariant::Wait,
+                ]));
+                app.add_plugins(WalkerAdapterPlugin);
+                app.add_plugins(WalkerGamePlugin);
+                app
+            },
+        };
+        let rep = ScenarioRunner::run(&runner, &scenario).expect("run scenario");
+        assert!(
+            !rep.violations.iter().any(|v| v.rule == "frozen_world"),
+            "seed {seed}: 2Hz chaos walker must not trip frozen_world: {:?}",
+            rep.violations
+        );
+    }
+}
+
+#[test]
+fn rf43_same_value_rewrites_still_frozen() {
+    // Value semantics preserved: a game re-WRITING an unchanged
+    // Transform every frame (same-value write) stays frozen. This is
+    // the RF27 blindness the value digest fixed — the RF43 fallback
+    // must not reintroduce it for reflected/engine components.
+    let scenario: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"replay","inputs":[]},"duration_s":3.2,"invariants":[]}"#,
+    )
+    .unwrap();
+    let mut app = build_app();
+    app.add_systems(bevy::app::Startup, |mut commands: Commands| {
+        commands.spawn((Name::new("Rewriter"), Gameplay, Transform::default()));
+    });
+    // Rewrite the SAME value every frame (trigger added, value equal).
+    app.add_systems(Update, |mut q: Query<&mut Transform>| {
+        for mut t in &mut q {
+            t.translation.x = 0.0;
+        }
+    });
+    let rep = run_scenario(&mut app, &scenario).unwrap();
+    assert!(
+        rep.violations.iter().any(|v| v.rule == "frozen_world"),
+        "same-value rewrites must stay frozen (value semantics): {:?}",
+        rep.violations
+    );
+}

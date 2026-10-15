@@ -833,6 +833,16 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             scenario.liveness.timeout_s
         )));
     }
+    // le3.33 (RF43 minor): a timeout SMALLER than one frame gives
+    // timeout_frames 0 (cast truncates) — frozen_world silently
+    // disabled. Reject up front instead.
+    if (scenario.liveness.timeout_s * scenario.tps as f32) as u64 == 0 {
+        return Err(ScenarioError::Rejected(format!(
+            "liveness.timeout_s {} is shorter than one frame at tps {} \
+             (frozen-world detection would be silently disabled)",
+            scenario.liveness.timeout_s, scenario.tps
+        )));
+    }
     let total_ticks = (scenario.duration_s * scenario.tps as f32).ceil() as u64;
     if total_ticks > MAX_TOTAL_TICKS {
         return Err(ScenarioError::Rejected(format!(
