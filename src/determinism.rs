@@ -93,6 +93,7 @@ pub fn canonical_state(world: &bevy::ecs::world::World) -> BTreeMap<String, Stri
     }
     // resolve_path-observable numeric paths via reflection on Resources.
     collect_resource_percepts(world, &mut map);
+    collect_gameplay_components(world, &mut map);
 
     // 2. Gameplay entities: bit-exact transforms keyed by name (with
     // occurrence index for collisions).
@@ -265,6 +266,72 @@ fn collect_resource_percepts(world: &bevy::ecs::world::World, map: &mut BTreeMap
             continue;
         };
         map.insert(format!("Resource:{}", short), format!("{:?}", reflect));
+    }
+}
+
+/// Reflected NON-BEVY components on Gameplay entities — values, not
+/// just change ticks. Lets the canonical digest see opaque game state
+/// (a Hand counter, a Health int) so value-based liveness/effect
+/// attribution isn't blind to it. Covered types (Name/Transform/
+/// GlobalTransform) are skipped — the bit-exact rows above already
+/// encode them.
+fn collect_gameplay_components(
+    world: &bevy::ecs::world::World,
+    map: &mut BTreeMap<String, String>,
+) {
+    use bevy::prelude::Name;
+    let Some(registry_arc) = world.get_resource::<bevy::ecs::reflect::AppTypeRegistry>() else {
+        return;
+    };
+    let registry = registry_arc.0.read();
+
+    // Entity identity: Name > StableId — must match the transform
+    // rows' keying so keys stay collision-stable.
+    let mut rows: Vec<(String, String, String)> = vec![]; // (name, comp_path, value)
+    for entity in world.iter_entities() {
+        if entity.get::<crate::harness::Gameplay>().is_none() {
+            continue;
+        }
+        let name = entity
+            .get::<Name>()
+            .map(|n| n.as_str().to_string())
+            .or_else(|| {
+                entity
+                    .get::<crate::identity::StableId>()
+                    .map(|sid| format!("#{}", sid.0))
+            })
+            .unwrap_or_else(|| "#unnamed".to_string());
+        for type_reg in registry.iter() {
+            let Some(reflect_component) = type_reg.data::<bevy::ecs::reflect::ReflectComponent>()
+            else {
+                continue;
+            };
+            let full_path = type_reg.type_info().type_path_table().path();
+            let short = type_reg.type_info().type_path_table().short_path();
+            // Engine + harness components are excluded: engine state
+            // is not game state, harness markers/ids would add noise.
+            if full_path.starts_with("bevy_")
+                || full_path.starts_with("bevy::")
+                || full_path.starts_with("bevy_swarm")
+            {
+                continue;
+            }
+            let Some(reflect) = reflect_component.reflect(entity) else {
+                continue;
+            };
+            let value = format!("{:?}", reflect);
+            rows.push((name.clone(), short.to_string(), value));
+        }
+    }
+    // Sort for iteration-order independence, then key with an
+    // occurrence index per (name, comp) pair.
+    rows.sort_by(|a, b| (&a.0, &a.1, &a.2).cmp(&(&b.0, &b.1, &b.2)));
+    let mut seen: std::collections::BTreeMap<(String, String), usize> = Default::default();
+    for (name, comp, value) in rows {
+        let key = (name, comp);
+        let idx = seen.entry(key.clone()).or_insert(0);
+        map.insert(format!("GP:{}{}#{}:{}", key.0, "", idx, key.1), value);
+        *idx += 1;
     }
 }
 

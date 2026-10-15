@@ -15,11 +15,15 @@ fn build_app() -> App {
         bevy_swarm::contract::TestConventionsPlugin,
     ));
     app.insert_resource(TestApi::default());
+    app.register_type::<Points>();
     app.add_message::<UserIntent>();
     app
 }
 
-#[derive(Component)]
+/// Registered for reflection so the canonical digest sees the VALUE
+/// (value-based effect attribution needs digest-visible state).
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct Points(i64);
 
 #[test]

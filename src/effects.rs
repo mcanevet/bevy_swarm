@@ -143,7 +143,16 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
     // time (current frame). This aligns with le3.23's value-based
     // liveness and prevents same-value writes (ambient counters,
     // idempotent rewrites) from masking dead verbs.
-    let now_digest = format!("{:?}", crate::determinism::canonical_state(world));
+    let now_digest = {
+        let rows = crate::determinism::canonical_state(world);
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in rows {
+            if !k.starts_with("census.") {
+                m.insert(k, v);
+            }
+        }
+        format!("{:?}", m)
+    };
     for p in take_pending.drain(..) {
         if frame.saturating_sub(p.frame) < window {
             still_pending.push(p);

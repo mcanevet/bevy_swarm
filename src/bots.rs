@@ -638,7 +638,19 @@ pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
     // changed between its frame start and retirement time.
     let frame_now = state.frame;
     state.effect_window_snapshots.reserve(1);
-    let digest = format!("{:?}", crate::determinism::canonical_state(world));
+    // Effect-attribution digest: census rows excluded — archetype
+    // topology churn (harness spawning observers mid-run) is not game
+    // state and would falsely mark actions effective.
+    let digest = {
+        let rows = crate::determinism::canonical_state(world);
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in rows {
+            if !k.starts_with("census.") {
+                m.insert(k, v);
+            }
+        }
+        format!("{:?}", m)
+    };
     let mut state = world.resource_mut::<PlaytestState>();
     state
         .effect_window_snapshots

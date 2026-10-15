@@ -41,54 +41,6 @@ pub fn gameplay_changed_since(world: &World, since: Tick, now: Tick) -> bool {
     false
 }
 
-/// True if a Gameplay-entity component NOT covered by canonical_state
-/// (the digest only sees Name/Transform pairs, resource percepts and
-/// TestApi customs) changed in `(since, now]`. Such writes are opaque
-/// to value comparison — we assume game-owned opaque writes are alive
-/// (I4: card games churning a Hand component stay unfrozen).
-fn opaque_gameplay_changed_since(world: &World, since: Tick, now: Tick) -> bool {
-    let Some(gameplay) = world
-        .components()
-        .get_valid_id(std::any::TypeId::of::<Gameplay>())
-    else {
-        return false;
-    };
-    // Digest-covered component types: writes to these ARE comparable
-    // via canonical_state; only consider components outside the set.
-    let covered = [
-        std::any::TypeId::of::<bevy::prelude::Name>(),
-        std::any::TypeId::of::<bevy::prelude::Transform>(),
-        std::any::TypeId::of::<bevy::prelude::GlobalTransform>(),
-    ];
-    for arch in world
-        .archetypes()
-        .iter()
-        .filter(|a| a.contains(gameplay) && !a.is_empty())
-    {
-        for e in arch.entities() {
-            let Ok(er) = world.get_entity(e.id()) else {
-                continue;
-            };
-            for cid in arch.components() {
-                let Some(info) = world.components().get_info(*cid) else {
-                    continue;
-                };
-                if let Some(tid) = info.type_id() {
-                    if covered.contains(&tid) {
-                        continue;
-                    }
-                }
-                if let Some(t) = er.get_change_ticks_by_id(*cid) {
-                    if t.is_changed(since, now) {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
 /// True if a resource changed in the window `(since, now]` (generic
 /// form; the I4/I5 shared `changed_since(world, scope, tick)` helper).
 pub fn resource_changed_since<R: Resource>(world: &World, since: Tick, now: Tick) -> bool {
@@ -151,7 +103,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
     // instead: only actual VALUE changes reset the freeze timer.
     // Change ticks remain the cheap pre-filter: if nothing was even
     // WRITTEN in the window, the world is trivially unchanged.
-    let (written, anchor_tick) = {
+    let (written, ()) = {
         let state = world.resource::<PlaytestState>();
         // Anchor on the tick from `window_frames` ago; if history is
         // shorter than the window (young run / long timeout), anchor on
@@ -170,7 +122,7 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
                 (
                     gameplay_changed_since(world, since, now)
                         || game_resource_changed_since(world, since, now),
-                    t,
+                    (),
                 )
             }
             // No history at all (first frames) → treat as LIVE
@@ -194,19 +146,27 @@ pub(crate) fn liveness_oracle_system(world: &mut World) {
         if !has_observed {
             true
         } else {
-            let digest = format!("{:?}", crate::determinism::canonical_state(world));
+            // Census rows excluded: archetype-topology churn (harness
+            // spawning observers mid-run) is not game state and would
+            // falsely mark a frozen world alive.
+            let digest = {
+                let rows = crate::determinism::canonical_state(world);
+                let mut m = std::collections::BTreeMap::new();
+                for (k, v) in rows {
+                    if !k.starts_with("census.") {
+                        m.insert(k, v);
+                    }
+                }
+                format!("{:?}", m)
+            };
             let state = world.resource::<PlaytestState>();
             if digest != state.liveness_digest {
+                let first_observation = state.liveness_digest.is_empty();
                 world.resource_mut::<PlaytestState>().liveness_digest = digest;
-                true
-            } else if opaque_gameplay_changed_since(world, Tick::new(anchor_tick), now) {
-                // Digest-visible state is unchanged, but an OPAQUE
-                // Gameplay component (one canonical_state can't see,
-                // e.g. a Hand counter) was written in the window.
-                // We can't tell whether the value changed — assume
-                // game-owned opaque writes are alive (I4: card games
-                // stay alive on non-Transform component churn).
-                true
+                // First observation establishes the BASELINE, it is
+                // not evidence the world is alive: every world
+                // differs from the initial empty digest.
+                !first_observation
             } else {
                 false
             }
