@@ -285,6 +285,41 @@ fn collect_gameplay_components(
     };
     let registry = registry_arc.0.read();
 
+    // Filter the registry ONCE (it can be large — the agent feature
+    // registers hundreds of types; iterating it per ENTITY made the
+    // per-frame digest O(entities x registry) and blew CI time
+    // budgets). Map ComponentId -> (short_path, ReflectComponent).
+    let mut watch: std::collections::HashMap<
+        bevy::ecs::component::ComponentId,
+        (&str, &bevy::ecs::reflect::ReflectComponent),
+    > = std::collections::HashMap::new();
+    for type_reg in registry.iter() {
+        let Some(reflect_component) = type_reg.data::<bevy::ecs::reflect::ReflectComponent>()
+        else {
+            continue;
+        };
+        let full_path = type_reg.type_info().type_path_table().path();
+        let short = type_reg.type_info().type_path_table().short_path();
+        // Engine + harness components are excluded: engine state
+        // is not game state, harness markers/ids would add noise.
+        if full_path.starts_with("bevy_")
+            || full_path.starts_with("bevy::")
+            || full_path.starts_with("bevy_swarm")
+        {
+            continue;
+        }
+        let Some(type_id) = registry.get_with_short_type_path(short) else {
+            continue;
+        };
+        let Some(comp_id) = world.components().get_valid_id(type_id.type_id()) else {
+            continue;
+        };
+        watch.insert(comp_id, (short, reflect_component));
+    }
+    if watch.is_empty() {
+        return;
+    }
+
     // Entity identity: Name > StableId — must match the transform
     // rows' keying so keys stay collision-stable.
     let mut rows: Vec<(String, String, String)> = vec![]; // (name, comp_path, value)
@@ -301,21 +336,12 @@ fn collect_gameplay_components(
                     .map(|sid| format!("#{}", sid.0))
             })
             .unwrap_or_else(|| "#unnamed".to_string());
-        for type_reg in registry.iter() {
-            let Some(reflect_component) = type_reg.data::<bevy::ecs::reflect::ReflectComponent>()
-            else {
+        // Only the entity's OWN components are walked (archetype
+        // component list is short), not the whole registry.
+        for cid in entity.archetype().components() {
+            let Some(&(short, reflect_component)) = watch.get(cid) else {
                 continue;
             };
-            let full_path = type_reg.type_info().type_path_table().path();
-            let short = type_reg.type_info().type_path_table().short_path();
-            // Engine + harness components are excluded: engine state
-            // is not game state, harness markers/ids would add noise.
-            if full_path.starts_with("bevy_")
-                || full_path.starts_with("bevy::")
-                || full_path.starts_with("bevy_swarm")
-            {
-                continue;
-            }
             let Some(reflect) = reflect_component.reflect(entity) else {
                 continue;
             };

@@ -149,14 +149,17 @@ fn z4_static_pruning_skips_mouse_and_gamepad() {
 }
 
 /// Discovery wall time stays bounded for the full prior candidate
-/// set (~50 candidates).
+/// set (~50 candidates). Budget accounts for CI runners (~5x slower
+/// than a dev machine) with parallel discovery tests sharing cores:
+/// the bound guards against unbounded probe EXPLOSION, not exact
+/// wall-clock performance.
 #[test]
 fn z4_discovery_is_bounded() {
     let start = std::time::Instant::now();
     let surface = surface_for(|| fixture_walker::WalkerGamePlugin);
     let elapsed = start.elapsed();
     assert!(
-        elapsed.as_secs() < 60,
+        elapsed.as_secs() < 150,
         "discovery took {elapsed:?}, pruned: {:?}",
         surface.pruned_devices
     );

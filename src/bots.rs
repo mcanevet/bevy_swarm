@@ -638,10 +638,19 @@ pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
     // changed between its frame start and retirement time.
     let frame_now = state.frame;
     state.effect_window_snapshots.reserve(1);
-    // Effect-attribution digest: census rows excluded — archetype
-    // topology churn (harness spawning observers mid-run) is not game
-    // state and would falsely mark actions effective.
-    let digest = {
+    // Performance pre-filter: canonical_state with reflection is not
+    // cheap; if NOTHING was written since the last snapshot's tick
+    // (world change tick unchanged), the digest is provably identical
+    // — reuse the previous string instead of recomputing.
+    let last_entry_tick = state
+        .effect_window_snapshots
+        .last()
+        .map(|&(_, t, _)| t)
+        .unwrap_or(0);
+    let digest = if tick != last_entry_tick || state.effect_window_snapshots.is_empty() {
+        // Effect-attribution digest: census rows excluded — archetype
+        // topology churn (harness spawning observers mid-run) is not
+        // game state and would falsely mark actions effective.
         let rows = crate::determinism::canonical_state(world);
         let mut m = std::collections::BTreeMap::new();
         for (k, v) in rows {
@@ -650,6 +659,12 @@ pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
             }
         }
         format!("{:?}", m)
+    } else {
+        state
+            .effect_window_snapshots
+            .last()
+            .map(|(_, _, d)| d.clone())
+            .unwrap_or_default()
     };
     let mut state = world.resource_mut::<PlaytestState>();
     state
