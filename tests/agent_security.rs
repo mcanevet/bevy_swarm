@@ -563,3 +563,125 @@ fn le35_late_registered_method_removed() {
         "late-registered method must be removed by PreUpdate sweep, found: {methods:?}"
     );
 }
+
+/// le3.24 (RF28): a method inserted by an Update system must NOT be
+/// served unguarded in the same frame. The old sweep ran in PreUpdate,
+/// so a method re-inserted every Update frame was served (by the
+/// RemoteLast server) without the allow-list ever seeing it. The fix
+/// sweeps again in RemoteLast, before serving — the one-frame window
+/// is closed permanently, even for methods re-inserted every frame.
+#[test]
+#[serial_test::serial]
+fn le324_update_inserted_method_never_served() {
+    use bevy::remote::RemoteMethods;
+
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    // Bring the server up (startup sweep completes).
+    loop {
+        app.update();
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+    }
+    // A game Update system that re-inserts a rogue method EVERY frame.
+    // Falsifiability: with only the PreUpdate sweep, this method is
+    // (re)inserted in Update AFTER PreUpdate ran, survives through
+    // RemoteLast serving, and is only swept NEXT frame's PreUpdate —
+    // then instantly re-inserted again. Post-frame it would EXIST.
+    // With the RemoteLast sweep it is removed before serving, every
+    // frame, permanently.
+    let handler_id =
+        app.world_mut()
+            .register_system(|_: bevy::ecs::system::In<Option<serde_json::Value>>| {
+                Ok(serde_json::json!({"evil": "ran"}))
+            });
+    let mut rogue = bevy::remote::RemoteMethods::new();
+    rogue.insert(
+        "game.evil",
+        bevy::remote::RemoteMethodSystemId::Instant(handler_id),
+    );
+    let mut commands_state = Some(rogue);
+    app.add_systems(
+        bevy::app::Update,
+        move |mut commands: bevy::ecs::system::Commands| {
+            if let Some(m) = commands_state.take() {
+                commands.insert_resource(m);
+            }
+        },
+    );
+
+    // One full frame: PreUpdate (nothing) → Update (rogue inserted) →
+    // Last → RemoteLast (sweep removes rogue, THEN server serves).
+    app.update();
+
+    // The rogue method must not survive the frame — i.e. it was never
+    // servable, unlike the PreUpdate-only regime where the freshly
+    // inserted handler was live at serve time, every single frame.
+    let methods = app.world().resource::<RemoteMethods>().methods();
+    assert!(
+        !methods.iter().any(|m| m == "game.evil"),
+        "Update-inserted method must be swept in RemoteLast before serving, found: {methods:?}"
+    );
+}
+
+/// le3.24 (RF28): reset/cheat with missing hooks must return an
+/// error, not panic. AgentPlugin does not init ResetHooks/CheatHooks;
+/// the unknown-kind error path used `world.resource::<ResetHooks>()`
+/// which panics when the resource is absent.
+#[test]
+#[serial_test::serial]
+fn le324_reset_cheat_missing_hooks_no_panic() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "playtest/reset",
+            "params": {"token": "sekrit", "kind": "no_such_kind"}
+        }),
+    );
+    assert!(
+        resp.get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .contains("unknown reset kind"),
+        "reset with missing hooks must return unknown-kind error, got: {resp}"
+    );
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 2,
+            "method": "playtest/cheat",
+            "params": {"token": "sekrit", "kind": "no_such_kind"}
+        }),
+    );
+    assert!(
+        resp.get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .contains("unknown cheat kind"),
+        "cheat with missing hooks must return unknown-kind error, got: {resp}"
+    );
+}
