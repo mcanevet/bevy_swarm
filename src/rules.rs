@@ -92,6 +92,8 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ChaosSelectUnnamed => "The chaos bot tried to select among entities but they carry no Name.",
             Rule::EntropyUnattributedDraws => "getrandom draws occurred outside a run's attribution window.",
             Rule::ScenarioError => "The scenario itself failed (rejected config, unloadable state) rather than the game misbehaving.",
+            Rule::NoActiveCamera => "After readiness, if drawable entities exist but zero active cameras, the game likely renders nothing.",
+            Rule::NothingOnScreen => "Drawable entities exist but none project inside the viewport after readiness — they may be off-screen.",
         }
     }
 
@@ -148,6 +150,8 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ChaosSelectUnnamed => "Chaos Select drawn while candidate entities lack Name components.",
             Rule::EntropyUnattributedDraws => "getrandom call outside an attributed run window.",
             Rule::ScenarioError => "Load-time or runtime ScenarioError paths.",
+            Rule::NoActiveCamera => "Post-readiness ECS scan: drawable entities present, zero active Camera components.",
+            Rule::NothingOnScreen => "Post-readiness projection scan: no drawable lands inside the camera viewport.",
         }
     }
 
@@ -204,6 +208,8 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ChaosSelectUnnamed => "Gameplay entities without Name by design — use StableId targeting.",
             Rule::EntropyUnattributedDraws => "Background threads drawing entropy concurrently with runs.",
             Rule::ScenarioError => "None known — the error text names the rejected field.",
+            Rule::NoActiveCamera => "Headless/gameplay-only tests with drawables intentionally left unrendered.",
+            Rule::NothingOnScreen => "Orthographic camera framing wider than content, or HUD-only sprites anchored off-camera by design.",
         }
     }
 
@@ -230,6 +236,9 @@ informational by default, escalate with scenario strict_warnings.",
                 // Escalate opt-in via Scenario::strict_warnings.
                 | Rule::BevyWarning
                 | Rule::LogWarn
+                // RF38: no pixel data in headless runs — projection
+                // approximations make nothing_on_screen advisory.
+                | Rule::NothingOnScreen
         )
     }
 }
@@ -285,6 +294,8 @@ declare_rules! {
     ChaosSelectUnnamed => "chaos_select_unnamed",
     EntropyUnattributedDraws => "entropy_unattributed_draws",
     ScenarioError => "scenario_error",
+    NoActiveCamera => "no_active_camera",
+    NothingOnScreen => "nothing_on_screen",
 }
 
 #[cfg(test)]

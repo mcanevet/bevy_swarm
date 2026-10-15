@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "fail",
+  "scaffold": "none",
+  "seeds": [1,2,3,4,5,6,7,8],
+  "duration_s": 2.0,
+  "must_report": [
+    {
+      "rule": "nothing_on_screen",
+      "detail_contains": "off-screen"
+    }
+  ],
+  "must_not_report": [
+    {
+      "rule": "no_active_camera"
+    }
+  ]
+}

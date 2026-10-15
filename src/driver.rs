@@ -248,6 +248,9 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 check_custom_system,
                 // I3: typed oracles after the JSON-DSL checker.
                 crate::typed::run_typed_oracles,
+                // RF38: rendering checks (no_active_camera /
+                // nothing_on_screen) — one-shot, after liveness settles.
+                crate::render_check::render_check_oracle_system,
                 intent_audit_log_system,
                 crate::determinism::record_state_digest_system,
             )
@@ -1074,6 +1077,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             }
         }
     }));
+
+    // RF38: finalize the accumulated rendering-check verdicts
+    // (no_active_camera / nothing_on_screen) while the world is
+    // still alive.
+    crate::render_check::finalize_render_checks(app.world_mut());
 
     // Unwind-safety net: an exclusive system that panicked mid-flight
     // (planner, cheat scheduler) may have removed a resource it was
