@@ -7,12 +7,10 @@
 //! (I4's `changed_since` helper). Rates feed `dead_verb` (an action key
 //! with 0% effect over ≥10 samples) and Z1's vacuity guard.
 
-use bevy::ecs::change_detection::Tick;
 use bevy::ecs::world::World;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::liveness::changed_since;
 use crate::state::{PlaytestState, Violations};
 
 /// Minimum samples before an action key can be declared a dead verb.
@@ -83,18 +81,18 @@ impl ActionEffects {
 /// Effect scope: game-owned state by default (Z6 Gameplay components +
 /// TestApi resource via I4's helper). Optional narrowing arrives with
 /// scenario "effects": {"scope": [...]}.
-fn effect_present(world: &World, tick: u32) -> bool {
-    let since = Tick::new(tick);
-    changed_since(world, since)
-}
-
 /// The I5 oracle: retire pending effects whose window elapsed, count
 /// effective/total per key, report `dead_verb` for keys with 0%
 /// effectiveness over >= DEAD_VERB_MIN_SAMPLES samples (Major).
 pub(crate) fn action_effect_oracle_system(world: &mut World) {
-    let (frame, tps) = {
+    let (frame, tps, liveness_timeout_s) = {
         let state = world.resource::<PlaytestState>();
-        (state.frame, state.tps)
+        let timeout_s = world
+            .resource::<crate::driver::ScenarioResource>()
+            .0
+            .liveness
+            .timeout_s;
+        (state.frame, state.tps, timeout_s)
     };
     // FX1: anchor each action's effect window on the change tick
     // snapshotted at the START of the action's frame (before bots and
@@ -102,9 +100,14 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
     // PlaytestState. The previous late-snapshot (taken in Last, AFTER
     // the game reacted) counted the reaction itself as pre-action
     // state, marking every action ineffective.
-    let frame_ticks: HashMap<u64, u32> = {
+    // FX1: snapshot digests for value-based effect attribution.
+    let frame_digests: HashMap<u64, (u32, String)> = {
         let state = world.resource::<PlaytestState>();
-        state.effect_window_snapshots.iter().copied().collect()
+        state
+            .effect_window_snapshots
+            .iter()
+            .map(|&(f, t, ref d)| (f, (t, d.clone())))
+            .collect()
     };
 
     // FX1: reaction window. Attribution must not span MULTIPLE actions:
@@ -133,19 +136,33 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
             .expect("ActionEffects initialized by plugin");
         std::mem::take(&mut eff.pending)
     };
-    let tick_by_frame = &frame_ticks;
     let mut still_pending = Vec::new();
     let mut new_rates: Vec<(String, bool)> = Vec::new();
+    // Value-based effect attribution: an action is effective iff the
+    // canonical digest changed between its frame start and retirement
+    // time (current frame). This aligns with le3.23's value-based
+    // liveness and prevents same-value writes (ambient counters,
+    // idempotent rewrites) from masking dead verbs.
+    let now_digest = {
+        let rows = crate::determinism::canonical_state(world);
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in rows {
+            if !k.starts_with("census.") {
+                m.insert(k, v);
+            }
+        }
+        format!("{:?}", m)
+    };
     for p in take_pending.drain(..) {
         if frame.saturating_sub(p.frame) < window {
             still_pending.push(p);
             continue;
         }
-        let Some(tick) = tick_by_frame.get(&p.frame) else {
+        let Some((_tick, digest_at_action)) = frame_digests.get(&p.frame) else {
             still_pending.push(p);
             continue;
         };
-        let effective = effect_present(world, *tick);
+        let effective = now_digest != *digest_at_action;
         new_rates.push((p.action_key.clone(), effective));
     }
     world
@@ -194,10 +211,19 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
             // FX1: dead_verb is Major only when the world was otherwise
             // LIVE (something else responded all along). In a frozen
             // world the liveness oracle owns the diagnosis; flagging
-            // every verb too just doubles the noise.
+            // every verb too just doubles the noise. Scale the live
+            // horizon to the liveness timeout (not the tiny effect
+            // attribution window): a verb is dead while the rest of the
+            // game keeps responding on the liveness timescale.
             let world_live = {
                 let state = world.resource::<PlaytestState>();
-                frame.saturating_sub(state.last_alive_frame) <= window * 4
+                let timeout_frames = (liveness_timeout_s * state.tps as f32) as u64;
+                // The world must have been alive at least ONCE (a
+                // never-alive world belongs to the liveness oracle's
+                // undrivable_game diagnosis) and recently on the
+                // liveness timescale.
+                state.last_alive_frame > 0
+                    && frame.saturating_sub(state.last_alive_frame) <= timeout_frames
             };
             // RF8: at tier 0 the default surface is a GUESS. An
             // ineffective key only gates when the game/scenario

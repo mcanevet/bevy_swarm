@@ -151,10 +151,13 @@ fn main() {
                 app.add_plugins(fixture_spinner::SpinnerGamePlugin);
             }
             "walker" => {
-                app.insert_resource(IntentSurface::new(vec![
-                    SurfaceVariant::Move,
-                    SurfaceVariant::Wait,
-                ]));
+                // le3.23 (RF27): value-based liveness — a walker that
+                // receives no Move intents for the timeout window is
+                // TRUTHFULLY frozen. Drop Wait from the surface so the
+                // chaos bot actually drives the walker (the game
+                // supports movement only; Wait was a harness artifact
+                // masking liveness behavior under tick semantics).
+                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Move]));
                 app.add_plugins(WalkerAdapterPlugin);
                 app.add_plugins(fixture_walker::WalkerGamePlugin);
             }

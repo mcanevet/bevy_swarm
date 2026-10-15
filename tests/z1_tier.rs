@@ -380,3 +380,71 @@ fn report_schema_includes_scope() {
         .collect();
     assert!(errors.is_empty(), "schema errors: {errors:?}");
 }
+
+/// le3.23 (RF27): same-value-write blindness — a system that assigns
+/// the SAME VALUE every frame (no actual change) must still report
+/// frozen_world. The old change-tick scan counted the WRITE as "alive"
+/// even though the value never changed.
+#[test]
+fn same_value_write_fails_not_alive() {
+    // A game with a Gameplay entity whose Transform is reset to the
+    // SAME value every frame — no actual movement, just a write.
+    #[derive(Clone, Default)]
+    struct StaticGamePlugin;
+    impl Plugin for StaticGamePlugin {
+        fn build(&self, app: &mut App) {
+            app.add_systems(Update, |mut q: Query<&mut Transform>| {
+                for mut t in q.iter_mut() {
+                    *t = Transform::IDENTITY; // Same value every frame
+                }
+            });
+        }
+    }
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::input::InputPlugin,
+        bevy::transform::TransformPlugin,
+        StaticGamePlugin,
+        PlaytestPlugin,
+    ));
+    // IntentSurface so chaos bot attempts inputs (the game ignores them).
+    app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Move]));
+    // Spawn a Gameplay entity that gets reset to Identity every frame.
+    app.world_mut()
+        .spawn((Gameplay, Name::new("Static"), Transform::default()));
+
+    let scenario = scenario_json(
+        r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":60},"duration_s":1.5,"invariants":[],"liveness":{"timeout_s":0.2}}"#,
+    );
+    let report = run_scenario(&mut app, &scenario).unwrap();
+    let has_freeze = report.violations.iter().any(|v| v.rule == "frozen_world");
+    assert!(
+        has_freeze,
+        "a world with same-value rewrites (no actual change) must report frozen_world; violations: {:?}",
+        report.violations
+    );
+    assert_ne!(
+        report.status,
+        PlaytestStatus::Pass,
+        "same-value writes must not keep a frozen world alive; violations: {:?}",
+        report.violations
+    );
+}
+
+/// le3.23 (RF27): reject NaN/negative liveness timeouts at load time.
+#[test]
+fn liveness_timeout_rejects_nan_negative() {
+    let bad_nan: Result<Scenario, _> = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"liveness":{"timeout_s":NaN}}"#,
+    );
+    assert!(bad_nan.is_err(), "NaN timeout must reject at deserialize");
+    let bad_neg: Scenario = serde_json::from_str(
+        r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"liveness":{"timeout_s":-1.0}}"#,
+    ).unwrap();
+    let err = bevy_swarm::scenario::validate_scenario(&bad_neg);
+    assert!(
+        err.is_err(),
+        "negative timeout must reject at validate_scenario"
+    );
+}

@@ -825,6 +825,14 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             scenario.duration_s
         )));
     }
+    // I4 (RF27): reject NaN/negative liveness timeouts — they silently
+    // disable frozen_world detection (timeout_frames 0).
+    if !scenario.liveness.timeout_s.is_finite() || scenario.liveness.timeout_s <= 0.0 {
+        return Err(ScenarioError::Rejected(format!(
+            "liveness.timeout_s must be finite and > 0, got {}",
+            scenario.liveness.timeout_s
+        )));
+    }
     let total_ticks = (scenario.duration_s * scenario.tps as f32).ceil() as u64;
     if total_ticks > MAX_TOTAL_TICKS {
         return Err(ScenarioError::Rejected(format!(

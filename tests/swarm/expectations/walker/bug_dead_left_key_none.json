@@ -3,7 +3,7 @@
   "status": "fail",
   "scaffold": "none",
   "seeds": [
-    42
+    7
   ],
   "duration_s": 10.0,
   "must_report": [

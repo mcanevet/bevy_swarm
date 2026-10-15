@@ -632,9 +632,44 @@ pub(crate) fn tick_counter_system(world: &mut bevy::prelude::World) {
     if state.frame_start_ticks.len() > liveness_cap {
         state.frame_start_ticks.pop_front();
     }
-    // FX1: also snapshot for effect windows (I5).
+    // FX1: also snapshot for effect windows (I5). Record the canonical
+    // digest at this frame's start so effect attribution becomes
+    // value-based: an action is effective iff the canonical digest
+    // changed between its frame start and retirement time.
     let frame_now = state.frame;
-    state.effect_window_snapshots.push((frame_now, tick));
+    state.effect_window_snapshots.reserve(1);
+    // Performance pre-filter: canonical_state with reflection is not
+    // cheap; if NOTHING was written since the last snapshot's tick
+    // (world change tick unchanged), the digest is provably identical
+    // — reuse the previous string instead of recomputing.
+    let last_entry_tick = state
+        .effect_window_snapshots
+        .last()
+        .map(|&(_, t, _)| t)
+        .unwrap_or(0);
+    let digest = if tick != last_entry_tick || state.effect_window_snapshots.is_empty() {
+        // Effect-attribution digest: census rows excluded — archetype
+        // topology churn (harness spawning observers mid-run) is not
+        // game state and would falsely mark actions effective.
+        let rows = crate::determinism::canonical_state(world);
+        let mut m = std::collections::BTreeMap::new();
+        for (k, v) in rows {
+            if !k.starts_with("census.") {
+                m.insert(k, v);
+            }
+        }
+        format!("{:?}", m)
+    } else {
+        state
+            .effect_window_snapshots
+            .last()
+            .map(|(_, _, d)| d.clone())
+            .unwrap_or_default()
+    };
+    let mut state = world.resource_mut::<PlaytestState>();
+    state
+        .effect_window_snapshots
+        .push((frame_now, tick, digest));
     if state.effect_window_snapshots.len() > liveness_cap {
         state.effect_window_snapshots.remove(0);
     }

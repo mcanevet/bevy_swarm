@@ -17,7 +17,8 @@ fn build_app() -> App {
     app
 }
 
-#[derive(Component)]
+#[derive(Component, bevy::prelude::Reflect)]
+#[reflect(Component)]
 struct Hand(u32);
 
 #[test]
@@ -29,6 +30,7 @@ fn card_game_not_frozen() {
     )
     .unwrap();
     let mut app = build_app();
+    app.register_type::<Hand>();
     app.add_systems(bevy::app::Startup, |mut commands: Commands| {
         commands.spawn((Name::new("Dealer"), Gameplay, Hand(0)));
     });

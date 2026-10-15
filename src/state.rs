@@ -173,6 +173,10 @@ pub struct PlaytestState {
     pub frozen_frames: u64,
     /// Last frame where any liveness signal was observed (I4).
     pub last_alive_frame: u64,
+    /// le3.23 (RF27): value-based liveness — digest of the canonical
+    /// gameplay state at the previous sample. Same-value RE-writes
+    /// produce an identical digest and count as frozen.
+    pub liveness_digest: String,
     /// Last frame where an intent/action was consumed (I4 turn-based mode).
     pub last_intent_frame: Option<u64>,
     /// Consecutive liveness-sample quanta with NO state change after
@@ -192,9 +196,9 @@ pub struct PlaytestState {
     /// tick recorded N FRAMES ago — the raw tick counter advances per
     /// system run, not per frame, so `now - k` spans microseconds.
     pub(crate) frame_start_ticks: std::collections::VecDeque<u32>,
-    /// FX1: pending effect-window snapshots: (frame, tick) taken at
+    /// FX1: pending effect-window snapshots: (frame, tick, digest) taken at
     /// action application time; the effect oracle consumes them.
-    pub(crate) effect_window_snapshots: Vec<(u64, u32)>,
+    pub(crate) effect_window_snapshots: Vec<(u64, u32, String)>,
     /// Readiness gate: frames spent waiting for `GameReady` before
     /// scenario duration began accruing (UE IsReady analog).
     pub pre_ready_frames: u64,
@@ -460,6 +464,7 @@ impl PlaytestState {
             eventually_state: HashMap::default(),
             frozen_frames: 0,
             last_alive_frame: 0,
+            liveness_digest: String::new(),
             last_intent_frame: None,
             stuck_after_intent_quanta: 0,
             inference_last_archetype_len: 0,
