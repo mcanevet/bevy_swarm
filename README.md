@@ -1,7 +1,5 @@
 # bevy_swarm
 
-[![Sponsor](https://img.shields.io/badge/sponsor-%40mcanevet-db61a2?logo=github-sponsors&style=flat-square)](https://github.com/sponsors/mcanevet)
-
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
 **Targets Bevy 0.20** (`0.20.0` on crates.io). Uses the `MessageReader`/`MessageWriter` buffered-event API.
@@ -270,8 +268,10 @@ token setup, and the design decision context.
 
 ## Contributing
 
-Contributions are welcome! By submitting a contribution you agree it is
-licensed under **MIT OR Apache-2.0**, at the option of the project.
+Contributions are welcome! Unless you explicitly state otherwise, any
+contribution intentionally submitted for inclusion in the work by you,
+as defined in the Apache-2.0 license, shall be dual licensed as above,
+without any additional terms or conditions.
 
 ## License
 
@@ -289,7 +289,3 @@ submitted for inclusion in the work by you, as defined in the
 Apache-2.0 license, shall be dual licensed as above, without any
 additional terms or conditions.
 
-## Sponsor
-
-bevy_swarm is free (MIT/Apache-2.0). If your studio ships with it,
-consider [sponsoring @mcanevet](https://github.com/sponsors/mcanevet).
