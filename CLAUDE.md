@@ -16,6 +16,23 @@ bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
 ```
 
+
+## Release Order and Dependencies
+
+- **Release order is mandatory**: v0.N work starts only after RV v0.(N-1) is closed.
+  - v0.1: RV swarm-le3.1
+  - v0.2: RV swarm-2yc.1
+  - v0.3: RV swarm-1w8.8
+  - v0.4: RV swarm-1w8.9
+  - v0.5: RV swarm-1w8.10
+  - v0.6: RV swarm-1w8.11
+- **Never remove a dependency on a release-review (RV) bead**.
+- **Never close a bead whose dependencies are open** (no --force). If blocked, take other work from `bd ready`.
+- **New beads must get a release:vX label** (+ gating) or non-gating, and depend on the previous release's RV bead.
+- **Close reasons list every item as DONE** (commit/test) or NOT DONE (+ follow-up bead id).
+- **Never publish, push tags, create releases, change licensing, or post externally without the user's explicit approval** (swarm-le3.15 is the user's publish task).
+
+
 ### Rules
 
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
