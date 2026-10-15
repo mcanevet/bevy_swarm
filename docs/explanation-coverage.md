@@ -52,6 +52,20 @@ works, and the known limitations.*
   the run active when it lands. For strict isolation, use the
   external subprocess tiers (smoke / BRP-driven).
 
+## What bevy_swarm does NOT check
+
+**Rendering/pixels.** Headless runs strip the render family — a
+game that renders nothing would otherwise pass. The structural
+checks `no_active_camera` (drawables present, zero active cameras)
+and `nothing_on_screen` (nothing projects inside the viewport)
+catch the common blank-window causes, but **pixels are never
+verified**: every headless run lists "rendering" in
+`scope.unchecked` with reason "headless: pixels not verified", and
+the summary prints `[rendering not verified]`. Recommendation: run
+your game windowed once before shipping. Deeper verification
+(screenshots, a `rendering_verified` flag) is planned in
+swarm-1tw (v0.3).
+
 ## Known experimental limitations
 
 - `autotest()` — false positives on default intent keys and static

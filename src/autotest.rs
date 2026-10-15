@@ -382,8 +382,15 @@ impl AutotestReport {
         } else {
             String::new()
         };
+        // RF38: "pass" must never read as "it renders" — headless
+        // runs do not verify pixels. Always print the caveat.
+        let render_note = if self.scope.inactive.iter().any(|(f, _)| f == "rendering") {
+            " [rendering not verified]"
+        } else {
+            ""
+        };
         format!(
-            "autotest: {} seeds, {} failing runs ({} unique), {}s total, {}%{}, {}{}",
+            "autotest: {} seeds, {} failing runs ({} unique), {}s total, {}%{}, {}{}{}",
             self.budget.seeds_run,
             self.runs.iter().filter(|r| r.status != "pass").count(),
             self.failures.len(),
@@ -398,7 +405,8 @@ impl AutotestReport {
                 "gate: FAIL"
             },
             surface_info,
-            gate_info
+            gate_info,
+            render_note
         )
     }
 

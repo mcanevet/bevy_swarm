@@ -59,6 +59,8 @@ Expectation files (X2) reference only these names.
 | `chaos_select_unnamed` | major |
 | `entropy_unattributed_draws` | informational |
 | `scenario_error` | major |
+| `no_active_camera` | major |
+| `nothing_on_screen` | informational |
 
 ## Reference
 
@@ -461,6 +463,22 @@ Expectation files (X2) reference only these names.
 **Detects:** Load-time or runtime ScenarioError paths.
 
 **False-positive modes:** None known — the error text names the rejected field.
+
+### `no_active_camera`
+
+**Kind:** major (fails the run) — After readiness, if drawable entities exist but zero active cameras, the game likely renders nothing.
+
+**Detects:** Post-readiness ECS scan: drawable entities present, zero active Camera components.
+
+**False-positive modes:** Headless/gameplay-only tests with drawables intentionally left unrendered.
+
+### `nothing_on_screen`
+
+**Kind:** informational (reported, never gates run status) — Drawable entities exist but none project inside the viewport after readiness — they may be off-screen.
+
+**Detects:** Post-readiness projection scan: no drawable lands inside the camera viewport.
+
+**False-positive modes:** Orthographic camera framing wider than content, or HUD-only sprites anchored off-camera by design.
 
 Notes:
 - `crash` is a report **status**, not a rule.

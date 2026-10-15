@@ -129,6 +129,8 @@ impl Violations {
         // Scenario::strict_warnings (see driver escalation set).
         crate::rules::Rule::BevyWarning,
         crate::rules::Rule::LogWarn,
+        // RF38: projection approximation, not pixel truth.
+        crate::rules::Rule::NothingOnScreen,
     ];
 }
 
@@ -145,6 +147,18 @@ pub struct PlaytestState {
     pub(crate) warned_paths: HashSet<String>,
     /// FX12 (I4): one-shot — liveness.mode was off this run.
     pub(crate) warned_liveness_off: bool,
+    /// RF38 accumulator: drawables existed at some check this run.
+    pub(crate) rendering_has_drawables: bool,
+    /// RF38 accumulator: an active camera coexisted with drawables at
+    /// some check. Fail-open (true) until a check observes otherwise.
+    pub(crate) rendering_seen_active_camera: bool,
+    /// RF38 accumulator: a drawable projected inside a viewport at
+    /// some check.
+    pub(crate) rendering_seen_drawable_inside: bool,
+    /// RF38 accumulator: at least one projection succeeded this run
+    /// (fail-open when no camera could project at all — e.g. apps
+    /// without WindowPlugin have no derivable viewport).
+    pub(crate) rendering_saw_projection: bool,
     /// x4k: one-shot — liveness frame history evicted before an intent
     /// frame (should be unreachable since the ring cap scales with tps).
     pub(crate) warned_liveness_history_evicted: bool,
@@ -457,6 +471,10 @@ impl PlaytestState {
             delta_windows: HashMap::default(),
             warned_paths: HashSet::default(),
             warned_liveness_off: false,
+            rendering_has_drawables: false,
+            rendering_seen_active_camera: true,
+            rendering_seen_drawable_inside: false,
+            rendering_saw_projection: false,
             warned_liveness_history_evicted: false,
             coverage: Coverage::default(),
             frame_timing: FrameTimingStats::default(),

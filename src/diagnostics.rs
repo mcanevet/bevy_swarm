@@ -306,6 +306,17 @@ pub fn compute_run_scope(world: &World, scenario: &crate::scenario::Scenario) ->
         ));
     }
 
+    // RF38: pixel truth is unavailable headless — the render family
+    // is stripped, so "pass" must never read as "it renders". The
+    // no_active_camera/nothing_on_screen checks narrow the blind
+    // spot structurally but do not close it.
+    inactive.push((
+        "rendering".into(),
+        "headless: pixels not verified — run the game windowed once to confirm it renders \
+         (structural checks no_active_camera/nothing_on_screen ran; see docs/rules.md)"
+            .into(),
+    ));
+
     build_checked_scope(world, actuators, active, inactive)
 }
 

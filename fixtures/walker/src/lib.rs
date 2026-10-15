@@ -26,7 +26,38 @@ pub struct MoveEvent {
 }
 
 fn setup(mut commands: Commands) {
-    commands.spawn((Player, Transform::default(), LogicalPosition::default()));
+    // RF38: a visible player (camera + sprite) in the clean variant.
+    // The no_camera/offscreen bugs mutate these.
+    commands.spawn(Camera2d);
+    commands.spawn((
+        Player,
+        Transform::default(),
+        LogicalPosition::default(),
+        Sprite::default(),
+    ));
+}
+
+/// BUG no_camera: identical to clean, minus the camera — the game
+/// state works but the window renders nothing.
+fn setup_no_camera(mut commands: Commands) {
+    commands.spawn((
+        Player,
+        Transform::default(),
+        LogicalPosition::default(),
+        Sprite::default(),
+    ));
+}
+
+/// BUG offscreen: camera + sprite, but the sprite spawns far away —
+/// state works, screen shows the background only.
+fn setup_offscreen(mut commands: Commands) {
+    commands.spawn(Camera2d);
+    commands.spawn((
+        Player,
+        Transform::from_xyz(100000.0, 0.0, 0.0),
+        LogicalPosition::default(),
+        Sprite::default(),
+    ));
 }
 
 /// Tier-0 input: translate keyboard state (ButtonInput<KeyCode>) into
@@ -245,7 +276,12 @@ impl Plugin for WalkerGamePlugin {
         app.add_message::<MoveEvent>();
         app.add_message::<SelectEvent>();
         app.init_resource::<Selection>();
-        app.add_systems(Startup, setup);
+        // RF38: rendering variants replace the clean setup (their own
+        // camera/sprite arrangement); everything else keeps it.
+        let replaces_setup = matches!(bug.as_deref(), Some("no_camera") | Some("offscreen"));
+        if !replaces_setup {
+            app.add_systems(Startup, setup);
+        }
         // Clean: keyboard drives MoveEvents; SelectEvent updates selection.
         app.add_systems(Update, (keyboard_system, select_system_clean).chain());
 
@@ -261,6 +297,8 @@ impl Plugin for WalkerGamePlugin {
                 "panic_on_load",
                 "select_unnamed",
                 "dangling_target",
+                "no_camera",
+                "offscreen",
             ],
         );
         match bug.as_deref() {
@@ -322,6 +360,14 @@ impl Plugin for WalkerGamePlugin {
             Some("dangling_target") => {
                 app.add_systems(Startup, dangling_target_setup);
                 app.add_systems(Update, move_system_clean);
+            }
+            Some("no_camera") => {
+                app.add_systems(Startup, setup_no_camera);
+                app.add_systems(Update, (keyboard_system, move_system_clean).chain());
+            }
+            Some("offscreen") => {
+                app.add_systems(Startup, setup_offscreen);
+                app.add_systems(Update, (keyboard_system, move_system_clean).chain());
             }
             _ => {
                 app.add_systems(Update, move_system_clean);
