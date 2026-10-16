@@ -250,19 +250,21 @@ where
         }
         let target = event.metadata().target().to_string();
         let frame = current_frame();
-        if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
-            let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
-            map.entry(run_id).or_default().push(Captured::Log {
-                level: if level == tracing::Level::ERROR {
-                    Level::ERROR
-                } else {
-                    Level::WARN
-                },
-                target,
-                message,
-                frame,
-            });
-        }
+        // le3.35 (RF45): the layer used to read CURRENT_RUN only, so
+        // error!()/warn!() emitted on WORKER/POOL threads (asset io,
+        // async compute) were silently dropped. Route through
+        // push_captured: thread-local run if set, else pool-thread
+        // fan-out.
+        push_captured(Captured::Log {
+            level: if level == tracing::Level::ERROR {
+                Level::ERROR
+            } else {
+                Level::WARN
+            },
+            target,
+            message,
+            frame,
+        });
     }
 }
 
@@ -311,18 +313,13 @@ pub fn swarm_panic_hook_inner(
         system
     };
 
-    // Push to the global sink if a run is active.
-    if let Some(run_id) = resolve_run() {
-        {
-            let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
-            map.entry(run_id).or_default().push(Captured::Panic {
-                message: message.clone(),
-                location: location.clone(),
-                backtrace: backtrace.clone(),
-                system,
-            });
-        }
-    }
+    // Push to the sink(s) — le3.35 (RF45) fan-out routing.
+    push_captured(Captured::Panic {
+        message,
+        location,
+        backtrace,
+        system,
+    });
 
     previous(info);
 }
@@ -369,15 +366,12 @@ pub fn capture_bevy_error(err: &BevyError, ctx: &ErrorContext) {
     let context = ctx.name().to_string();
     let message = err.to_string();
     let frame = current_frame();
-    if let Some(run_id) = resolve_run() {
-        let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
-        map.entry(run_id).or_default().push(Captured::BevyError {
-            severity,
-            context: context.clone(),
-            message: message.clone(),
-            frame,
-        });
-    }
+    push_captured(Captured::BevyError {
+        severity,
+        context,
+        message,
+        frame,
+    });
 }
 
 /// Per-run chain of the previous (game-installed) error handler, so our
@@ -446,6 +440,38 @@ pub fn clear_current_run() {
 pub fn drain_run(run_id: RunId) -> Vec<Captured> {
     let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
     map.remove(&run_id).unwrap_or_default()
+}
+
+/// le3.35 (RF45): route a captured event to the run(s) it belongs to.
+/// Driver/ECS threads have a thread-local CURRENT_RUN and get the
+/// event directly. Pool threads (IoTaskPool, AsyncComputeTaskPool —
+/// process-global, task-stealing) have NO reliable per-run
+/// attribution: the old code routed the event to the NEWEST run
+/// (next_back), so seed 1's pool panic was filed under seed 3 (wrong
+/// run fails, panicking run passes). When more than one run is
+/// active, fan the event out to ALL concurrently active runs instead
+/// — a shared failure beats a misattributed one. Single active run:
+/// attributing to it is exact.
+fn push_captured(event: Captured) {
+    if let Some(run_id) = CURRENT_RUN.with(Cell::get) {
+        let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(run_id).or_default().push(event);
+        return;
+    }
+    if !on_pool_thread() {
+        return;
+    }
+    let runs: Vec<RunId> = {
+        let runs = GLOBAL_RUNS.lock().unwrap_or_else(|e| e.into_inner());
+        runs.iter().copied().collect()
+    };
+    if runs.is_empty() {
+        return;
+    }
+    let mut map = SINK.lock().unwrap_or_else(|e| e.into_inner());
+    for run_id in runs {
+        map.entry(run_id).or_default().push(event.clone());
+    }
 }
 
 #[cfg(test)]

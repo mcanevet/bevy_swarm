@@ -45,3 +45,92 @@ fn rejected_run_doesnt_leak_handler_chain() {
     let rep = run_scenario(&mut app, &good);
     assert!(rep.is_ok(), "valid scenario must run: {:?}", rep.err());
 }
+
+#[test]
+fn parallel_pool_panic_attributed_to_every_active_run() {
+    // le3.35 (RF45) CRITICAL regression: a pool-thread panic during
+    // PARALLEL runs used to be filed under the NEWEST run only
+    // (resolve_run -> next_back). Seed 1's panic landed on seed 3:
+    // the panicking seed PASSED, an innocent seed FAILED. Now
+    // pool-thread events fan out to ALL concurrently active runs.
+    // Setup: 3 variants run in parallel (run_matrix); variant
+    // "seed1" triggers a cheat that detaches a panicking task on
+    // AsyncComputeTaskPool; seeds 2/3 do nothing. Reverting to
+    // newest-run routing makes seed1 pass and (usually) seed3 fail.
+    use bevy::tasks::AsyncComputeTaskPool;
+    use bevy_swarm::branch::{run_matrix, InProcess};
+    use bevy_swarm::contract::CheatHooks;
+    use std::collections::HashMap;
+
+    let mk_variant = |name: &str, cheat: bool| {
+        let cheats = if cheat {
+            r#"[{"kind":"panic_pool","frame":5}]"#
+        } else {
+            "[]"
+        };
+        let scenario: Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":1.0,"invariants":[],
+                "setup":{{"cheats":{cheats}}}}}"#
+        ))
+        .unwrap();
+        (name.to_string(), scenario)
+    };
+
+    let variants = vec![
+        mk_variant("seed1", true),
+        mk_variant("seed2", false),
+        mk_variant("seed3", false),
+    ];
+
+    let factory = || {
+        let mut app = build_app();
+        #[allow(clippy::type_complexity)]
+        let mut hooks: HashMap<
+            String,
+            Box<dyn Fn(&mut bevy::prelude::World) + Send + Sync>,
+        > = HashMap::new();
+        hooks.insert(
+            "panic_pool".to_string(),
+            Box::new(|_world: &mut bevy::prelude::World| {
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    panic!("seed1 pool panic (le3.35 RF45)");
+                });
+                task.detach();
+            }),
+        );
+        app.insert_resource(CheatHooks(hooks));
+        app
+    };
+
+    let runner = InProcess { factory };
+    let report = run_matrix(&runner, variants, 3).expect("matrix runs");
+    for outcome in &report.outcomes {
+        let panics: Vec<String> = outcome
+            .report
+            .violations
+            .iter()
+            .filter(|v| v.rule == "panic")
+            .map(|v| v.last_detail.clone())
+            .collect();
+        if outcome.variant_name == "seed1" {
+            assert!(
+                outcome.report.status == bevy_swarm::enums::PlaytestStatus::Fail,
+                "seed1 (panicking variant) must FAIL, got {:?} violations={:?}",
+                outcome.report.status,
+                outcome.report.violations
+            );
+        } else {
+            // Fan-out semantics: an innocent seed may ALSO see the
+            // panic (shared, non-reproducible-by-seed attribution) —
+            // the RF45 requirement is ONLY that seed1 fails. But
+            // seed1 must fail because of ITS OWN panic, so seed1's
+            // violations must contain the pool panic detail.
+            assert!(
+                panics.iter().any(|d| d.contains("seed1 pool panic")),
+                "seed1's report must contain its pool panic: {:?}",
+                panics
+            );
+        }
+    }
+}

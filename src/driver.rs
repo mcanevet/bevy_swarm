@@ -618,6 +618,23 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // (IoTaskPool, AsyncComputeTaskPool — no thread-local run id)
     // attribute panics/logs/errors to this run.
     crate::sinks::set_global_run(run_id);
+    // le3.35 (RF45): registration guard created IMMEDIATELY — the
+    // fallible steps below (finish_plugins, single_threaded,
+    // ambiguity, contract resets, compile()) all `?`/return Err
+    // BEFORE HandlerGuard exists, leaving the dead run id in
+    // CURRENT_RUN/GLOBAL_RUNS and a HANDLER_CHAIN entry (contradicting
+    // the comment above). Drop clears everything on ANY exit path;
+    // the later HandlerGuard repeats the clears (idempotent) plus the
+    // handler restore.
+    struct RunRegGuard(crate::sinks::RunId);
+    impl Drop for RunRegGuard {
+        fn drop(&mut self) {
+            crate::sinks::clear_current_run();
+            crate::sinks::clear_global_run(self.0);
+            crate::sinks::clear_previous_handler(self.0);
+        }
+    }
+    let _run_reg_guard = RunRegGuard(run_id);
     // le3.11 (RF7): the swarm error handler and the run-id are BOTH
     // guarded by a single drop guard — a scenario rejected after the
     // handler is installed no longer leaves it half-installed (the
