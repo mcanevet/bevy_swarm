@@ -15,17 +15,13 @@ fn setup(mut commands: Commands) {
     commands.init_resource::<Damage>();
 }
 
-fn damage_system(mut damage: ResMut<Damage>, time: Res<Time>) {
+fn damage_system(mut damage: ResMut<Damage>, bug: Res<BugRes>, time: Res<Time>) {
     // le3.8 (RF4): real dynamics — a live combat tick recomputes the
     // CURRENT damage each frame (base damage scaled by a genuinely
     // changing phase). Same-value rewrites no longer fake liveness:
     // the value actually moves every frame.
     let phase = (time.elapsed_secs() * 0.5).fract();
-    let base = DAMAGE
-        .get()
-        .copied()
-        .unwrap_or(Bug::Clean)
-        .formula(damage.0);
+    let base = bug.0.formula(damage.0);
     damage.0 = base * (1.0 + phase as f64 * 0.1);
 }
 
@@ -38,9 +34,15 @@ pub struct MenuAnim {
     pub speed: f32,
 }
 
-fn menu_anim_system(mut menu: ResMut<MenuAnim>) {
-    menu.speed = DAMAGE.get().copied().unwrap_or(Bug::Clean).menu_speed();
+fn menu_anim_system(mut menu: ResMut<MenuAnim>, bug: Res<BugRes>) {
+    menu.speed = bug.0.menu_speed();
 }
+
+/// le3.36 (RF46): the bug used to live in a process-global OnceLock —
+/// the FIRST app built locked the variant in for every later app in
+/// the process (parallel matrices mixed variants). Per-App resource.
+#[derive(Resource, Clone, Copy)]
+struct BugRes(Bug);
 
 /// Selected bug, resolved ONCE at plugin build (unknown values panic).
 #[derive(Clone, Copy)]
@@ -66,8 +68,6 @@ impl Bug {
     }
 }
 
-static DAMAGE: std::sync::OnceLock<Bug> = std::sync::OnceLock::new();
-
 pub struct RegressionPairGamePlugin;
 
 impl Plugin for RegressionPairGamePlugin {
@@ -85,7 +85,7 @@ impl Plugin for RegressionPairGamePlugin {
                 other
             ),
         };
-        let _ = DAMAGE.set(bug);
+        app.insert_resource(BugRes(bug));
         app.add_systems(Startup, |mut commands: Commands| {
             commands.init_resource::<MenuAnim>();
         });

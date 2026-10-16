@@ -8,6 +8,8 @@
 //! - strict xfail semantics for "pending" cases
 //! - prints a summary: passed / pending / failed / unexpected passes
 
+mod expectation_common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -414,8 +416,10 @@ fn acceptance_suite() {
         let expect_path = golden_dir(fixture).join(format!("{}.json", variant));
         let raw = std::fs::read_to_string(&expect_path)
             .unwrap_or_else(|e| panic!("read {}: {}", expect_path.display(), e));
-        let expectation: serde_json::Value = serde_json::from_str(&raw)
-            .unwrap_or_else(|e| panic!("parse {}: {}", expect_path.display(), e));
+        // le3.36 (RF46): typed loader (deny_unknown_fields) — typo'd
+        // expectation keys must reject in THIS suite too, not just
+        // fx0_gate.
+        let expectation: serde_json::Value = expectation_common::load_typed(&raw, &expect_path);
 
         let scenario_built = build_scenario(&expectation);
         let (report, out_dir) =

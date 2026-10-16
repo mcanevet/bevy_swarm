@@ -15,6 +15,8 @@
 //! Known gaps (seed-dependent misses tracked by follow-up beads):
 //! - walker/bug_dead_left_key: seed 5 misses dead_verb (swarm-lgn)
 
+mod expectation_common;
+
 use serde_json::Value;
 use serial_test::serial;
 use std::path::PathBuf;
@@ -63,67 +65,7 @@ fn load_expectation(fixture: &str, variant: &str) -> Value {
     // le3.20 (RF24): typed parse first — unknown keys (typos like
     // `must_reprot`) must REJECT, not silently skip. Falls back to
     // Value only for pending-stub cases.
-    let typed: Result<TypedExpectation, _> = serde_json::from_str(&raw);
-    if let Err(e) = typed {
-        panic!(
-            "{}: expectation schema violation (unknown or mistyped key?): {}",
-            path.display(),
-            e
-        );
-    }
-    serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e))
-}
-
-/// le3.20 (RF24): typed expectation — a typo'd key like `must_reprot`
-/// previously deserialized fine (extra keys ignored) and the check
-/// silently skipped. deny_unknown_fields makes typos loud.
-/// Fields exist for schema validation only; readers use the Value form.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code)]
-struct TypedExpectation {
-    #[serde(default)]
-    schema_version: Option<u64>,
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    scaffold: Option<String>,
-    #[serde(default)]
-    seeds: Option<Vec<u64>>,
-    #[serde(default)]
-    duration_s: Option<f64>,
-    #[serde(default)]
-    invariants: Option<Value>,
-    #[serde(default)]
-    must_report: Option<Vec<TypedMustReport>>,
-    #[serde(default)]
-    must_not_report: Option<Vec<TypedMustReport>>,
-    #[serde(default)]
-    liveness: Option<Value>,
-    #[serde(default)]
-    bot: Option<Value>,
-    #[serde(default)]
-    input_rate_hz: Option<u64>,
-    #[serde(default)]
-    check_determinism: Option<u64>,
-    #[serde(default)]
-    pending: Option<Value>,
-    /// Regressions carry arbitrary metadata — allowed explicitly.
-    #[serde(default)]
-    metadata: Option<Value>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(dead_code)]
-struct TypedMustReport {
-    rule: String,
-    #[serde(default)]
-    detail_contains: Option<String>,
-    #[serde(default)]
-    target: Option<String>,
-    #[serde(default)]
-    min_count: Option<u64>,
+    crate::expectation_common::load_typed(&raw, &path)
 }
 
 /// Build a scenario JSON honouring the expectation's overrides
@@ -284,6 +226,22 @@ fn check_bug_signal(
     seed: u64,
 ) -> Vec<String> {
     let mut errors = Vec::new();
+    // le3.36 (RF46): the STATUS expectation was never verified here —
+    // a bug variant whose report unexpectedly PASSED stayed green.
+    let want_status = expect.get("status").and_then(|s| s.as_str());
+    if let Some(want) = want_status {
+        let got = match report.status {
+            bevy_swarm::enums::PlaytestStatus::Pass => "pass",
+            bevy_swarm::enums::PlaytestStatus::Fail => "fail",
+            bevy_swarm::enums::PlaytestStatus::Crash => "crash",
+        };
+        if got != want {
+            errors.push(format!(
+                "bug seed {}: expected status '{want}', got '{got}'",
+                seed
+            ));
+        }
+    }
     let violation_objects: Vec<&bevy_swarm::state::ViolationEntry> =
         report.violations.iter().collect();
     if let Some(must) = expect.get("must_report").and_then(|m| m.as_array()) {
@@ -319,6 +277,21 @@ fn check_bug_signal(
                     errors.push(format!(
                         "bug seed {}: must_report '{}' reported but not on target {:?}",
                         seed, rule, target
+                    ));
+                }
+            }
+            // le3.36 (RF46): min_count — the SAME counting semantics as
+            // the bug-disabled guard and acceptance (report_named
+            // merges repeats into one entry whose `count` is the
+            // occurrence count). Without this, a bug firing a rule
+            // ~80x passed a min_count of 200 (only acceptance caught
+            // it; the fx0 gate stayed green).
+            if let Some(min_count) = entry.get("min_count").and_then(|m| m.as_u64()) {
+                let occurrences: u64 = matching.iter().map(|v| v.count).max().unwrap_or(0);
+                if occurrences < min_count {
+                    errors.push(format!(
+                        "bug seed {}: must_report '{}' fired {occurrences}x (< min_count {min_count})",
+                        seed, rule
                     ));
                 }
             }
