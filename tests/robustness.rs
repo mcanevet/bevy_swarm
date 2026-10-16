@@ -194,7 +194,10 @@ fn equals_margin_is_negative_distance() {
     app.add_systems(Update, |mut api: ResMut<TestApi>| api.score = 42);
     let rep = run_scenario(&mut app, &scen).unwrap();
     let r = &rep.robustness;
-    assert!((r.per_invariant["exact"].0 - 0.0).abs() < 1e-9);
+    // le3.34 (RF44): exact equality now yields a strictly POSITIVE
+    // epsilon margin (was 0.0 — made max(-0, rho_R) = -0, breaking
+    // overall<0 iff fail).
+    assert!((r.per_invariant["exact"].0 - bevy_swarm::robustness::EPSILON).abs() < 1e-12);
     assert!((r.per_invariant["off_by_three"].0 - (-3.0)).abs() < 1e-9);
     assert!(
         rep.violations.iter().any(|v| v.rule == "off_by_three"),
@@ -626,130 +629,157 @@ fn numeric_when_text_require_robustness_matches_verdict() {
 
 #[test]
 fn j1_overall_negative_iff_fail_property() {
-    // Randomized property over invariant kinds and thresholds: for every
-    // run, overall < 0 IFF the run has a violation on a robustness-tracked
-    // invariant. Seeded, deterministic.
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::Hash;
+    // le3.34 (RF44): deterministic enumeration of BOUNDARY cases
+    // (value == threshold for every op; Equals/Ne WHEN; eventually
+    // with deadline before/after run end; text WHEN/REQUIRE) plus
+    // seeded random cases. Assert overall<0 IFF a violation was
+    // produced, on the REAL path (run_scenario).
+    let mut cases: Vec<(String, i64, usize, bool, &'static str)> = Vec::new();
+    // (scenario-json fragment tail, score, players, should_fail, phase)
+    let ops = [
+        ("le", "below"),
+        ("ge", "above"),
+        ("lt", "lt"),
+        ("gt", "gt"),
+        ("equals", "equals"),
+        ("ne", "ne"),
+    ];
+    // Boundary: value == threshold, for every op, both directions of
+    // satisfaction around it.
+    for (op, check) in ops {
+        for &(score, expect_fail_exact) in &[(50i64, false), (51, true), (49, false)] {
+            // exact-op semantics: fail depends on op at the boundary
+            let should_fail = match op {
+                "le" => score > 50,
+                "ge" => score < 50,
+                "lt" => score >= 50,
+                "gt" => score <= 50,
+                "equals" => score != 50,
+                _ => score == 50, // "ne"
+            };
+            let _ = expect_fail_exact;
+            cases.push((
+                format!(
+                    r#"{{"name":"b_{op}","rule":"custom","path":"TestApi.score","check":"{check}","value":50}}"#
+                ),
+                score,
+                100,
+                should_fail,
+                "playing",
+            ));
+        }
+    }
+    // Ne boundary: value == threshold must FAIL.
+    cases.push((
+        r#"{"name":"b_ne_eq","rule":"custom","path":"TestApi.score","check":"ne","value":50}"#
+            .into(),
+        50,
+        100,
+        true,
+        "playing",
+    ));
+    // Equals WHEN expert rule at the boundary: WHEN score EQUALS 50
+    // REQUIRE players GE 5, players=0 → must fail with overall<0
+    // (the RF44 critical: rho was max(-0, -5) = -0).
+    cases.push((
+        r#"{"name":"b_exp_equals","rule":"custom","path":"TestApi.score","check":"equals","value":50,"requires_path":"TestApi.active_players","requires_check":"ge","requires_value":5}"#.into(),
+        50, 0, true, "playing",
+    ));
+    // Same but WHEN holds and REQUIRE holds → pass.
+    cases.push((
+        r#"{"name":"b_exp_ok","rule":"custom","path":"TestApi.score","check":"equals","value":50,"requires_path":"TestApi.active_players","requires_check":"ge","requires_value":5}"#.into(),
+        50, 7, false, "playing",
+    ));
+    // Text WHEN/REQUIRE: WHEN phase=menu REQUIRE score ge 0 → pass.
+    cases.push((
+        r#"{"name":"b_text_when","rule":"custom","path":"TestApi.phase","check":"equals","value":"menu","requires_path":"TestApi.score","requires_check":"ge","requires_value":0}"#.into(),
+        10, 3, false, "menu",
+    ));
+    // Text WHEN false (phase=playing) REQUIRE score ge 100 →
+    // VACUOUSLY true: no violation, overall >= 0 (the RF44 minor:
+    // sign inversion enforced the REQUIRE against a false guard).
+    cases.push((
+        r#"{"name":"b_text_vacuous","rule":"custom","path":"TestApi.phase","check":"equals","value":"menu","requires_path":"TestApi.score","requires_check":"ge","requires_value":100}"#.into(),
+        10, 3, false, "playing",
+    ));
+    // Eventually with deadline INSIDE the run: never satisfied → fail.
+    cases.push((
+        r#"{"name":"b_ev_in","rule":"custom","path":"TestApi.score","check":"ge","value":100,"eventually_s":0.1}"#.into(),
+        10, 3, true, "playing",
+    ));
+    // Eventually with deadline PAST the run end (duration 0.15 <
+    // deadline 5.0): never satisfied within the run → MUST fail
+    // (the RF44 critical: previously overall<0 with no violation).
+    cases.push((
+        r#"{"name":"b_ev_past","rule":"custom","path":"TestApi.score","check":"ge","value":100,"eventually_s":5.0}"#.into(),
+        10, 3, true, "playing",
+    ));
+    // Eventually satisfied mid-run → pass.
+    cases.push((
+        r#"{"name":"b_ev_ok","rule":"custom","path":"TestApi.score","check":"ge","value":5,"eventually_s":1.0}"#.into(),
+        10, 3, false, "playing",
+    ));
 
+    // Seeded random cases on top: scores/thresholds on both sides of
+    // the boundaries.
     let mut rng_state = 0xC0FFEEu64;
     let mut next = move || {
-        // xorshift64*
         rng_state ^= rng_state >> 12;
         rng_state ^= rng_state << 25;
         rng_state ^= rng_state >> 27;
         rng_state.wrapping_mul(0x2545F4914F6CDD1D)
     };
-
-    for _ in 0..24 {
-        let pick = next() % 6;
-        let score = (next() % 200) as i64; // 0..199
-        let players = (next() % 500) as usize;
-        let (scen, should_fail) = match pick {
-            0 => {
-                let thr = (next() % 200) as i64;
-                let scen: Scenario = serde_json::from_str(&format!(
-                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
-                        {{"name":"p_cap","rule":"custom","path":"TestApi.score","check":"le","value":{thr}}}]}}"#
-                ))
-                .unwrap();
-                (scen, score > thr)
-            }
-            1 => {
-                let thr = (next() % 200) as i64;
-                let scen: Scenario = serde_json::from_str(&format!(
-                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
-                        {{"name":"p_floor","rule":"custom","path":"TestApi.score","check":"ge","value":{thr}}}]}}"#
-                ))
-                .unwrap();
-                (scen, score < thr)
-            }
-            2 => {
-                let thr = (next() % 500) as i64;
-                let scen: Scenario = serde_json::from_str(&format!(
-                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
-                        {{"name":"p_players","rule":"custom","path":"TestApi.active_players","check":"lt","value":{thr}}}]}}"#
-                ))
-                .unwrap();
-                (scen, (players as i64) >= thr)
-            }
-            3 => {
-                // Expert rule: WHEN score<=thr REQUIRE players>=rthr
-                let thr = (next() % 200) as i64;
-                let rthr = (next() % 500) as i64;
-                let scen: Scenario = serde_json::from_str(&format!(
-                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
-                        {{"name":"p_exp","rule":"custom","path":"TestApi.score","check":"le","value":{thr},
-                          "requires_path":"TestApi.active_players","requires_check":"ge","requires_value":{rthr}}}]}}"#
-                ))
-                .unwrap();
-                (scen, score <= thr && (players as i64) < rthr)
-            }
-            4 => {
-                // Text standalone: custom_text phase vs expectation.
-                let phase = if next() % 2 == 0 { "menu" } else { "playing" };
-                let expect = if next() % 2 == 0 { "playing" } else { "menu" };
-                let scen: Scenario = serde_json::from_str(&format!(
-                    r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[
-                        {{"name":"p_text","rule":"custom","path":"TestApi.phase","check":"equals","value":"{expect}"}}]}}"#
-                ))
-                .unwrap();
-                let mut hasher = DefaultHasher::new();
-                format!("{phase}{expect}").hash(&mut hasher);
-                let sf = phase != expect;
-                // fold phase into the app closure below via scen-tag; simplest:
-                // re-run with the phase inserted through custom_text in caller.
-                // We handle by returning a marker: encode in should_fail and
-                // set phase in the app from the same value.
-                // -> handled by `pick == 4` special-casing below.
-                (scen, sf)
-            }
-            _ => {
-                // Differential: no_decrease on score; constant score passes.
-                let scen: Scenario = serde_json::from_str(
-                    r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.15,"invariants":[
-                        {"name":"p_diff","rule":"custom","path":"TestApi.score","check":"ge","value":0,
-                         "differential":"no_decrease"}]}"#,
-                )
-                .unwrap();
-                (scen, false)
-            }
+    for _ in 0..12 {
+        let score = (next() % 200) as i64;
+        let thr = (next() % 200) as i64;
+        let (op, check) = ops[(next() % 6) as usize];
+        let should_fail = match op {
+            "le" => score > thr,
+            "ge" => score < thr,
+            "lt" => score >= thr,
+            "gt" => score <= thr,
+            "equals" => score != thr,
+            _ => score == thr,
         };
+        cases.push((
+            format!(
+                r#"{{"name":"r_{op}_{thr}","rule":"custom","path":"TestApi.score","check":"{check}","value":{thr}}}"#
+            ),
+            score,
+            100,
+            should_fail,
+            "playing",
+        ));
+    }
 
-        let is_text_case = pick == 4;
+    for (inv_json, score, players, should_fail, phase) in cases {
+        let phase = phase.to_string();
+        let scen: Scenario = serde_json::from_str(&format!(
+            r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":0.15,"invariants":[{inv_json}]}}"#
+        ))
+        .unwrap();
         let mut app = build_app();
-        if is_text_case {
-            // Phase differs from the invariant's expected value exactly
-            // when should_fail (both drawn from the same seeded RNG).
-            let inv_val = scen.invariants[0]
-                .value
-                .as_ref()
-                .and_then(|v| v.as_str())
-                .unwrap_or("playing")
-                .to_string();
-            app.add_systems(Update, move |mut api: ResMut<TestApi>| {
-                let phase = if inv_val == "playing" {
-                    "menu"
-                } else {
-                    "playing"
-                };
-                api.custom_text.insert("phase".into(), phase.into());
-            });
-        }
         app.add_systems(Update, move |mut api: ResMut<TestApi>| {
             api.score = score;
             api.active_players = players;
+            api.custom_text.insert("phase".into(), phase.clone());
         });
         let rep = run_scenario(&mut app, &scen).unwrap();
         let overall_neg = rep.robustness.overall.map(|o| o < 0.0).unwrap_or(false);
-        let failed = !rep.violations.is_empty();
+        let failed = rep.violations.iter().any(|v| v.rule != "bevy_suppressed");
+        let inv_name = scen.invariants[0].name.clone();
         assert_eq!(
-            should_fail, overall_neg,
-            "property overall<0: pick={pick} score={score} players={players}"
+            should_fail,
+            overall_neg,
+            "J1 overall sign: {inv_name} score={score} players={players} violations={:?}",
+            rep.violations
+                .iter()
+                .map(|v| v.rule.clone())
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             should_fail, failed,
-            "property violations: pick={pick} score={score} players={players}"
+            "J1 violation presence: {inv_name} score={score} players={players}",
         );
     }
 }

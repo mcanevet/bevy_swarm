@@ -1355,13 +1355,17 @@ pub(crate) fn check_custom_system(world: &mut World) {
                         crate::robustness::threshold_margin(wc, cur, w_thr)
                     }
                     _ => {
-                        // Text or unconditional WHEN: vacuously
-                        // satisfied when false (guard lifts to ∞), +1
-                        // margin when it holds.
+                        // Text or unconditional WHEN. le3.34 (RF44):
+                        // the OLD sign here was inverted — WHEN false
+                        // set rho_w = +∞ so -rho_w = -∞ dominated the
+                        // max() and ENFORCED the REQUIRE against a
+                        // false guard. Vacuous truth needs
+                        // -rho_w = +∞, i.e. rho_w = -∞; a holding
+                        // guard contributes a +1 margin.
                         if when_holds {
                             1.0
                         } else {
-                            f64::INFINITY
+                            f64::NEG_INFINITY
                         }
                     }
                 };
@@ -1728,5 +1732,54 @@ mod tests_716_33 {
             "growth must be bounded, got {}",
             state.api_history.len()
         );
+    }
+}
+
+/// le3.34 (RF44): end-of-run eventually reconciliation. An eventually
+/// rule whose deadline extends past the run's duration never hits its
+/// in-frame expiry check (`elapsed_s >= deadline` is unreachable) —
+/// the run ends with overall<0 (observe_max tracked only negative
+/// margins) but NO violation (J1 broken). Report at run end: an
+/// eventually rule never satisfied by the END OF THE RUN failed,
+/// regardless of whether the deadline or the duration came first.
+pub(crate) fn finalize_eventually_rules(world: &mut World) {
+    let Some(scenario_res) = world.get_resource::<crate::driver::ScenarioResource>() else {
+        return;
+    };
+    let duration_s = scenario_res.0.duration_s;
+    let invariants: Vec<(String, f32)> = scenario_res
+        .0
+        .invariants
+        .iter()
+        .filter_map(|inv| inv.eventually_s.map(|d| (inv.name.clone(), d)))
+        .collect();
+    for (name, deadline) in invariants {
+        // Only the UNREACHABLE-in-frame case: a deadline extending
+        // past the run end never triggers the per-frame expiry check
+        // (`elapsed_s >= deadline` is false on every frame). Deadlines
+        // expiring inside the run are reported by the per-frame path.
+        if deadline <= duration_s {
+            continue;
+        }
+        let Some(state) = world.get_resource::<crate::state::PlaytestState>() else {
+            continue;
+        };
+        let Some((_, first_hold)) = state.eventually_state.get(&name) else {
+            // Rule never evaluated (no reachable path frames?) —
+            // nothing observed; don't invent a violation.
+            continue;
+        };
+        if first_hold.is_some() {
+            // Satisfied before the run ended — a hold is a hold.
+            continue;
+        }
+        let frame = state.frame;
+        let detail = format!(
+            "{} never satisfied within the run duration {:.1}s (eventually deadline {:.1}s extends past the run end)",
+            name, duration_s, deadline
+        );
+        world
+            .resource_mut::<crate::state::Violations>()
+            .report_named(&name, "", detail, frame);
     }
 }

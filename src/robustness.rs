@@ -106,7 +106,11 @@ fn normalized(scale: f64) -> f64 {
 /// equals: -(distance) (0 when equal); ne: +distance.
 // le3.9 (RF5): strict ops at boundary return -EPSILON so that
 // violations give rho<0 (overall<0 iff fail property).
-const EPSILON: f64 = 1e-9;
+// le3.34 (RF44): satisfied Le/Ge at the exact boundary and Equals
+// at exact equality return +EPSILON (strictly positive) — a 0.0
+// margin made max(-0.0, rho_R) = -0.0, which is NOT < 0 while the
+// run failed (J1 broken).
+pub const EPSILON: f64 = 1e-9;
 pub fn threshold_margin(check: crate::enums::CheckOp, value: f64, thr: f64) -> f64 {
     use crate::enums::CheckOp::*;
     match check {
@@ -114,6 +118,8 @@ pub fn threshold_margin(check: crate::enums::CheckOp, value: f64, thr: f64) -> f
             let m = thr - value;
             if matches!(check, Lt) && m.abs() < EPSILON {
                 -EPSILON
+            } else if m == 0.0 {
+                EPSILON
             } else {
                 m
             }
@@ -122,6 +128,8 @@ pub fn threshold_margin(check: crate::enums::CheckOp, value: f64, thr: f64) -> f
             let m = value - thr;
             if matches!(check, Gt) && m.abs() < EPSILON {
                 -EPSILON
+            } else if m == 0.0 {
+                EPSILON
             } else {
                 m
             }
@@ -129,7 +137,7 @@ pub fn threshold_margin(check: crate::enums::CheckOp, value: f64, thr: f64) -> f
         Equals => {
             let d = (value - thr).abs();
             if d == 0.0 {
-                0.0
+                EPSILON
             } else {
                 -d
             }
