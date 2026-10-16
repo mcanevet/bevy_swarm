@@ -1109,6 +1109,11 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
             .insert_resource(crate::typed::TypedRegistry::default());
     }
 
+    // le3.34 (RF44): reconcile eventually rules whose deadline
+    // extends past the run duration (otherwise overall<0 with no
+    // violation — J1 broken). Must run BEFORE PlaytestState is
+    // removed below.
+    crate::oracles::finalize_eventually_rules(app.world_mut());
     let state = app
         .world_mut()
         .remove_resource::<PlaytestState>()
