@@ -494,7 +494,15 @@ impl Plugin for AgentPlugin {
             // before the next PreUpdate sweep ran. Sweeping again in
             // RemoteLast (before serving) closes the one-frame window
             // permanently, even for methods re-inserted every frame.
-            .add_systems(bevy::remote::RemoteLast, agent_method_allowlist_sweep)
+            // le3.37 (RF47): `.before(ProcessRequests)` — bevy-remote
+            // 0.20 runs process_remote_requests in the SAME schedule
+            // set; unordered systems left the serve window open by
+            // scheduling luck (flaky across machines). Explicit order
+            // closes it deterministically.
+            .add_systems(
+                bevy::remote::RemoteLast,
+                agent_method_allowlist_sweep.before(bevy::remote::RemoteSystems::ProcessRequests),
+            )
             .add_plugins(
                 guarded_remote_plugin()
                     .with_method_main("playtest/schema", playtest_schema)
@@ -514,6 +522,15 @@ impl Plugin for AgentPlugin {
                     .with_address(self.config.addr)
                     .with_port(self.config.port),
             );
+
+        // le3.37 (RF47): snapshot OUR handler ids immediately after the
+        // guarded plugin builds. Later plugins (or runtime systems) can
+        // REPLACE an allow-listed method's handler by re-registering
+        // the same NAME — the old sweep kept it (name matched) with the
+        // game's UNGUARDED handler. The sweep now restores OUR handler
+        // when the current id differs from this snapshot.
+        let snapshot = snapshot_guarded_handlers(app.world_mut());
+        app.insert_resource(snapshot);
     }
 
     fn finish(&self, app: &mut App) {
@@ -534,6 +551,15 @@ impl Plugin for AgentPlugin {
             {
                 render_app.world_mut().insert_resource(RemoteMethods::new());
             }
+            // le3.37 (RF47): the render RemoteLast table was only
+            // cleared ONCE at finish — a runtime system re-registering
+            // a render method went unswept and was served. Sweep every
+            // RemoteLast tick (ordered before ProcessRequests), like
+            // the main-world sweep.
+            render_app.add_systems(
+                bevy::remote::RemoteLast,
+                render_method_allowlist_sweep.before(bevy::remote::RemoteSystems::ProcessRequests),
+            );
         }
     }
 }
@@ -1296,62 +1322,118 @@ pub fn release_guard_decision(deny: bool) -> Result<(), String> {
 /// PLAYTEST_METHODS, the guarded world.* read-only trio, or the
 /// token-guarded discovery set is removed from the MAIN table; the
 /// render table is emptied entirely (render-world BRP is disabled).
+const ALLOWED: &[&str] = &[
+    // playtest/* (token-guarded via brp_params)
+    "playtest/schema",
+    "playtest/observe",
+    "playtest/intent",
+    "playtest/key",
+    "playtest/pointer",
+    "playtest/reset",
+    "playtest/cheat",
+    "playtest/actions",
+    "playtest/state",
+    "playtest/screenshot",
+    "playtest/diagnostics",
+    // token-guarded read-only world introspection
+    "world.get_components",
+    "world.query",
+    "world.list_components",
+    "world.get_resources",
+    // token-guarded discovery
+    "rpc.discover",
+    "registry.schema",
+    "schedule.list",
+    "schedule.graph",
+];
+
+const MUTATION_STUBS: &[&str] = &[
+    "world.spawn_entity",
+    "world.insert_components",
+    "world.remove_components",
+    "world.despawn_entity",
+    "world.reparent_entities",
+    "world.mutate_components",
+    "world.insert_resources",
+    "world.remove_resources",
+    "world.mutate_resources",
+    "world.list_resources",
+    "world.trigger_event",
+    "world.write_message",
+    "world.observe+watch",
+    "world.get_components+watch",
+    "world.list_components+watch",
+];
+
+/// le3.37 (RF47): snapshot our guarded handlers immediately after
+/// plugin build. The sweep restores these handlers when a later
+/// plugin/runtime system replaces an allow-listed method's handler.
+fn snapshot_guarded_handlers(world: &mut World) -> GuardedMethodSnapshot {
+    use bevy::remote::RemoteMethods;
+    let mut map = std::collections::HashMap::new();
+    if let Some(methods) = world.get_resource::<RemoteMethods>() {
+        for name in methods.methods() {
+            if let Some(id) = methods.get(&name) {
+                // Allow-list + stubs are OUR handlers.
+                if ALLOWED.contains(&name.as_str()) || MUTATION_STUBS.contains(&name.as_str()) {
+                    map.insert(name, *id);
+                }
+            }
+        }
+    }
+    GuardedMethodSnapshot(map)
+}
+
+#[derive(Resource, Default)]
+struct GuardedMethodSnapshot(std::collections::HashMap<String, bevy::remote::RemoteMethodSystemId>);
+
+/// le3.37 (RF47): render-world sweep — re-empty the render method
+/// table every RemoteLast tick (ordered before ProcessRequests). The
+/// finish()-time clear missed runtime re-registrations.
+fn render_method_allowlist_sweep(world: &mut World) {
+    use bevy::remote::RemoteMethods;
+    if world
+        .remove_resource::<RemoteMethods>()
+        .replace(RemoteMethods::new())
+        .is_some()
+    {
+        // Table had entries — cleared; re-insert the empty table.
+        world.insert_resource(RemoteMethods::new());
+    }
+}
+
 fn agent_method_allowlist_sweep(world: &mut World) {
     use bevy::remote::RemoteMethods;
-    const ALLOWED: &[&str] = &[
-        // playtest/* (token-guarded via brp_params)
-        "playtest/schema",
-        "playtest/observe",
-        "playtest/intent",
-        "playtest/key",
-        "playtest/pointer",
-        "playtest/reset",
-        "playtest/cheat",
-        "playtest/actions",
-        "playtest/state",
-        "playtest/screenshot",
-        "playtest/diagnostics",
-        // token-guarded read-only world introspection
-        "world.get_components",
-        "world.query",
-        "world.list_components",
-        "world.get_resources",
-        // token-guarded discovery
-        "rpc.discover",
-        "registry.schema",
-        "schedule.list",
-        "schedule.graph",
-    ];
+
     // Disabling stubs stay REGISTERED (they return METHOD_NOT_FOUND +
     // a clear message); sweeping them out entirely would leak less
     // info but also hides the error contract. The stubs are the
     // enforcement; unknown methods (added by other plugins) are dropped.
-    const MUTATION_STUBS: &[&str] = &[
-        "world.spawn_entity",
-        "world.insert_components",
-        "world.remove_components",
-        "world.despawn_entity",
-        "world.reparent_entities",
-        "world.mutate_components",
-        "world.insert_resources",
-        "world.remove_resources",
-        "world.mutate_resources",
-        "world.list_resources",
-        "world.trigger_event",
-        "world.write_message",
-        "world.observe+watch",
-        "world.get_components+watch",
-        "world.list_components+watch",
-    ];
+
     if let Some(methods) = world.remove_resource::<RemoteMethods>() {
+        // le3.37 (RF47): restore OUR handler for allow-listed names when
+        // the current one is NOT the snapshotted guarded handler (a
+        // game re-registering "world.query" or "playtest/observe" used
+        // to keep its unguarded handler — the filter was name-only).
+        let snapshot = world
+            .remove_resource::<GuardedMethodSnapshot>()
+            .unwrap_or_default();
         let mut kept = RemoteMethods::new();
         for name in methods.methods() {
-            if ALLOWED.contains(&name.as_str()) || MUTATION_STUBS.contains(&name.as_str()) {
-                if let Some(handler) = methods.get(&name) {
-                    kept.insert(name.clone(), *handler);
-                }
+            let is_allowed =
+                ALLOWED.contains(&name.as_str()) || MUTATION_STUBS.contains(&name.as_str());
+            if !is_allowed {
+                continue;
+            }
+            // Fail closed: keep ONLY the snapshotted guarded handler.
+            // If the current handler is someone else's re-registration
+            // of an allow-listed name, OURS is restored (or the entry is
+            // dropped when we never had one).
+            if let Some(ours) = snapshot.0.get(&name) {
+                kept.insert(name.clone(), *ours);
             }
         }
+        world.insert_resource(snapshot);
         world.insert_resource(kept);
     }
 }

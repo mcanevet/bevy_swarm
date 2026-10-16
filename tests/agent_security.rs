@@ -685,3 +685,128 @@ fn le324_reset_cheat_missing_hooks_no_panic() {
         "cheat with missing hooks must return unknown-kind error, got: {resp}"
     );
 }
+
+/// le3.37 (RF47): same-frame HTTP acceptance for the Update-inserted
+/// rogue method. The old test only inspected the table AFTER the
+/// frame; this sends a REAL HTTP request WHILE the rogue method is
+/// being re-inserted every frame — if the RemoteLast sweep were
+/// unordered w.r.t. process_remote_requests, the rogue could be
+/// served.
+#[test]
+#[serial_test::serial]
+fn le337_http_request_during_frame_rogue_method_not_served() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+
+    // A game Update system that re-inserts a rogue method EVERY frame.
+    let handler_id =
+        app.world_mut()
+            .register_system(|_: bevy::ecs::system::In<Option<serde_json::Value>>| {
+                Ok(serde_json::json!({"evil": "ran"}))
+            });
+    let make_rogue = move || {
+        let mut rogue = bevy::remote::RemoteMethods::new();
+        rogue.insert(
+            "game.evil",
+            bevy::remote::RemoteMethodSystemId::Instant(handler_id),
+        );
+        rogue
+    };
+    let rogue_for_system = make_rogue();
+    let mut rogue_opt = Some(rogue_for_system);
+    app.add_systems(
+        bevy::app::Update,
+        move |mut commands: bevy::ecs::system::Commands| {
+            // Re-insert EVERY frame (the sweep deletes it each
+            // RemoteLast; the game never stops trying).
+            commands.insert_resource(make_rogue());
+            let _ = rogue_opt.take();
+        },
+    );
+
+    // HTTP roundtrip DURING the frames where the rogue is present in
+    // the table between Update and RemoteLast. `brp_roundtrip` pumps
+    // app.update() while waiting — the server serves within those
+    // frames. The rogue must be METHOD_NOT_FOUND, never executed.
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "game.evil",
+            "id": 1,
+            "params": {}
+        }),
+    );
+    let code = resp
+        .get("error")
+        .and_then(|e| e.get("code"))
+        .and_then(serde_json::Value::as_i64);
+    assert_eq!(
+        code,
+        Some(-32601),
+        "rogue Update-inserted method must be METHOD_NOT_FOUND over HTTP, got: {resp}"
+    );
+}
+
+/// le3.37 (RF47): a game re-registering an ALLOW-LISTED method name
+/// (here world.query) with its OWN handler used to keep its unguarded
+/// handler — the sweep filtered by name only. Now the sweep restores
+/// the snapshotted guarded handler. Over HTTP: a call WITHOUT a token
+/// must still be auth-rejected (our guard), not the game's handler.
+#[test]
+#[serial_test::serial]
+fn le337_game_reregistered_allowed_method_keeps_guarded_handler() {
+    let port = free_port();
+    let mut app = bevy::app::App::new();
+    app.add_plugins(bevy::MinimalPlugins);
+    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
+        bevy_swarm::agent::AgentConfig {
+            port,
+            token: Some("sekrit".into()),
+            ..Default::default()
+        },
+    ));
+
+    // Game replaces world.query with its own UNguarded handler.
+    let evil_id =
+        app.world_mut()
+            .register_system(|_: bevy::ecs::system::In<Option<serde_json::Value>>| {
+                Ok(serde_json::json!({"evil": "world.query hijacked"}))
+            });
+    app.add_systems(
+        bevy::app::Update,
+        move |mut commands: bevy::ecs::system::Commands| {
+            let mut rogue = bevy::remote::RemoteMethods::new();
+            rogue.insert(
+                "world.query",
+                bevy::remote::RemoteMethodSystemId::Instant(evil_id),
+            );
+            commands.insert_resource(rogue);
+        },
+    );
+
+    // Without a token: our guarded handler must respond (auth-rejected).
+    let resp = brp_roundtrip(
+        &mut app,
+        port,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "world.query",
+            "id": 2,
+            "params": {"data": {}}
+        }),
+    );
+    assert!(
+        is_auth_rejected(&resp),
+        "hijacked world.query must remain token-guarded, got: {resp}"
+    );
+}
