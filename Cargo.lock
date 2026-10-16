@@ -1752,16 +1752,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_swarm_cli"
-version = "0.1.0"
-dependencies = [
- "bevy_swarm",
- "jsonschema",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "bevy_tasks"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2207,6 +2197,16 @@ dependencies = [
  "rustix 0.38.44",
  "wayland-backend",
  "wayland-client",
+]
+
+[[package]]
+name = "cargo-bevy-swarm"
+version = "0.1.0"
+dependencies = [
+ "bevy_swarm",
+ "jsonschema",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

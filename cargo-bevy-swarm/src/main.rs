@@ -1,26 +1,28 @@
-//! cargo-swarm: CLI scaffolding for bevy_swarm playtests.
+//! cargo-bevy-swarm: CLI scaffolding for bevy_swarm playtests.
 //!
 //! Subcommands:
-//! - `cargo swarm init [--package <name>] [--yes]` — detect the game's
+//! - `cargo bevy-swarm init [--package <name>] [--yes]` — detect the game's
 //!   root plugin and generate `tests/swarm.rs` (safe to edit).
-//! - `cargo swarm run [--seeds N] [--duration S]` — run the generated
+//! - `cargo bevy-swarm run [--seeds N] [--duration S]` — run the generated
 //!   test with env overrides; `--plugin <path>` uses the external
 //!   runner (X1 CLI mode) that never touches the game's dev-deps.
-//! - `cargo swarm report` — pretty-print the last autotest report.
+//! - `cargo bevy-swarm report` — pretty-print the last autotest report.
 //!
 //! Install (until the user approves publishing):
-//! `cargo install --path bevy_swarm_cli` from the bevy_swarm checkout.
+//! `cargo install cargo-bevy-swarm` from crates.io.
 
 use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // cargo invokes binaries as `cargo-swarm swarm ...` — the first
+    // cargo invokes binaries as `cargo-bevy-swarm bevy-swarm ...` — the first
     // arg is the subcommand after the binary name.
-    let args: Vec<String> = if args.first().map(String::as_str) == Some("swarm") {
-        args.into_iter().skip(1).collect()
-    } else {
-        args
+    // `cargo bevy-swarm init` invokes the binary with a first arg of
+    // "bevy-swarm" (the subcommand name given to cargo); direct
+    // execution and the old `cargo swarm` spelling are also handled.
+    let args: Vec<String> = match args.first().map(String::as_str) {
+        Some("bevy-swarm") | Some("swarm") => args.into_iter().skip(1).collect(),
+        _ => args,
     };
 
     let code = match args.first().map(String::as_str) {
@@ -44,10 +46,10 @@ fn main() {
 
 fn print_usage() {
     println!(
-        "cargo-swarm — bevy_swarm CLI\n\
+        "cargo-bevy-swarm — bevy_swarm CLI\n\
          \n\
          USAGE:\n\
-         \x20   cargo swarm <SUBCOMMAND>\n\
+         \x20   cargo bevy-swarm <SUBCOMMAND>\n\
          \n\
          SUBCOMMANDS:\n\
          \x20   init    Detect the game's root plugin and generate tests/swarm.rs\n\
@@ -250,7 +252,7 @@ fn cmd_validate(args: &[String]) -> i32 {
     }
 }
 
-/// smu: `cargo swarm reproduce [--fingerprint <fp>] [--report <path>]`
+/// smu: `cargo bevy-swarm reproduce [--fingerprint <fp>] [--report <path>]`
 /// — load the last (or given) report, pick the failing run matching
 /// the fingerprint (or the first failing run), re-run the generated
 /// test with the EXACT seed pinned via BEVY_SWARM_SEED. The harness's

@@ -54,7 +54,7 @@ silently injects true randomness into "deterministic" games. The
   your game draws entropy at odd times without failing spurious
 
 Enable with both the feature AND the cfg (they go together — the
-harness's own `cargo swarm` wrapper plans to set both):
+harness's own `cargo bevy-swarm` wrapper plans to set both):
 
 ```sh
 RUSTFLAGS='--cfg getrandom_backend="custom"' \
@@ -98,7 +98,7 @@ lies about reproduction wastes more debugging time than no tool.
 ## The hook, precisely
 
 Enable the `deterministic-entropy` feature AND set the cfg (they go
-together — a `cargo swarm run` wrapper that sets both automatically
+together — a `cargo bevy-swarm run` wrapper that sets both automatically
 is planned):
 
 ```sh

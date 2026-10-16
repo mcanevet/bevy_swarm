@@ -41,7 +41,7 @@ declared helpers (TestApi, IntentSurface, typed oracles), the report states
 `RemotePlugin`/`BrpClient` and the BRP HTTP verbs.
 
 **Important:** "Zero hand-written lines" (CLI scaffolding) is convenience, not a
-contract claim. Whether a human or `cargo swarm init` writes the test file, a new
+contract claim. Whether a human or `cargo bevy-swarm init` writes the test file, a new
 file enters the repo either way. The zero-contract guarantee is about *semantic*
 requirements (no TestApi, no IntentSurface), not about typing effort. Enabling
 a cargo feature at build time (e.g. `bevy_remote`) is a *thin build-time
@@ -55,7 +55,7 @@ as "zero contract".
 **Members:**
 - `.` — the `bevy_swarm` library crate (publishable)
 - `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_swarm dependency)
-- `bevy_swarm_cli/` — optional CLI binary for scaffolding (`cargo swarm init`); convenience only, not part of the zero-contract guarantee
+- `cargo-bevy-swarm/` — optional CLI binary for scaffolding (`cargo bevy-swarm init`); convenience only, not part of the zero-contract guarantee
 
 **Shared dependencies** (single place to pin, per Z0):
 

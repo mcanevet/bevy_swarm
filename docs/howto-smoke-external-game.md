@@ -18,7 +18,7 @@ HTTP. bevy_swarm's CLI can connect, observe, and run generic oracles:
 cargo run --features bevy/bevy_remote
 
 # harness side:
-cargo swarm smoke <brp-url> --duration 30
+cargo bevy-swarm smoke <brp-url> --duration 30
 ```
 
 You get: crash detection, log-error capture, liveness, state digests.

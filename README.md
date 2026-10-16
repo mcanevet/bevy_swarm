@@ -58,7 +58,22 @@ Once your first run passes, customize WHAT to check: the
 [scenario JSON](docs/schema.json) tells the harness your invariants, and
 the [Scenario Cookbook](docs/scenarios.md) walks through realistic examples.
 [`ScenarioBuilder`](src/builder.rs) is the same thing in type-checked Rust.
-Validate any scenario offline with `cargo swarm validate <file>` —
+Install the CLI for offline validation and scaffolding:
+
+```sh
+cargo install cargo-bevy-swarm
+```
+
+It is invoked through cargo as `cargo bevy-swarm <SUBCOMMAND>` (see the
+[CLI docs](cargo-bevy-swarm/README.md)). Optionally add a shorter alias
+to your project's `.cargo/config.toml`:
+
+```toml
+[alias]
+swarm = "bevy-swarm"
+```
+
+Validate any scenario offline with `cargo bevy-swarm validate <file>` —
 typos get did-you-mean suggestions before the game even builds:
 
 ```json

@@ -8,7 +8,7 @@ equivalent [`ScenarioBuilder`](../src/builder.rs) Rust API). Everything
 validates offline:
 
 ```sh
-cargo swarm validate my-scenario.json
+cargo bevy-swarm validate my-scenario.json
 ```
 
 ## Threshold invariant (TestApi path)
@@ -129,5 +129,5 @@ for guided search: see the robustness section of the README.
 - `after_s >= before_s`, inverted bounds, negative rates — rejected
 - Unknown keys, resets, cheats, oracles — rejected, with did-you-mean
 
-All of these surface in `cargo swarm validate` and at load time,
+All of these surface in `cargo bevy-swarm validate` and at load time,
 never mid-run.

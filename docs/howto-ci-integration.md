@@ -98,7 +98,7 @@ per-seed results natively.
 CI failure output includes the seed. Pull the artifact, then:
 
 ```sh
-cargo swarm reproduce --report <downloaded-report>/report.json
+cargo bevy-swarm reproduce --report <downloaded-report>/report.json
 # or directly:
 BEVY_SWARM_SEED=<seed> cargo test --test playtest
 ```

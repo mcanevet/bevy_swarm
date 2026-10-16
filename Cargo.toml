@@ -13,13 +13,13 @@ members = [
     "fixtures/brp",
     "fixtures/multithread_panic",
     "tests/fixture-runner",
-    "bevy_swarm_cli",
+    "cargo-bevy-swarm",
 ]
 
 # Z10: CLI test-fixture crates are standalone workspaces driven by the
 # CLI's own tests; building them as members would pull bevy
 # dev-deps into workspace-wide feature unification.
-exclude = ["bevy_swarm_cli/tests/fixtures"]
+exclude = ["cargo-bevy-swarm/tests/fixtures"]
 
 [workspace.package]
 version = "0.1.0"

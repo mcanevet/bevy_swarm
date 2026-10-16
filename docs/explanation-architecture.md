@@ -123,4 +123,4 @@ debugger, safe on loopback only.
 | Autotest aggregation | `src/autotest.rs` |
 | Golden snapshots | `src/golden.rs` |
 | Rule registry | `src/rules.rs` (generates `docs/rules.md`) |
-| CLI (init/run/validate/report/reproduce) | `bevy_swarm_cli/` |
+| CLI (init/run/validate/report/reproduce) | `cargo-bevy-swarm/` |

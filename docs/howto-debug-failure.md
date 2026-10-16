@@ -25,8 +25,8 @@ the fingerprint classification (`[NEW]` / `[known]` / `[muted]` /
 BEVY_SWARM_SEED=2 cargo test --test playtest
 
 # Or via the CLI (resolves the seed from the last report):
-cargo swarm reproduce
-cargo swarm reproduce --fingerprint <fp>   # a specific failure
+cargo bevy-swarm reproduce
+cargo bevy-swarm reproduce --fingerprint <fp>   # a specific failure
 ```
 
 ## Open the report artifacts
@@ -43,7 +43,7 @@ The **action log** is every input the bot fired, frame-indexed —
 the failing sequence is right there. Pretty-print it:
 
 ```sh
-cargo swarm report          # inline summary from the last run
+cargo bevy-swarm report          # inline summary from the last run
 jq '.action_log' target/bevy_swarm/runs/<run-id>/seed-2.json
 ```
 
@@ -122,5 +122,5 @@ the gate verdict (`report.gate.passed`) implements new-or-regressed
 semantics: known/muted failures don't fail CI, NEW fingerprints do.
 
 ```sh
-cargo swarm report    # classification + coverage + surface, inline
+cargo bevy-swarm report    # classification + coverage + surface, inline
 ```

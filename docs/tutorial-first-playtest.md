@@ -98,11 +98,11 @@ Copy the `Repro:` line verbatim to re-run exactly the failing seed:
 BEVY_SWARM_SEED=2 cargo test --test playtest
 ```
 
-Or use the CLI (after `cargo install --path bevy_swarm_cli`):
+Or use the CLI (after `cargo install --path cargo-bevy-swarm`):
 
 ```sh
-cargo swarm reproduce            # first failing seed from the last report
-cargo swarm reproduce --fingerprint <fp>  # a specific failure
+cargo bevy-swarm reproduce            # first failing seed from the last report
+cargo bevy-swarm reproduce --fingerprint <fp>  # a specific failure
 ```
 
 ## Where the artifacts live

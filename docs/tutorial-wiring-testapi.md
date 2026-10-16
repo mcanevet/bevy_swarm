@@ -98,7 +98,7 @@ Every capability of the invariant DSL against a wired TestApi:
 Validate offline before running the game:
 
 ```sh
-cargo swarm validate my-scenario.json
+cargo bevy-swarm validate my-scenario.json
 ```
 
 Syntax + schema + semantic checks, all errors at once, with

@@ -5,7 +5,7 @@ this page walks through what each one exercises and why the fields are
 there. Validate any of them offline with:
 
 ```sh
-cargo swarm validate examples/scenarios/movement-bug-hunt.json
+cargo bevy-swarm validate examples/scenarios/movement-bug-hunt.json
 ```
 
 Or author them in Rust with [`ScenarioBuilder`](../src/builder.rs):
@@ -121,7 +121,7 @@ emit.
 ## Validating scenarios
 
 ```sh
-cargo swarm validate my-scenario.json
+cargo bevy-swarm validate my-scenario.json
 ```
 
 Runs load-time validation WITHOUT running the game: JSON parse
