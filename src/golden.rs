@@ -156,7 +156,7 @@ impl GoldenReport {
 /// le3.12 (RF13): reject path separators, '..' and NUL in golden
 /// entry names — a scenario named `../../x` previously wrote outside
 /// the golden dir.
-fn sanitize_entry_name(name: &str) -> String {
+pub fn sanitize_entry_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|c| {

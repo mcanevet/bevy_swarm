@@ -70,6 +70,32 @@ fn load_expectation(fixture: &str, variant: &str) -> Value {
 
 /// Build a scenario JSON honouring the expectation's overrides
 /// (bot, invariants, liveness, input_rate_hz) at a given seed.
+/// le3.37 (RF47): record a golden set from the CLEAN variant of a
+/// fixture (memoized per fixture+name+seed). Expectations request this
+/// with "compare_golden": "clean_golden".
+fn clean_golden_dir(fixture: &str, name: &str, seed: u64, scenario_json: &str) -> String {
+    use std::sync::{LazyLock, Mutex};
+    static MEMO: LazyLock<Mutex<std::collections::HashMap<String, String>>> =
+        LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+    let key = format!("{fixture}/{name}/{seed}");
+    if let Some(dir) = MEMO.lock().unwrap().get(&key) {
+        return dir.clone();
+    }
+    let dir = std::env::temp_dir().join(format!("bevy_swarm_fx0_golden_{fixture}_{name}_{seed}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let scenario: bevy_swarm::scenario::Scenario =
+        serde_json::from_str(scenario_json).expect("parse scenario");
+    let fixture_owned = fixture.to_string();
+    let factory = move || build_app_for(&fixture_owned);
+    // Clean run: FIXTURE_BUG unset.
+    let _guard = FixtureBugGuard::set(None);
+    bevy_swarm::golden::record_golden(factory, &[scenario], &dir).expect("record clean golden");
+    let dir_str = dir.to_string_lossy().to_string();
+    MEMO.lock().unwrap().insert(key, dir_str.clone());
+    dir_str
+}
+
 fn build_scenario_json(fixture: &str, variant: &str, seed: u64) -> String {
     let exp = load_expectation(fixture, variant);
     let mut scenario = serde_json::json!({
@@ -89,6 +115,25 @@ fn build_scenario_json(fixture: &str, variant: &str, seed: u64) -> String {
     }
     if let Some(check_det) = exp.get("check_determinism").and_then(|d| d.as_u64()) {
         scenario["check_determinism"] = serde_json::json!(check_det);
+    }
+    // le3.37 (RF47): golden comparison — name + compare_golden dir.
+    // The marker "clean_golden" records the CLEAN variant's trajectory
+    // on demand and compares against it (the bug must diverge).
+    if let Some(golden_dir) = exp.get("compare_golden").and_then(|g| g.as_str()) {
+        // The golden entry is keyed by scenario name + seed.
+        let name = exp.get("name").and_then(|n| n.as_str()).unwrap_or(fixture);
+        scenario["name"] = serde_json::json!(name);
+        let dir = if golden_dir == "clean_golden" {
+            clean_golden_dir(
+                fixture,
+                name,
+                scenario["bot"]["seed"].as_u64().unwrap_or(seed),
+                &scenario.to_string(),
+            )
+        } else {
+            golden_dir.to_string()
+        };
+        scenario["compare_golden"] = serde_json::json!(dir);
     }
     scenario.to_string()
 }

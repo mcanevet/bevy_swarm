@@ -9,8 +9,10 @@
   "status": "fail",
   "must_report": [
     {
-      "rule": "golden_diverged"
+      "rule": "golden_diverged",
+      "min_count": 1
     }
   ],
-  "pending": "swarm-s5z"
+  "name": "v2_damage_check",
+  "compare_golden": "clean_golden"
 }

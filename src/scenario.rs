@@ -66,6 +66,14 @@ pub struct Scenario {
     /// state digests. Reports "nondeterministic" rule on divergence.
     #[serde(default)]
     pub check_determinism: Option<usize>,
+    /// Z11/swarm-s5z: opt-in golden-trajectory comparison. Some(dir)
+    /// points at a recorded golden set (see `crate::golden::record_golden`);
+    /// the run's per-frame state digests are compared against the stored
+    /// golden for `scenario-{name}-{seed}` and a `golden_diverged`
+    /// violation is reported on the first differing frame (or a digest
+    /// count mismatch). Requires `name` to select the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare_golden: Option<String>,
 }
 /// Key name → KeyCode (common subset; extend as games need).
 pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {

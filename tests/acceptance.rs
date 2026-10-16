@@ -222,6 +222,15 @@ fn build_scenario(expectation: &serde_json::Value) -> String {
     if let Some(rate) = expectation.get("input_rate_hz").and_then(|r| r.as_u64()) {
         scenario["bot"]["input_rate_hz"] = serde_json::json!(rate);
     }
+    // le3.37 (RF47): golden comparison keys (name + compare_golden).
+    if let Some(golden_dir) = expectation.get("compare_golden").and_then(|g| g.as_str()) {
+        let name = expectation
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("case");
+        scenario["name"] = serde_json::json!(name);
+        scenario["compare_golden"] = serde_json::json!(golden_dir);
+    }
     if let Some(check_det) = expectation
         .get("check_determinism")
         .and_then(|d| d.as_u64())

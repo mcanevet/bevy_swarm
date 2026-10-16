@@ -58,6 +58,7 @@ impl ScenarioBuilder {
                 oracles: None,
                 liveness: Default::default(),
                 check_determinism: None,
+                compare_golden: None,
             },
         }
     }
