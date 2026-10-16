@@ -1259,6 +1259,13 @@
         "null"
       ]
     },
+    "compare_golden": {
+      "description": "Z11/swarm-s5z: opt-in golden-trajectory comparison. Some(dir)\npoints at a recorded golden set (see `crate::golden::record_golden`);\nthe run's per-frame state digests are compared against the stored\ngolden for `scenario-{name}-{seed}` and a `golden_diverged`\nviolation is reported on the first differing frame (or a digest\ncount mismatch). Requires `name` to select the entry.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "deny_ambiguities": {
       "default": false,
       "description": "Fail the run (ScenarioError::Rejected listing the ambiguities) when\nany schedule has conflicting systems with no order. Opt-in: many\ngames have benign ambiguities.",

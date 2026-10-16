@@ -135,6 +135,15 @@ fn run_impl<F: Fn() -> App + Sync>(
             // plugin-build draws are seeded.
             crate::entropy::enter_run(scenario.bot.seed);
             let mut app = (factory)();
+            // swarm-s5z: when comparing to golden, capture per-frame
+            // digests (see the non-entropy run_impl twin).
+            if scenario.compare_golden.is_some() {
+                app.insert_resource(crate::determinism::StateTrace {
+                    with_snapshots: false,
+                    stop_after: None,
+                    digests: vec![],
+                });
+            }
             let report = match run_scenario(&mut app, scenario) {
                 Ok(report) if scenario.check_determinism.is_some() => {
                     // swarm-kpl: opt-in cross-run determinism check —
