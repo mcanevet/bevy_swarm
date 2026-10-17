@@ -42,6 +42,19 @@ use crate::state::{PlaytestState, Violations};
 #[derive(bevy::ecs::prelude::Resource, Default)]
 pub struct RawActionQueue(pub std::sync::Mutex<VecDeque<(u64, RawAction)>>);
 
+/// swarm-9o4: grouped message writers so the preupdate injector stays
+/// under Bevy's system-parameter count limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct InputWriters<'w> {
+    pub keyboard_events: MessageWriter<'w, KeyboardInput>,
+    pub mouse_button_events: MessageWriter<'w, MouseButtonInput>,
+    pub mouse_motion_events: MessageWriter<'w, MouseMotion>,
+    pub mouse_wheel_events: MessageWriter<'w, MouseWheel>,
+    pub window_events: MessageWriter<'w, WindowEvent>,
+}
+
+type InputWrites<'w> = InputWriters<'w>;
+
 /// Combined hold-tracking for keys, mouse buttons, and gamepad buttons
 /// and axes: (frame when pressed, input) -> release frame.
 #[derive(bevy::ecs::prelude::Resource, Default)]
@@ -119,6 +132,34 @@ fn ensure_window(
     e
 }
 
+/// swarm-9o4: release frame of the active hold for `input` (any press
+/// frame <= current frame), if the key/button is currently held.
+fn current_hold_release<T: Copy + std::hash::Hash + std::cmp::Eq>(
+    holds: &HashMap<(u64, T), u64>,
+    input: T,
+    frame: u64,
+) -> Option<u64> {
+    holds
+        .iter()
+        .filter(|((press_frame, k), _)| *k == input && *press_frame <= frame)
+        .map(|(_, release)| *release)
+        .min()
+}
+
+/// Next frame at which a new command for `input` may fire: strictly
+/// AFTER the active hold's release, so the release lands on its own
+/// frame (a press never shares a frame with its predecessor's
+/// release).
+fn next_free_frame<T: Copy + std::hash::Hash + std::cmp::Eq>(
+    holds: &HashMap<(u64, T), u64>,
+    input: T,
+    frame: u64,
+) -> u64 {
+    current_hold_release(holds, input, frame)
+        .map_or(frame + 1, |r| r + 1)
+        .max(frame + 1)
+}
+
 /// Inject pending raw actions for the current frame.
 ///
 /// Runs in `PreUpdate` after `PlaytestSet::Bots` and before Bevy's
@@ -130,9 +171,7 @@ fn ensure_window(
 pub fn raw_input_preupdate_system(
     queue: ResMut<RawActionQueue>,
     mut holds: ResMut<InputHolds>,
-    mut keyboard_events: MessageWriter<KeyboardInput>,
-    mut mouse_button_events: MessageWriter<MouseButtonInput>,
-    mut window_events: MessageWriter<WindowEvent>,
+    mut writers: InputWrites,
     mut cursor_events: Option<MessageWriter<CursorMoved>>,
     mut violations: ResMut<Violations>,
     playtest_state: Option<ResMut<PlaytestState>>,
@@ -169,8 +208,8 @@ pub fn raw_input_preupdate_system(
         .collect();
     for (_, key_code) in &expired_keys {
         write_keyboard_input(
-            &mut keyboard_events,
-            &mut window_events,
+            &mut writers.keyboard_events,
+            &mut writers.window_events,
             key_code,
             false,
             window_entity,
@@ -187,8 +226,8 @@ pub fn raw_input_preupdate_system(
         .collect();
     for (_, btn) in &expired_buttons {
         write_mouse_button_input(
-            &mut mouse_button_events,
-            &mut window_events,
+            &mut writers.mouse_button_events,
+            &mut writers.window_events,
             *btn,
             false,
             window_entity,
@@ -268,6 +307,24 @@ pub fn raw_input_preupdate_system(
     };
 
     // Process queued actions for this frame.
+    //
+    // swarm-9o4 (bevy_debugger_mcp semantics):
+    // - Rule 3: max ONE command per key / per mouse button per frame;
+    //   extras defer to the next free frame, order preserved.
+    // - Rule 4: GLOBAL head-of-line deferral — once anything defers,
+    //   every later action in the same batch defers too, so a release
+    //   can never overtake a pending move and commit a drag at the
+    //   wrong corner.
+    // - Rule 5: move->press may share a frame (aim then click), so
+    //   cursor moves execute INLINE here in queue order (before any
+    //   later press in the same batch), instead of always deferring to
+    //   the Update pass. Two moves in one frame would collapse a drag
+    //   path, so at most one move executes per frame.
+    let mut seen_keys: std::collections::HashSet<KeyCode> = Default::default();
+    let mut seen_buttons: std::collections::HashSet<WindowMouseButton> = Default::default();
+    let mut moved_this_frame = false;
+    let mut head_of_line = false;
+    let mut head_deferral = frame + 1;
     let mut still_pending = VecDeque::new();
     let mut deferred = VecDeque::new();
     while let Some((target_frame, action)) = queue
@@ -280,11 +337,31 @@ pub fn raw_input_preupdate_system(
             still_pending.push_back((target_frame, action));
             continue;
         }
+        if head_of_line {
+            // Rule 4: something ahead of us deferred; we defer too,
+            // preserving relative order — never EARLIER than the
+            // deferral that blocked us (a release must not overtake a
+            // pending move).
+            let next = match &action {
+                RawAction::Key { key, .. } => parse_raw_key(key)
+                    .map_or(frame + 1, |code| next_free_frame(&holds.keys, code, frame)),
+                RawAction::MouseButton { button, .. } | RawAction::Click { button, .. } => {
+                    next_free_frame(&holds.mouse, parse_mouse_btn(*button), frame)
+                }
+                _ => frame + 1,
+            };
+            head_deferral = head_deferral.max(next);
+            deferred.push_back((head_deferral, action));
+            continue;
+        }
         match action {
             RawAction::Key {
                 ref key,
                 hold_frames,
             } => {
+                // Rule 3: one command per key per frame; a press while
+                // the key is still held defers past the scheduled
+                // release so just_pressed actually transitions.
                 let Some(key_code) = parse_raw_key(key) else {
                     violations.report(
                         crate::rules::Rule::RawKeyInvalid,
@@ -294,9 +371,16 @@ pub fn raw_input_preupdate_system(
                     );
                     continue;
                 };
+                if !seen_keys.insert(key_code) {
+                    head_of_line = true;
+                    let next = next_free_frame(&holds.keys, key_code, frame);
+                    head_deferral = head_deferral.max(next);
+                    deferred.push_back((next, action));
+                    continue;
+                }
                 write_keyboard_input(
-                    &mut keyboard_events,
-                    &mut window_events,
+                    &mut writers.keyboard_events,
+                    &mut writers.window_events,
                     &key_code,
                     true,
                     window_entity,
@@ -312,9 +396,16 @@ pub fn raw_input_preupdate_system(
                 hold_frames,
             } => {
                 let btn = parse_mouse_btn(button);
+                if !seen_buttons.insert(btn) {
+                    head_of_line = true;
+                    let next = next_free_frame(&holds.mouse, btn, frame);
+                    head_deferral = head_deferral.max(next);
+                    deferred.push_back((next, action));
+                    continue;
+                }
                 write_mouse_button_input(
-                    &mut mouse_button_events,
-                    &mut window_events,
+                    &mut writers.mouse_button_events,
+                    &mut writers.window_events,
                     btn,
                     true,
                     window_entity,
@@ -334,15 +425,22 @@ pub fn raw_input_preupdate_system(
                 if let Some(ref mut ce) = cursor_events {
                     move_cursor(
                         ce,
-                        &mut window_events,
+                        &mut writers.window_events,
                         &mut windows,
                         bevy::math::Vec2::new(pos.0, pos.1),
                     );
                 }
                 let btn = parse_mouse_btn(button);
+                if !seen_buttons.insert(btn) {
+                    head_of_line = true;
+                    let next = next_free_frame(&holds.mouse, btn, frame);
+                    head_deferral = head_deferral.max(next);
+                    deferred.push_back((next, action));
+                    continue;
+                }
                 write_mouse_button_input(
-                    &mut mouse_button_events,
-                    &mut window_events,
+                    &mut writers.mouse_button_events,
+                    &mut writers.window_events,
                     btn,
                     true,
                     window_entity,
@@ -409,9 +507,58 @@ pub fn raw_input_preupdate_system(
                     );
                 }
             }
-            RawAction::MouseMove { .. } | RawAction::Cursor { .. } | RawAction::Wheel { .. } => {
-                // Handled in the Update pass.
-                deferred.push_back((frame, action));
+            RawAction::MouseMove { delta } => {
+                if moved_this_frame {
+                    head_of_line = true;
+                    deferred.push_back((frame + 1, action));
+                    continue;
+                }
+                moved_this_frame = true;
+                writers.mouse_motion_events.write(MouseMotion {
+                    delta: bevy::math::Vec2::new(delta.0, delta.1),
+                });
+                writers
+                    .window_events
+                    .write(WindowEvent::MouseMotion(MouseMotion {
+                        delta: bevy::math::Vec2::new(delta.0, delta.1),
+                    }));
+                audit("raw:mouse_motion", &action);
+            }
+            RawAction::Cursor { pos } => {
+                if moved_this_frame {
+                    head_of_line = true;
+                    deferred.push_back((frame + 1, action));
+                    continue;
+                }
+                moved_this_frame = true;
+                if let Some(ref mut ce) = cursor_events {
+                    move_cursor(
+                        ce,
+                        &mut writers.window_events,
+                        &mut windows,
+                        bevy::math::Vec2::new(pos.0, pos.1),
+                    );
+                }
+                audit("raw:cursor", &action);
+            }
+            RawAction::Wheel { dy } => {
+                writers.mouse_wheel_events.write(MouseWheel {
+                    unit: bevy::input::mouse::MouseScrollUnit::Line,
+                    x: 0.0,
+                    y: dy,
+                    phase: bevy::input::touch::TouchPhase::Started,
+                    window: window_entity,
+                });
+                writers
+                    .window_events
+                    .write(WindowEvent::MouseWheel(MouseWheel {
+                        unit: bevy::input::mouse::MouseScrollUnit::Line,
+                        x: 0.0,
+                        y: dy,
+                        phase: bevy::input::touch::TouchPhase::Started,
+                        window: window_entity,
+                    }));
+                audit("raw:wheel", &action);
             }
             RawAction::ClickEntity { .. } => {
                 // Resolved in the Update pass where camera and transform

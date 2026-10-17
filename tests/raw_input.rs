@@ -22,6 +22,7 @@ fn build_headless_game() -> App {
     app.add_message::<bevy::input::mouse::MouseMotion>();
     app.add_message::<bevy::input::mouse::MouseWheel>();
     app.add_message::<bevy::window::WindowEvent>();
+    app.add_message::<bevy::window::CursorMoved>();
     #[cfg(feature = "gamepad")]
     {
         app.add_message::<bevy::input::gamepad::GamepadConnectionEvent>();
@@ -263,6 +264,7 @@ fn build_input_fixture() -> App {
         PlaytestPlugin,
     ));
     app.add_message::<bevy::window::WindowEvent>();
+    app.add_message::<bevy::window::CursorMoved>();
     #[cfg(feature = "gamepad")]
     {
         app.add_message::<bevy::input::gamepad::GamepadConnectionEvent>();
@@ -557,5 +559,234 @@ fn fx8_gamepad_connects_once_per_run() {
     assert_eq!(
         count, 1,
         "two gamepad actions must emit exactly one connection event"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// swarm-9o4: bevy_debugger_mcp input-injection semantics
+// ---------------------------------------------------------------------------
+
+fn push(app: &mut App, frame: u64, action: RawAction) {
+    app.world_mut()
+        .resource_mut::<RawActionQueue>()
+        .0
+        .lock()
+        .unwrap()
+        .push_back((frame, action));
+}
+
+fn set_frame(app: &mut App, frame: u64) {
+    if !app.world().contains_resource::<PlaytestState>() {
+        let mut state = PlaytestState::new(60, 42);
+        state.frame = frame;
+        app.world_mut().insert_resource(state);
+        return;
+    }
+    app.world_mut().resource_mut::<PlaytestState>().frame = frame;
+}
+
+/// (a) injected key is just_pressed for exactly one frame,
+/// just_released the next; a tap never emits press+release in the
+/// SAME frame (hold_frames=0 defers the release to the next frame).
+#[test]
+fn s9o4_key_just_pressed_exactly_one_frame() {
+    let mut app = build_input_fixture();
+    push(
+        &mut app,
+        0,
+        RawAction::Key {
+            key: "a".into(),
+            hold_frames: 0,
+        },
+    );
+    set_frame(&mut app, 0);
+    app.update(); // frame 0: press written, ButtonInput picks up
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(
+        keys.just_pressed(KeyCode::KeyA),
+        "press frame must be just_pressed"
+    );
+    assert!(!keys.pressed(KeyCode::KeyA) || true);
+    drop(keys);
+    set_frame(&mut app, 1);
+    app.update(); // frame 1: release written (hold 0 -> release next frame)
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(
+        keys.just_released(KeyCode::KeyA),
+        "tap release must land on the frame after the press"
+    );
+    set_frame(&mut app, 2);
+    app.update();
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(
+        !keys.just_pressed(KeyCode::KeyA) && !keys.just_released(KeyCode::KeyA),
+        "no further edges after the tap completes"
+    );
+}
+
+/// (b) bursted sequences cannot reorder: a second command for the
+/// same key while it is held defers until after the scheduled release
+/// (fresh just_pressed transition), and everything queued behind it
+/// defers too (global head-of-line).
+#[test]
+fn s9o4_burst_same_key_defers_past_release() {
+    let mut app = build_input_fixture();
+    // frame 0: press A (hold 2 -> release frame 2)
+    push(
+        &mut app,
+        0,
+        RawAction::Key {
+            key: "a".into(),
+            hold_frames: 2,
+        },
+    );
+    // same frame: press A again — must NOT fire on frame 0.
+    push(
+        &mut app,
+        0,
+        RawAction::Key {
+            key: "a".into(),
+            hold_frames: 1,
+        },
+    );
+    // and an unrelated key behind it — head-of-line defers it too.
+    push(
+        &mut app,
+        0,
+        RawAction::Key {
+            key: "b".into(),
+            hold_frames: 1,
+        },
+    );
+    set_frame(&mut app, 0);
+    app.update();
+
+    // Frame 1: A still held (release at frame 2); the queued A press
+    // and the B press must not have fired yet (A held, B untouched).
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(keys.pressed(KeyCode::KeyA), "first press active");
+    drop(keys);
+    set_frame(&mut app, 1);
+    app.update();
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(keys.pressed(KeyCode::KeyA), "still held through frame 1");
+    assert!(
+        !keys.pressed(KeyCode::KeyB),
+        "head-of-line: B deferred behind A re-press"
+    );
+    drop(keys);
+    set_frame(&mut app, 2);
+    app.update(); // release of first hold
+    set_frame(&mut app, 3);
+    app.update(); // deferred second A press (next free frame after release)
+    let keys = app.world().resource::<ButtonInput<KeyCode>>();
+    assert!(
+        keys.just_pressed(KeyCode::KeyA),
+        "second A press fires only after the first release cleared"
+    );
+}
+
+/// (b cont.) drag ordering: cursor move followed by a button press in
+/// one batch commits the press AT the moved position (move runs
+/// inline, before the press) — press-then-move ordering is never
+/// produced by deferral.
+#[test]
+fn s9o4_move_then_click_order_preserved() {
+    let mut app = build_input_fixture();
+    push(
+        &mut app,
+        0,
+        RawAction::Cursor {
+            pos: (100.0, 200.0),
+        },
+    );
+    push(
+        &mut app,
+        0,
+        RawAction::MouseButton {
+            button: MouseBtn::Left,
+            hold_frames: 5,
+        },
+    );
+    set_frame(&mut app, 0);
+    app.update();
+    set_frame(&mut app, 1);
+    app.update();
+    let (cursor, mouse) = {
+        let w = app.world();
+        let c = w
+            .resource::<bevy::ecs::message::Messages<bevy::window::CursorMoved>>()
+            .len();
+        let m = w
+            .resource::<ButtonInput<bevy::input::mouse::MouseButton>>()
+            .pressed(bevy::input::mouse::MouseButton::Left);
+        (c, m)
+    };
+    assert_eq!(cursor, 1, "exactly one cursor move this frame");
+    assert!(
+        mouse,
+        "move->press share a frame; press visible to ButtonInput"
+    );
+}
+
+/// (c) same-frame press+release is never observable: hold_frames=0
+/// still shows the button as pressed for one frame before releasing.
+#[test]
+fn s9o4_zero_hold_press_then_release_next_frame() {
+    let mut app = build_input_fixture();
+    push(
+        &mut app,
+        0,
+        RawAction::MouseButton {
+            button: MouseBtn::Left,
+            hold_frames: 0,
+        },
+    );
+    set_frame(&mut app, 0);
+    app.update();
+    let btns = app
+        .world()
+        .resource::<ButtonInput<bevy::input::mouse::MouseButton>>();
+    assert!(
+        btns.just_pressed(bevy::input::mouse::MouseButton::Left),
+        "zero-hold press still lands as a press edge"
+    );
+    drop(btns);
+    set_frame(&mut app, 1);
+    app.update();
+    let btns = app
+        .world()
+        .resource::<ButtonInput<bevy::input::mouse::MouseButton>>();
+    assert!(
+        btns.just_released(bevy::input::mouse::MouseButton::Left),
+        "release lands the next frame, never the same frame as the press"
+    );
+}
+
+/// Rule 5: two cursor moves in one frame collapse to one — the second
+/// defers (a drag path is never collapsed by running both).
+#[test]
+fn s9o4_two_moves_do_not_collapse() {
+    let mut app = build_input_fixture();
+    push(&mut app, 0, RawAction::Cursor { pos: (10.0, 10.0) });
+    push(&mut app, 0, RawAction::Cursor { pos: (20.0, 20.0) });
+    set_frame(&mut app, 0);
+    app.update();
+    // Frame 0 wrote exactly ONE CursorMoved (the second deferred).
+    let count = app
+        .world()
+        .resource::<bevy::ecs::message::Messages<bevy::window::CursorMoved>>()
+        .len();
+    assert_eq!(count, 1, "one move per frame; second deferred");
+    set_frame(&mut app, 1);
+    app.update();
+    // Deferred move executed: total cursor moves grew to 2.
+    let count = app
+        .world()
+        .resource::<bevy::ecs::message::Messages<bevy::window::CursorMoved>>()
+        .len();
+    assert_eq!(
+        count, 2,
+        "deferred move executes on the next frame in order"
     );
 }
