@@ -148,9 +148,9 @@ pub(crate) fn on_add_name(
 }
 
 /// Observer: Name replaced -> reindex under the new name.
-/// Note: On<Discard<Name>> fires BEFORE the old value is overwritten;
+/// Note: `On<Discard<Name>>` fires BEFORE the old value is overwritten;
 /// the Query sees the OLD name, so we unindex the old and index the
-/// new value is observed by the subsequent On<Insert<Name>>.
+/// new value is observed by the subsequent `On<Insert<Name>>`.
 pub(crate) fn on_replace_name(
     event: On<Discard<Name>>,
     mut idx: ResMut<IdentityIndex>,
