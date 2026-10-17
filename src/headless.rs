@@ -148,8 +148,8 @@ pub fn headless_platform() -> PluginGroupBuilder {
 /// Construct a fresh headless `App` with the game's plugin installed.
 ///
 /// - Calls `headless_platform()` to get a sanitized `DefaultPlugins`.
-/// - Adds the game plugin `P`.
-/// - Finishes the app (no pending plugins).
+/// - Adds the game plugin `P` (schedules initialize lazily on the
+///   first `update` — `finish()`/`cleanup()` are NOT called here).
 /// - Returns a closure that produces a fresh `App` on each call (for
 ///   repeated test runs without cross-contamination).
 ///

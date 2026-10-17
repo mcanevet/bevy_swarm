@@ -138,7 +138,7 @@ impl AgentConfig {
             // up yet during Plugin::build, so bevy::log::warn! would
             // be lost).
             eprintln!(
-                "WARNING: bevy_playtest agent feature is active in a RELEASE build —                  BRP exposes arbitrary world reads and mutation."
+                "WARNING: bevy_playtest agent feature is active in a RELEASE build — BRP is exposed for agent-driven testing; restrict access to trusted networks."
             );
         }
         if !self.addr.is_loopback() && !self.allow_remote {

@@ -153,8 +153,9 @@ impl ChoiceStream {
         self.below(frame, den) < num
     }
 
-    /// Uniform f32 in [lo, hi] via a 2^24 draw. Shrinks toward 0.0
-    /// when 0 is in range (canonical midpoint), else toward lo.
+    /// Uniform f32 in [lo, hi] via a 2^24 draw. A zero draw maps to
+    /// `lo` (the simplest endpoint — minimization-friendly: an
+    /// all-zeros replay collapses every axis to `lo`).
     pub fn unit_f32(&mut self, frame: u64, lo: f32, hi: f32) -> f32 {
         let draw = self.below(frame, 1 << 24) as f32 / (1u64 << 24) as f32;
         lo + (hi - lo) * draw

@@ -263,7 +263,9 @@ pub(crate) fn chaos_bot_system(
             }
         }
         SurfaceVariant::Axis(name) => {
-            variant_name = "axis".into();
+            // qa8.15: coverage tracks PER-AXIS ("axis:<name>") so a
+            // multi-axis surface discriminates in the report.
+            variant_name = format!("axis:{}", name);
             UserIntent::Axis {
                 name: name.clone(),
                 value: choices.unit_f32(state.frame, -1.0, 1.0),
@@ -336,7 +338,7 @@ pub(crate) fn replay_bot_system(
                     UserIntent::Choice { index: *index }
                 }
                 ReplayIntent::Axis { name, value } => {
-                    variant_name = "axis".into();
+                    variant_name = format!("axis:{}", name);
                     UserIntent::Axis {
                         name: name.clone(),
                         value: *value,
