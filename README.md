@@ -256,6 +256,26 @@ Games contribute custom digest parts (RNG state, AI blackboards) via the
 `DigestHooks` resource. Normal runs pay nothing — digests are only recorded
 when a `StateTrace` resource is present.
 
+## Bevy compatibility
+
+| bevy_playtest | Bevy | cargo-bevy-playtest |
+|---------------|------|---------------------|
+| 0.1           | 0.20 | 0.1                 |
+
+Policy: each bevy_playtest minor tracks exactly one Bevy minor; for now only
+the latest supported Bevy minor is targeted. Version-agnostic plans (BRP and
+other decoupling work) are tracked separately and are not part of this policy.
+
+Building with a different Bevy minor alongside bevy_playtest fails with a
+duplicate-crate error:
+
+```text
+error: failed to select a version for `bevy_ecs`.
+  ... two versions of crate `bevy_ecs` found ...
+```
+
+Fix: pin your game and bevy_playtest to the same Bevy minor (the table above).
+
 ## Robustness margins (J1)
 
 See the [robustness reference](docs/reference-robustness.md) for the full ρ
