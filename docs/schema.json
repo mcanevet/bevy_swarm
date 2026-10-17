@@ -168,7 +168,7 @@
             }
           ],
           "default": null,
-          "description": "synthetic_keyboard: frame-indexed raw key presses. Exercises\nthe FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`\n→ game adapter) that intent-injection bots bypass. A dead\nadapter or wrong key mapping fails the scenario's invariants.\nChaos persona: \"uniform\" (default), \"aggressive\" (2x rate, never\nWait), \"curious\" (reserved for F1 coverage-guided curiosity;\ncurrently behaves as uniform), \"idle\" (mostly Wait, occasional\njabs). REPLACES the legacy text: \"curious\" previously meant\nbias toward unseen variants (not implemented).\n(stronger unseen-variant bias), \"idle\" (mostly waiting, rare\njabs). Different personas find different bugs."
+          "description": "synthetic_keyboard: frame-indexed raw key presses. Exercises\nthe FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`\n→ game adapter) that intent-injection bots bypass. A dead\nadapter or wrong key mapping fails the scenario's invariants.\nChaos persona: \"uniform\" (default), \"aggressive\" (2x rate, never\nWait), \"curious\" (reserved for F1 coverage-guided curiosity;\ncurrently behaves as uniform), \"idle\" (mostly Wait, occasional\njabs). Different personas find different bugs."
         },
         "pointer_clicks": {
           "default": [],

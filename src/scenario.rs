@@ -1,5 +1,8 @@
 //! Scenario schema: DTOs, defaults, and load-time validation.
 
+pub mod builder;
+pub mod inputs;
+
 use serde::{Deserialize, Serialize};
 
 fn default_tps() -> u32 {

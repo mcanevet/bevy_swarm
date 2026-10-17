@@ -1,5 +1,9 @@
 //! Bots — all emit UserIntent (contract-aware, genre-general).
 
+pub mod choice;
+pub mod game_types;
+pub mod planner;
+
 use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageWriter;
 use bevy::ecs::query::With;
@@ -34,7 +38,7 @@ pub(crate) fn chaos_bot_system(
     mut intents: MessageWriter<UserIntent>,
     mut violations: ResMut<Violations>,
     surface: Option<Res<IntentSurface>>,
-    raw_queue: Option<ResMut<crate::raw_input::RawActionQueue>>,
+    raw_queue: Option<ResMut<crate::scenario::inputs::RawActionQueue>>,
     q: Query<Entity, With<Gameplay>>,
     q_named: Query<(Entity, &Name), With<Gameplay>>,
     scenario: Res<ScenarioResource>,
@@ -321,7 +325,7 @@ pub(crate) fn replay_bot_system(
     mut violations: ResMut<Violations>,
     scenario: Res<ScenarioResource>,
     idx: Res<crate::identity::IdentityIndex>,
-    raw_queue: ResMut<crate::raw_input::RawActionQueue>,
+    raw_queue: ResMut<crate::scenario::inputs::RawActionQueue>,
 ) {
     for entry in &scenario.0.bot.inputs {
         if entry.frame == state.frame {

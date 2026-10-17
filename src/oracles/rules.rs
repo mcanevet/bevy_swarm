@@ -358,7 +358,7 @@ mod tests {
     /// rule — no missing, no orphan rows.
     #[test]
     fn docs_list_all_rules() {
-        let docs = include_str!("../docs/rules.md");
+        let docs = include_str!("../../docs/rules.md");
         for &rule in Rule::ALL {
             let row = format!("| `{}` |", rule.name());
             assert!(
@@ -376,7 +376,7 @@ mod tests {
     /// from digests/fingerprints; everything else fails runs).
     #[test]
     fn docs_severity_agrees_with_code() {
-        let docs = include_str!("../docs/rules.md");
+        let docs = include_str!("../../docs/rules.md");
         for line in docs.lines() {
             let Some(line) = line.strip_prefix('|') else {
                 continue;

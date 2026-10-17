@@ -66,11 +66,11 @@ pub mod autotest;
 pub mod prelude {
     #[cfg(feature = "agent")]
     pub use crate::agent::{AgentConfig, AgentPlugin};
-    pub use crate::builder::ScenarioBuilder;
     pub use crate::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin, UserIntent};
     pub use crate::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
     pub use crate::enums::PlaytestStatus;
     pub use crate::rules::Rule;
+    pub use crate::scenario::builder::ScenarioBuilder;
     pub use crate::scenario::{BotConfig, Scenario};
     pub use crate::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
 }
@@ -88,31 +88,28 @@ pub mod ambiguity;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod bots;
+pub use bots::choice;
+pub use bots::game_types;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod branch;
-pub mod builder;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod choice;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod compiled;
+// restructure wvx: bots cluster.
+pub use bots::planner;
+// restructure wvx: scenario cluster (scenario.rs remains the anchor).
 pub mod contract;
 pub mod conventions;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod determinism;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod diagnostics;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod discover;
 pub mod driver;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod effects;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod entropy;
@@ -122,11 +119,8 @@ pub mod enums;
 pub mod external;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod fingerprint;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod game_types;
-pub mod golden;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod harness;
@@ -135,52 +129,62 @@ pub mod harness;
 pub mod headless;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod headless_strip;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod identity;
-pub mod junit;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod liveness;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod minimize;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod oracles;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod pass_through;
+pub use oracles::compiled;
+pub use oracles::effects;
+pub use oracles::liveness;
+pub use oracles::render as render_check;
+pub use oracles::robustness;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod planner;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod raw_input;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod render_check;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod robustness;
-pub mod rules;
+// restructure wvx: re-export oracles submodules at crate root (crate::rules, crate::effects, etc.).
+pub use oracles::rules;
+pub use oracles::typed;
+// restructure wvx: reporting cluster.
+mod reporting;
+pub use reporting::issues;
+pub use reporting::junit;
+pub use reporting::sinks;
+// restructure wvx: analysis cluster (deliberately NOT named verify/ —
+// that name is taken by the private cfg(test) tree).
+mod analysis;
+pub use analysis::branch;
+pub use analysis::determinism;
+pub use analysis::diagnostics;
+pub use analysis::discover;
+pub use analysis::fingerprint;
+pub use analysis::golden;
+pub use analysis::minimize;
+pub use analysis::sweep;
+pub use scenario::builder;
+pub use scenario::inputs as raw_input;
 pub mod scenario;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod sinks;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod smoke;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod state;
-#[doc(hidden)]
-/// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod sweep;
-#[doc(hidden)]
-/// Internal machinery — no stability guarantee before the core/adapter split.
-pub mod typed;
 
 #[cfg(test)]
 mod verify {
@@ -203,4 +207,3 @@ mod verify {
     mod test_api_ext;
     mod validation;
 }
-pub mod issues;

@@ -1,5 +1,13 @@
 //! Oracles: per-frame world checks and the custom-invariant engine.
 
+pub mod compiled;
+pub mod effects;
+pub mod liveness;
+pub mod render;
+pub mod robustness;
+pub mod rules;
+pub mod typed;
+
 use bevy::ecs::entity::Entity;
 use bevy::ecs::query::{Changed, With};
 use bevy::ecs::resource::Resource;

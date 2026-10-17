@@ -21,7 +21,7 @@
 //! `contains::<T>()` to avoid panics when the plugin isn't present.
 
 #[cfg(feature = "render")]
-use crate::headless_strip::strip_render_family;
+use crate::headless::strip::strip_render_family;
 use bevy::app::{App, Plugin, PluginGroupBuilder};
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
@@ -178,6 +178,8 @@ pub fn headless_platform() -> PluginGroupBuilder {
 /// Panics if the game plugin conflicts with platform plugins (e.g., the
 /// game bundles its own `DefaultPlugins`). In that case, migrate the
 /// game's plugin to `main.rs` or use the subprocess tier (Z8).
+mod strip;
+
 pub fn headless_app<P: Plugin + Clone + Send + Sync + 'static>(
     game_plugin: P,
 ) -> impl Fn() -> App + Send + Sync + 'static {

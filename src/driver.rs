@@ -175,11 +175,11 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 .chain()
                 .in_set(PlaytestSet::Tick),
         );
-        app.init_resource::<crate::raw_input::RawActionQueue>();
+        app.init_resource::<crate::scenario::inputs::RawActionQueue>();
         app.init_resource::<crate::effects::ActionEffects>();
-        app.init_resource::<crate::raw_input::InputHolds>();
-        app.init_resource::<crate::raw_input::VirtualGamepad>();
-        app.init_resource::<crate::raw_input::HeadlessWindow>();
+        app.init_resource::<crate::scenario::inputs::InputHolds>();
+        app.init_resource::<crate::scenario::inputs::VirtualGamepad>();
+        app.init_resource::<crate::scenario::inputs::HeadlessWindow>();
         // le3.21 (RF25): harness systems read these; run_scenario
         // replaces them per-run, but any app driven by the plugin
         // (e.g. a test calling app.update() directly) must not panic
@@ -205,7 +205,7 @@ impl bevy::app::Plugin for PlaytestPlugin {
         // before Bevy's InputSystems so ButtonInput reflects them same-frame.
         app.add_systems(
             bevy::app::PreUpdate,
-            crate::raw_input::raw_input_preupdate_system
+            crate::scenario::inputs::raw_input_preupdate_system
                 .after(PlaytestSet::Bots)
                 .before(bevy::input::InputSystems),
         );
@@ -229,8 +229,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 synthetic_pointer_bot_system,
                 synthetic_pointer_actionability_check_system,
                 synthetic_keyboard_bot_system,
-                crate::raw_input::raw_input_click_entity_system,
-                crate::raw_input::raw_input_update_system,
+                crate::scenario::inputs::raw_input_click_entity_system,
+                crate::scenario::inputs::raw_input_update_system,
             )
                 .chain()
                 .in_set(PlaytestSet::RawInput),
