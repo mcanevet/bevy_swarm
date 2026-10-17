@@ -7,5 +7,10 @@
   "duration_s": 6.0,
   "must_not_report": [],
   "status": "crash",
-  "must_report": []
+  "must_report": [
+    {
+      "rule": "panic",
+      "detail_contains": "index out of bounds"
+    }
+  ]
 }
