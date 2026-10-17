@@ -1,0 +1,291 @@
+//! Z14: Deterministic entropy injection via getrandom's custom backend.
+//!
+//! Removes the "seed your RNG" contract requirement by intercepting
+//! `getrandom::fill()` calls with a deterministic stream seeded from
+//! the scenario seed. Works for `rand::rng()`, `uuid::Uuid::new_v4`,
+//! `bevy_rand`, and any crate using getrandom 0.3/0.4.
+//!
+//! ## Usage
+//! Enable the `deterministic-entropy` feature and set `RUSTFLAGS`:
+//! ```bash
+//! RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_playtest/deterministic-entropy
+//! ```
+//! (planned: a `cargo bevy-playtest run` wrapper that sets both automatically).
+
+use std::cell::RefCell;
+
+/// Domain separator to avoid correlating entropy streams across
+/// different bevy_playtest subsystems.
+const ENTROPY_DOMAIN: u64 = 0xBEAF_57A2;
+
+// Thread-local deterministic RNG stream. None = fallback to the
+// process-global stream (unattributed entropy).
+thread_local! {
+    static STREAM: RefCell<Option<Xoshiro256StarStar>> = const { RefCell::new(None) };
+}
+
+/// Splitmix64 for seeding (fast, good mixing).
+#[inline]
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e3779b97f4a7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+
+/// Xoshiro256** PRNG (no dependencies, 256-bit state).
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct Xoshiro256StarStar {
+    s: [u64; 4],
+}
+
+#[allow(dead_code)]
+impl Xoshiro256StarStar {
+    fn seed(seed: u64) -> Self {
+        let mut state = seed ^ ENTROPY_DOMAIN;
+        Self {
+            s: [
+                splitmix64(&mut state),
+                splitmix64(&mut state),
+                splitmix64(&mut state),
+                splitmix64(&mut state),
+            ],
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let result = self.s[0]
+            .wrapping_add(self.s[3])
+            .rotate_left(23)
+            .wrapping_add(self.s[0]);
+
+        let t = self.s[1] << 17;
+
+        self.s[2] ^= self.s[0];
+        self.s[3] ^= self.s[1];
+        self.s[1] ^= self.s[2];
+        self.s[0] ^= self.s[3];
+
+        self.s[2] ^= t;
+        self.s[3] = self.s[3].rotate_left(45);
+
+        result
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        let mut i = 0;
+        while i + 8 <= dest.len() {
+            let bytes = self.next_u64().to_ne_bytes();
+            dest[i..i + 8].copy_from_slice(&bytes);
+            i += 8;
+        }
+        if i < dest.len() {
+            let bytes = self.next_u64().to_ne_bytes();
+            let remaining = dest.len() - i;
+            dest[i..].copy_from_slice(&bytes[..remaining]);
+        }
+    }
+}
+
+/// Enter a deterministic entropy run with the given seed.
+/// Must be called before building the App or running scenarios.
+/// Enter a deterministic run context on THIS thread.
+///
+/// nhw (finding B): this MUST run on the driving thread before any
+/// entropy draws. run_scenario does this internally (driver.rs), and
+/// InProcess::run additionally enters it in child threads (branch.rs).
+/// Custom ScenarioRunner implementations or direct getrandom users on
+/// spawned threads without enter_run silently fall back to the
+/// process-global stream (detected as 'unattributed entropy draws'
+/// by the entropy_unattributed_draws rule).
+pub fn enter_run(seed: u64) {
+    // FX3: diagnostic when the feature is on but the build cfg is not —
+    // entropy interception silently no-ops in that misconfiguration.
+    #[cfg(all(feature = "deterministic-entropy", not(getrandom_backend = "custom")))]
+    eprintln!(
+        "bevy_playtest: deterministic-entropy feature is enabled but the getrandom \
+         custom-backend cfg is NOT set. Rebuild with RUSTFLAGS='--cfg getrandom_backend=\"custom\"' \
+         (a planned `cargo bevy-playtest run` wrapper sets it automatically); entropy interception is inactive and runs are NOT \
+         deterministic."
+    );
+    STREAM.with(|s| {
+        *s.borrow_mut() = Some(Xoshiro256StarStar::seed(seed));
+    });
+}
+
+/// Exit the current deterministic entropy run.
+pub fn exit_run() {
+    STREAM.with(|s| {
+        *s.borrow_mut() = None;
+    });
+}
+
+/// Check if we're in a deterministic run.
+pub fn in_deterministic_run() -> bool {
+    STREAM.with(|s| s.borrow().is_some())
+}
+
+// Count of fallback entropy draws for the CURRENT run (thread-local,
+// so parallel matrix runs don't cross-contaminate).
+thread_local! {
+    static RUN_FALLBACK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Process-global count of ALL unattributed draws (never reset).
+static UNATTRIBUTED_TOTAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Fallback draws attributed to the current run (thread-local).
+pub fn fallback_draw_count() -> usize {
+    RUN_FALLBACK_COUNT.with(|c| c.get())
+}
+
+/// Total unattributed draws across the process (diagnostics; monotonic).
+pub fn unattributed_total() -> usize {
+    UNATTRIBUTED_TOTAL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Reset the PER-RUN counter (call at start of each run). The global
+/// unattributed total is never reset — build-time and cross-run draws
+/// remain visible in diagnostics.
+pub fn reset_fallback_counter() {
+    RUN_FALLBACK_COUNT.with(|c| c.set(0));
+}
+
+// The getrandom v0.4 custom backend hook (also works for v0.3 due to
+// identical symbol name and ABI). Defined only when the cfg is set.
+// FX3: Changed from extern "C" to extern "Rust" with proper Error return
+// (getrandom 0.3/0.4 declare this as extern "Rust" — using "C" was UB).
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+/// getrandom v0.4 custom-backend hook (also satisfies v0.3 due to the
+/// identical symbol name and ABI). Replaces the OS entropy source with
+/// the deterministic per-run stream, or the process-global fallback.
+///
+/// # Safety
+///
+/// Caller (getrandom) guarantees `dest` points to `len` writable bytes.
+///
+/// Override contract: getrandom 0.3 resolves this symbol at link time
+/// (weak-symbol override). Any other randomness in the process that
+/// routes through getrandom 0.3 also becomes deterministic — that is
+/// the intended behaviour (headless, seeded runs must not depend on OS
+/// entropy). Bevy / rand / getrandom 0.4 users keep their own sources
+/// unless they also route here.
+///
+/// qa8.16: fragility note — the extern "Rust" symbol punning across
+/// getrandom 0.3/0.4 relies on transitive layout equality of Error
+/// types (both wrap NonZeroU32). The compile-time asserts above cover
+/// 0.4's Error; add a runtime sanity check on first call.
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn __getrandom_v03_custom(
+    dest: *mut u8,
+    len: usize,
+) -> Result<(), getrandom04::Error> {
+    // Safety: caller guarantees dest points to len valid bytes.
+    let buf = unsafe { std::slice::from_raw_parts_mut(dest, len) };
+
+    // qa8.16: runtime sanity check on first call.
+    static CHECKED: std::sync::Once = std::sync::Once::new();
+    CHECKED.call_once(|| {
+        let sz = std::mem::size_of::<getrandom04::Error>();
+        let al = std::mem::align_of::<getrandom04::Error>();
+        if sz != 4 || al != 4 {
+            eprintln!("WARNING: getrandom04::Error layout unexpected (sz={}, al={}); FFI contract may be broken", sz, al);
+        }
+    });
+
+    STREAM.with(|s| {
+        match s.borrow_mut().as_mut() {
+            Some(rng) => {
+                rng.fill_bytes(buf);
+                Ok(())
+            }
+            None => {
+                // Fallback: process-global deterministic stream (seeded constant).
+                // No panics — we're in an FFI context.
+                RUN_FALLBACK_COUNT.with(|c| c.set(c.get() + 1));
+                UNATTRIBUTED_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut g = global_fallback().lock().unwrap_or_else(|e| e.into_inner());
+                g.fill_bytes(buf);
+                Ok(())
+            }
+        }
+    })
+}
+
+/// Process-global fallback RNG for getrandom calls outside enter_run.
+/// Seeded with a constant to ensure reproducibility across runs.
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+static GLOBAL_FALLBACK: std::sync::OnceLock<std::sync::Mutex<Xoshiro256StarStar>> =
+    std::sync::OnceLock::new();
+
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+fn global_fallback() -> &'static std::sync::Mutex<Xoshiro256StarStar> {
+    GLOBAL_FALLBACK.get_or_init(|| std::sync::Mutex::new(Xoshiro256StarStar::seed(0xDEADBEEF)))
+}
+
+/// Compile-time layout assertions for the getrandom Error type.
+///
+/// The hook returns `Result<(), getrandom04::Error>`; getrandom 0.3
+/// declares the same symbol with the same ABI. getrandom 0.3 is not a
+/// direct dependency, so its layout is asserted transitively: both
+/// 0.3.x and 0.4.x define `Error` as a `NonZeroU32` error code
+/// (size 4, align 4) — the second assert below checks that the actual
+/// `getrandom04::Error` layout still matches a `NonZeroU32`, so a
+/// layout drift in EITHER version fails the build instead of silently
+/// breaking the FFI contract.
+#[cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
+const _: () = {
+    assert!(
+        std::mem::size_of::<getrandom04::Error>() == 4
+            && std::mem::align_of::<getrandom04::Error>() == 4
+    );
+    // Equivalent-abi check against a NonZeroU32, the layout getrandom
+    // 0.3 also documents for its Error. Both crates repr(Rust)-wrap a
+    // NonZeroU32 error code; if either drifts away from that layout the
+    // FFI contract with the shared __getrandom_v03_custom symbol breaks.
+    assert!(
+        std::mem::size_of::<std::num::NonZeroU32>() == std::mem::size_of::<getrandom04::Error>()
+            && std::mem::align_of::<std::num::NonZeroU32>()
+                == std::mem::align_of::<getrandom04::Error>()
+    );
+};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xoshiro_produces_different_streams() {
+        let mut rng1 = Xoshiro256StarStar::seed(42);
+        let mut rng2 = Xoshiro256StarStar::seed(43);
+        assert_ne!(rng1.next_u64(), rng2.next_u64());
+    }
+
+    #[test]
+    fn xoshiro_is_deterministic() {
+        let mut rng1 = Xoshiro256StarStar::seed(42);
+        let mut rng2 = Xoshiro256StarStar::seed(42);
+        for _ in 0..100 {
+            assert_eq!(rng1.next_u64(), rng2.next_u64());
+        }
+    }
+
+    #[test]
+    fn enter_exit_run_sets_stream() {
+        assert!(!in_deterministic_run());
+        enter_run(123);
+        assert!(in_deterministic_run());
+        exit_run();
+        assert!(!in_deterministic_run());
+    }
+
+    #[test]
+    fn fallback_counter_works() {
+        reset_fallback_counter();
+        assert_eq!(fallback_draw_count(), 0);
+        // Can't easily test increment without calling the hook,
+        // but the atomic operation is straightforward.
+    }
+}

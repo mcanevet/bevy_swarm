@@ -1,0 +1,1086 @@
+//! Scenario schema: DTOs, defaults, and load-time validation.
+
+use serde::{Deserialize, Serialize};
+
+fn default_tps() -> u32 {
+    60
+}
+fn default_true() -> bool {
+    true
+}
+use crate::key::Key;
+use std::collections::HashSet;
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Scenario {
+    /// Stable scenario name. Used for golden-trajectory file naming
+    /// (`scenario-NAME-SEED`): scenarios recorded into a golden set
+    /// must have unique names so reordering the list cannot rename or
+    /// overwrite files. Optional for plain playtests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub bot: BotConfig,
+    /// Simulation ticks per second. Each `app.update()` advances simulated
+    /// time by exactly 1/tps when `simulated_time` is true.
+    #[serde(default = "default_tps")]
+    pub tps: u32,
+    /// Drive `Time` with a fixed delta of 1/tps (deterministic, the default)
+    /// instead of the wall clock. Turn off only for soak tests that want
+    /// real-time behaviour.
+    #[serde(default = "default_true")]
+    pub simulated_time: bool,
+    /// Run every schedule on Bevy's SingleThreadedExecutor (deterministic
+    /// system order for a given schedule graph). Default true: playtests
+    /// value reproducibility over throughput. Parallelism comes from
+    /// running many scenarios at once, not from threading one App.
+    #[serde(default = "default_true")]
+    pub single_threaded: bool,
+    /// Fail the run (ScenarioError::Rejected listing the ambiguities) when
+    /// any schedule has conflicting systems with no order. Opt-in: many
+    /// games have benign ambiguities.
+    #[serde(default)]
+    pub deny_ambiguities: bool,
+    /// dbt: escalate warning-class violations (bevy_warning, log_warn)
+    /// to gating severity. Default false: those rules are informational
+    /// because headless runs routinely trip render/audio warnings that
+    /// are benign without a GPU or audio device. Opt in when your game
+    /// should never log warnings.
+    #[serde(default)]
+    pub strict_warnings: bool,
+    #[serde(default = "default_duration")]
+    pub duration_s: f32,
+    #[serde(default)]
+    pub invariants: Vec<Invariant>,
+    #[serde(default)]
+    pub setup: Setup,
+    /// I3: typed-oracle selection. None = run ALL registered typed
+    /// oracles; Some(names) restricts to the listed ones. Unknown names
+    /// reject at load time (ScenarioError::Rejected).
+    #[serde(default)]
+    pub oracles: Option<Vec<String>>,
+    /// I4: liveness configuration (default 2s timeout, real-time mode).
+    #[serde(default)]
+    pub liveness: LivenessConfig,
+    /// A4: opt-in determinism check. None = disabled; Some(N) means
+    /// run the scenario N times (N >= 2) with the same seed and compare
+    /// state digests. Reports "nondeterministic" rule on divergence.
+    #[serde(default)]
+    pub check_determinism: Option<usize>,
+    /// Z11/swarm-s5z: opt-in golden-trajectory comparison. Some(dir)
+    /// points at a recorded golden set (see `crate::golden::record_golden`);
+    /// the run's per-frame state digests are compared against the stored
+    /// golden for `scenario-{name}-{seed}` and a `golden_diverged`
+    /// violation is reported on the first differing frame (or a digest
+    /// count mismatch). Requires `name` to select the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare_golden: Option<String>,
+}
+/// Key name → KeyCode (common subset; extend as games need).
+pub fn parse_key_code(name: &str) -> Option<Key> {
+    use Key::*;
+    let lower = name.to_ascii_lowercase();
+    Some(match lower.as_str() {
+        "space" => Space,
+        "enter" | "return" => Enter,
+        "escape" => Escape,
+        "tab" => Tab,
+        "backspace" => Backspace,
+        "up" | "arrowup" => ArrowUp,
+        "down" | "arrowdown" => ArrowDown,
+        "left" | "arrowleft" => ArrowLeft,
+        "right" | "arrowright" => ArrowRight,
+        "shift" => ShiftLeft,
+        "ctrl" => ControlLeft,
+        "alt" => AltLeft,
+        s => {
+            // Accept "KeyA"-style names (debug/serde form) as well as
+            // bare letters ("a") and digits ("1").
+            if let Some(rest) = lower.strip_prefix("key") {
+                if rest.len() == 1 {
+                    if let Some(c) = rest.chars().next() {
+                        if c.is_ascii_lowercase() {
+                            return KEY_LETTERS.get(c as usize - 'a' as usize).copied();
+                        }
+                    }
+                }
+            }
+            let mut chars = s.chars();
+            let c = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            match c {
+                'a'..='z' => KEY_LETTERS.get(c as usize - 'a' as usize).copied(),
+                '0'..='9' => KEY_DIGITS.get(c as usize - '0' as usize).copied(),
+                _ => None,
+            }?
+        }
+    })
+}
+
+const KEY_LETTERS: [Key; 26] = [
+    Key::KeyA,
+    Key::KeyB,
+    Key::KeyC,
+    Key::KeyD,
+    Key::KeyE,
+    Key::KeyF,
+    Key::KeyG,
+    Key::KeyH,
+    Key::KeyI,
+    Key::KeyJ,
+    Key::KeyK,
+    Key::KeyL,
+    Key::KeyM,
+    Key::KeyN,
+    Key::KeyO,
+    Key::KeyP,
+    Key::KeyQ,
+    Key::KeyR,
+    Key::KeyS,
+    Key::KeyT,
+    Key::KeyU,
+    Key::KeyV,
+    Key::KeyW,
+    Key::KeyX,
+    Key::KeyY,
+    Key::KeyZ,
+];
+
+const KEY_DIGITS: [Key; 10] = [
+    Key::Digit0,
+    Key::Digit1,
+    Key::Digit2,
+    Key::Digit3,
+    Key::Digit4,
+    Key::Digit5,
+    Key::Digit6,
+    Key::Digit7,
+    Key::Digit8,
+    Key::Digit9,
+];
+
+fn default_duration() -> f32 {
+    15.0
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BotConfig {
+    #[serde(rename = "type")]
+    pub bot_type: crate::enums::BotType,
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+    #[serde(default = "default_rate")]
+    pub input_rate_hz: u32,
+    /// pursuit: agent/target entity Names
+    pub agent_target: Option<String>,
+    pub target: Option<String>,
+    #[serde(default = "default_deadzone")]
+    pub deadzone: f32,
+    /// replay: frame-indexed typed intents — genre-free
+    #[serde(default)]
+    pub inputs: Vec<ReplayInput>,
+    /// synthetic_pointer: frame-indexed raw pointer clicks at named
+    /// entities. Exercises the FULL input chain (pointer input →
+    /// picking backend → PointerClick → game adapter) that
+    /// intent-injection bots bypass. A missing mesh/sprite picking
+    /// backend fails LOUDLY here instead of silently dead-clicking.
+    #[serde(default)]
+    pub pointer_clicks: Vec<PointerClickInput>,
+    /// synthetic_keyboard: frame-indexed raw key presses. Exercises
+    /// the FULL keyboard chain (`KeyboardInput` → `ButtonInput<KeyCode>`
+    /// → game adapter) that intent-injection bots bypass. A dead
+    /// adapter or wrong key mapping fails the scenario's invariants.
+    /// Chaos persona: "uniform" (default), "aggressive" (2x rate, never
+    /// Wait), "curious" (reserved for F1 coverage-guided curiosity;
+    /// currently behaves as uniform), "idle" (mostly Wait, occasional
+    /// jabs). REPLACES the legacy text: "curious" previously meant
+    /// bias toward unseen variants (not implemented).
+    /// (stronger unseen-variant bias), "idle" (mostly waiting, rare
+    /// jabs). Different personas find different bugs.
+    #[serde(default)]
+    pub persona: Option<crate::enums::Persona>,
+    #[serde(default)]
+    pub key_presses: Vec<KeyPressInput>,
+    /// Raw input surface for chaos/curious bots (Z3). When present,
+    /// chaos bot emits RawActions instead of UserIntents.
+    #[serde(default)]
+    pub raw_surface: Option<RawSurface>,
+    /// planner: declarative goal tree (aplib-inspired). The scenario
+    /// author writes WHAT to achieve (TestApi predicates), not WHEN
+    /// to press.
+    #[serde(default)]
+    pub goals: Option<crate::planner::GoalNode>,
+    /// custom: name of a registered typed bot policy
+    /// (PlaytestAppExt::add_bot_policy). Unknown names reject at load.
+    #[serde(default)]
+    pub policy: Option<String>,
+    /// J0: replay prefix for the bot's random choices (recorded
+    /// values; each draw consumes one). Absent = pure PRNG from seed.
+    #[serde(default)]
+    pub choices: Option<Vec<crate::choice::Choice>>,
+    /// J0: continuation once replayed choices run out (prng/zeros/
+    /// reseed). Default prng.
+    #[serde(default)]
+    pub continuation: crate::choice::Continuation,
+    /// Z1: how the harness acts on the game. "auto" (default) selects
+    /// intents when a non-empty IntentSurface exists, raw input
+    /// otherwise. "intents" | "raw" | "ui" force one (rejecting
+    /// impossible combinations at load time).
+    #[serde(default)]
+    pub actuator: Option<String>,
+}
+
+/// I4: liveness configuration.
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LivenessConfig {
+    /// Liveness mode (default: real-time).
+    #[serde(default)]
+    pub mode: LivenessMode,
+    /// Timeout for liveness signal (seconds).
+    #[serde(default = "default_liveness_timeout")]
+    pub timeout_s: f32,
+    /// Optional watched resources/components by type path (future Z6).
+    #[serde(default)]
+    pub watch: Vec<String>,
+}
+
+fn default_liveness_timeout() -> f32 {
+    2.0
+}
+
+impl Default for LivenessConfig {
+    fn default() -> Self {
+        Self {
+            mode: LivenessMode::default(),
+            timeout_s: default_liveness_timeout(),
+            watch: Vec::new(),
+        }
+    }
+}
+
+/// I4: liveness mode.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LivenessMode {
+    /// Real-time: violation if no liveness signal for timeout_s.
+    #[default]
+    RealTime,
+    /// Turn-based: idle is fine, but after an intent some liveness must occur.
+    AfterIntent,
+    /// Disable the liveness oracle (loud: recorded in report warnings).
+    Off,
+}
+
+fn default_seed() -> u64 {
+    42
+}
+fn default_rate() -> u32 {
+    10
+}
+fn default_deadzone() -> f32 {
+    10.0
+}
+
+/// Raw input surface declaration (Z3). Defines what raw inputs are available
+/// for chaos/curious bots to sample from.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct RawSurface {
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub mouse_buttons: bool,
+    #[serde(default)]
+    pub mouse_motion: bool,
+    #[serde(default)]
+    pub wheel: bool,
+    #[serde(default)]
+    pub gamepad: bool,
+    #[serde(default)]
+    pub clickables: bool, // ClickEntity targets discovered by Z6/Z5
+    /// Z4: per-key chaos sampling weights (key -> weight), from
+    /// DiscoveredSurface effect breadth (more changed percepts =
+    /// higher prior). Absent = uniform.
+    #[serde(default)]
+    pub weights: std::collections::HashMap<String, u32>,
+}
+
+impl RawSurface {
+    /// Z4: build a chaos-sampling surface from a discovered
+    /// surface. Keys are weighted by effect breadth (changed
+    /// percept count); mouse_motion/wheel/gamepad flags follow what
+    /// discovery observed; clickables pass through untouched.
+    pub fn from_discovered(d: &crate::discover::DiscoveredSurface) -> Self {
+        let mut weights = std::collections::HashMap::new();
+        let mut keys = vec![];
+        for (k, eff) in &d.keys {
+            keys.push(k.clone());
+            weights.insert(k.clone(), (eff.changed.len().max(1)) as u32);
+        }
+        let mut gamepad_buttons = d.gamepad_buttons.clone();
+        for (b, eff) in &d.gamepad_buttons {
+            weights.insert(format!("gamepad:{b}"), (eff.changed.len().max(1)) as u32);
+        }
+        gamepad_buttons.dedup_by(|a, b| a.0 == b.0);
+        Self {
+            keys,
+            mouse_buttons: !d.mouse_buttons.is_empty(),
+            mouse_motion: d.mouse_motion.is_some(),
+            wheel: d.wheel.is_some(),
+            gamepad: !d.gamepad_buttons.is_empty() || !d.gamepad_axes.is_empty(),
+            clickables: false,
+            weights,
+        }
+    }
+}
+
+impl Default for RawSurface {
+    fn default() -> Self {
+        // FX4.4: non-empty default surface for tier-0 chaos. When no
+        // IntentSurface exists, chaos samples these raw inputs into
+        // RawActionQueue. Standard set: arrows + WASD (keyboard only).
+        // RF8: keys here are a GUESS — an unbound key is reported as
+        // informational unused_input, never dead_verb (unless a
+        // sibling in its verb family works). Mouse/gamepad stay
+        // opt-in.
+        Self {
+            keys: vec![
+                "KeyW".into(),
+                "KeyA".into(),
+                "KeyS".into(),
+                "KeyD".into(),
+                "ArrowUp".into(),
+                "ArrowDown".into(),
+                "ArrowLeft".into(),
+                "ArrowRight".into(),
+            ],
+            // Mouse/gamepad stay OFF by default: tier-0 games frequently
+            // ignore them, and the dead_verb oracle would flag every
+            // unused button as a dead verb. Authors opt in per-scenario.
+            mouse_buttons: false,
+            mouse_motion: false,
+            wheel: false,
+            gamepad: false,
+            clickables: false,
+            weights: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// A typed replay intent. Whatever intent sequence a scenario author
+/// (or a recorded human play session translated through the adapter)
+/// provides is replayed verbatim.
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayInput {
+    pub frame: u64,
+    pub intent: ReplayIntent,
+}
+
+/// A raw input action for the tier-0 actuator (Z3). Peer of ReplayIntent:
+/// keys, mouse, cursor, gamepad, wheel, and ClickEntity gestures.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(tag = "raw", rename_all = "snake_case")]
+pub enum RawAction {
+    /// Key press (reuse parse_key_code for validation).
+    Key { key: String, hold_frames: u32 },
+    /// Mouse button press.
+    MouseButton { button: MouseBtn, hold_frames: u32 },
+    /// Mouse motion (delta in logical pixels).
+    MouseMove { delta: (f32, f32) },
+    /// Absolute cursor position (logical pixels, viewport coordinates).
+    Cursor { pos: (f32, f32) },
+    /// Click gesture: move to pos, press, hold, release.
+    Click {
+        pos: (f32, f32),
+        button: MouseBtn,
+        hold_frames: u32,
+    },
+    /// Click an entity by Name or StableId (resolved each frame).
+    ClickEntity { target: EntityRef },
+    /// Mouse wheel scroll.
+    Wheel { dy: f32 },
+    /// Gamepad button.
+    GamepadButton { button: String, hold_frames: u32 },
+    /// Gamepad axis.
+    GamepadAxis {
+        axis: String,
+        value: f32,
+        hold_frames: u32,
+    },
+    /// Wait N frames (no-op, for pacing).
+    Wait { frames: u32 },
+}
+
+/// Reference to a gameplay entity (by Name or StableId). Used by ClickEntity.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum EntityRef {
+    ByName(String),
+    ByStableId(u64),
+}
+
+/// Mouse button for raw input (wire-compatible with PointerButton).
+#[derive(
+    Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseBtn {
+    Left,
+    Right,
+    Middle,
+}
+
+/// synthetic_pointer: click a named entity at a given frame. The
+/// pointer position is derived from the entity's world transform via
+/// the camera, so the click lands on whatever the picking backend
+/// actually hits — which is the point.
+/// synthetic_keyboard: press+release a key at a given frame, through
+/// the real keyboard input chain.
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KeyPressInput {
+    pub frame: u64,
+    /// Key name: "space", "enter", "escape", "tab", "backspace",
+    /// "up"/"down"/"left"/"right", single letters a-z, digits 0-9.
+    pub key: String,
+    /// Hold the key for N frames (default 1). Charge attacks, dash
+    /// charging, and long-press menus require this.
+    #[serde(default = "default_hold_frames")]
+    pub hold_frames: u64,
+}
+
+fn default_hold_frames() -> u64 {
+    1
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PointerClickInput {
+    pub frame: u64,
+    /// Entity Name to click (resolved against Gameplay entities).
+    pub target: String,
+    /// Primary button by default; "secondary"/"middle" supported.
+    #[serde(default)]
+    pub button: crate::enums::PointerButton,
+    /// ACTIONABILITY GATE (Playwright-style, opt-in): after the click
+    /// gesture completes, verify the picking backend's hover map shows
+    /// the pointer over SOME entity — i.e. the click was receivable by
+    /// the game's picking wiring. A click through a masked/occluded
+    /// target or with a dead picking backend reports
+    /// `pointer_not_actionable` instead of silently hitting nothing.
+    #[serde(default)]
+    pub require_actionable: bool,
+    /// Hold the button for N frames before releasing (default 1).
+    /// Long-press interactions, drag-to-hold menus.
+    #[serde(default = "default_hold_frames")]
+    pub hold_frames: u64,
+}
+
+pub fn action_log_to_timed_actions(log: &[crate::core_state::ActionEntry]) -> Vec<TimedAction> {
+    log.iter()
+        .map(|e| TimedAction {
+            frame: e.frame,
+            source: match &e.source {
+                crate::core_state::ActionSource::BotScenario(s) => format!("scenario:{}", s),
+                crate::core_state::ActionSource::Agent => "agent".into(),
+                crate::core_state::ActionSource::Manual => "manual".into(),
+            },
+            action: e.action.clone(),
+            details: e.details.clone(),
+        })
+        .collect()
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, schemars::JsonSchema)]
+#[serde(tag = "intent", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReplayIntent {
+    Move {
+        dir: (f32, f32),
+    },
+    Choice {
+        index: usize,
+    },
+    Axis {
+        name: String,
+        value: f32,
+    },
+    /// Select a tile/entity BY NAME or StableId — resolved against live
+    /// `Name` + `Gameplay` entities at fire time. Unlike raw-entity
+    /// Selects, this survives reset cycles (fresh entity ids) — the
+    /// replay scenario refers to stable scene identities. StableId
+    /// targets work for unnamed Gameplay entities (I1).
+    Select {
+        target: SelectTarget,
+    },
+    Wait,
+    /// Raw input action for tier-0 games (Z3): the actuator replays it
+    /// verbatim through the real input chain. Details form is the
+    /// serde-tagged RawAction JSON.
+    Raw {
+        raw: RawAction,
+    },
+}
+
+/// Target of a replay Select: Name (plain string, back-compat) or
+/// StableId (unnamed Gameplay entities; I1).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum SelectTarget {
+    /// Plain string name (existing JSON scenarios keep working).
+    Name(String),
+    /// StableId object form: {"stable_id": n}.
+    Stable { stable_id: u64 },
+}
+
+/// Timed action for replay from ActionLog. Frame-aligned with the original
+/// run for deterministic reproduction. Used by the replay bot and ddmin
+/// minimizer to reconstruct crash-inducing sequences.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct TimedAction {
+    pub frame: u64,
+    pub source: String,
+    pub action: String,
+    pub details: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Invariant {
+    pub name: String,
+    pub rule: crate::enums::InvariantRule,
+    // nodes_in_bounds
+    pub min_x: Option<f32>,
+    pub max_x: Option<f32>,
+    pub min_y: Option<f32>,
+    pub max_y: Option<f32>,
+    pub min_z: Option<f32>,
+    pub max_z: Option<f32>,
+    /// Entity Names. Empty = all Gameplay entities.
+    #[serde(default)]
+    pub targets: Vec<String>,
+    // frame_time_p99_below / fps_floor / custom thresholds
+    pub value: Option<serde_json::Value>,
+    // custom: "TestApi.score" (numeric) or "TestApi.game_phase" (string)
+    pub path: Option<String>,
+    pub check: Option<crate::enums::CheckOp>,
+    pub after_s: Option<f32>,
+    pub before_s: Option<f32>,
+    pub max_delta_per_sec: Option<f64>,
+    /// Differential invariants: no_decrease (value must never drop) or
+    /// no_increase (value must never rise). Requires numeric path.
+    pub differential: Option<crate::enums::DifferentialOp>,
+    /// Eventually mode: the rule must hold AT LEAST ONCE within this
+    /// deadline (seconds). Unlike always-mode invariants (per-frame),
+    /// eventually waits for the first satisfaction and reports failure
+    /// only if the deadline expires unmet. Playwright/gdUnit pattern.
+    pub eventually_s: Option<f32>,
+    /// Query-shaped target: component filters instead of a TestApi path.
+    /// When present, the rule applies to the COUNT of entities matching
+    /// the filter (e.g., "count_above", "count_equals"). This is the
+    /// ECS-native analogue of Playwright's `toHaveCount`.
+    #[serde(default)]
+    pub query: Option<QueryTarget>,
+    /// Expert-rule oracle: WHEN `path` satisfies `check` vs
+    /// `value`, REQUIRE `requires_path` to satisfy `requires_check` vs
+    /// `requires_value`. Checks game POLICY compliance ("low HP ⇒ heal"),
+    /// complementing state invariants.
+    pub requires_path: Option<String>,
+    pub requires_check: Option<crate::enums::CheckOp>,
+    pub requires_value: Option<serde_json::Value>,
+    /// J1: robustness normalization scale. Defaults to max(|threshold|,
+    /// 1.0) so large-unit invariants don't dominate the overall min.
+    pub scale: Option<f64>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryTarget {
+    /// Component types that MUST be present.
+    #[serde(default)]
+    pub with: Vec<String>,
+    /// Component types that MUST NOT be present.
+    #[serde(default)]
+    pub without: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Setup {
+    #[serde(default)]
+    pub resets: Vec<ResetCall>,
+    /// Cheats invoked at scheduled frames, mid-run (AUDITED — every
+    /// invocation lands in the action log and bumps cheat_count).
+    #[serde(default)]
+    pub cheats: Vec<CheatCall>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+pub struct CheatCall {
+    pub frame: u64,
+    pub kind: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResetCall {
+    pub kind: String,
+}
+
+// ---------------------------------------------------------------------------
+// Load-time validation (reject, never run)
+// ---------------------------------------------------------------------------
+
+/// zp2: "did you mean" suggestions for typos. Levenshtein distance
+/// capped at 2 — good enough for near-miss typos ("keyq" → "KeyQ",
+/// "synthetic_pointer" → "synthetic_pointer") without noisy hits on
+/// genuinely unrelated names.
+pub fn suggest_similar(input: &str, candidates: &[String]) -> Option<String> {
+    let lower = input.to_ascii_lowercase();
+    let mut best: Option<(usize, &String)> = None;
+    for cand in candidates {
+        let d = levenshtein(&lower, &cand.to_ascii_lowercase());
+        if d <= 2 && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, cand));
+        }
+    }
+    best.map(|(_, c)| c.clone())
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            cur[j + 1] = (prev[j + 1] + 1)
+                .min(cur[j] + 1)
+                .min(prev[j] + if ca == cb { 0 } else { 1 });
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// zp2: canonical key names accepted by parse_key_code, for
+/// suggestion output ("Space" not "space", matching the bevy KeyCode
+/// spelling authors see in game code).
+pub const KNOWN_KEY_NAMES: &[&str] = &[
+    "Space",
+    "Enter",
+    "Escape",
+    "Tab",
+    "Backspace",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ShiftLeft",
+    "ControlLeft",
+    "AltLeft",
+    "KeyA",
+    "KeyB",
+    "KeyC",
+    "KeyD",
+    "KeyE",
+    "KeyF",
+    "KeyG",
+    "KeyH",
+    "KeyI",
+    "KeyJ",
+    "KeyK",
+    "KeyL",
+    "KeyM",
+    "KeyN",
+    "KeyO",
+    "KeyP",
+    "KeyQ",
+    "KeyR",
+    "KeyS",
+    "KeyT",
+    "KeyU",
+    "KeyV",
+    "KeyW",
+    "KeyX",
+    "KeyY",
+    "KeyZ",
+];
+
+/// zp2: description of every accepted key spelling, appended to
+/// unknown-key errors.
+fn key_format_help() -> String {
+    "accepted key formats: 'Space'/'space', 'Enter'/'enter', 'Escape', 'Tab', 'Backspace', \
+     'ArrowUp'/'up', 'ArrowDown'/'down', 'ArrowLeft'/'left', 'ArrowRight'/'right', 'Shift', \
+     'Ctrl', 'Alt', single letters ('w') or 'KeyW' style, digits 0-9"
+        .to_string()
+}
+
+/// zp2: unknown-key error with a did-you-mean suggestion. Public so
+/// the CLI validate command and runtime validation share wording.
+pub fn unknown_key_error(key: &str, at: Option<u64>) -> String {
+    let mut msg = format!(
+        "unknown key name '{}'{}",
+        key,
+        at.map(|f| format!(" at frame {f}")).unwrap_or_default()
+    );
+    let cands: Vec<String> = KNOWN_KEY_NAMES.iter().map(|s| s.to_string()).collect();
+    if let Some(sug) = suggest_similar(key, &cands) {
+        msg.push_str(&format!(" — did you mean '{sug}'?"));
+    }
+    msg.push_str(&format!(" ({})", key_format_help()));
+    msg
+}
+
+/// Errors rejecting a scenario before/at run start. Structured so
+/// callers can match on the category (e.g. missing contract pieces)
+/// instead of parsing strings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScenarioError {
+    /// The scenario JSON is structurally invalid (bad field combos).
+    Rejected(String),
+    /// The game does not implement the contract (missing TestApi).
+    ContractMissing(String),
+    /// The scenario references a reset kind the game never registered.
+    UnknownReset { kind: String, known: Vec<String> },
+    /// The scenario references a cheat kind the game never registered.
+    UnknownCheat { kind: String, known: Vec<String> },
+    /// A query-target component name failed to resolve.
+    InvalidComponent { name: String, reason: String },
+}
+
+impl std::fmt::Display for ScenarioError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScenarioError::Rejected(msg) => write!(f, "scenario rejected: {}", msg),
+            ScenarioError::ContractMissing(msg) => write!(f, "contract missing: {}", msg),
+            ScenarioError::UnknownReset { kind, known } => {
+                let base = format!(
+                    "unknown reset kind '{}' — known kinds: {}",
+                    kind,
+                    if known.is_empty() {
+                        "(none registered)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                );
+                write!(
+                    f,
+                    "scenario rejected: {base}{}",
+                    suggestion_suffix(kind, known)
+                )
+            }
+            ScenarioError::UnknownCheat { kind, known } => {
+                let base = format!(
+                    "unknown cheat kind '{}' — known kinds: {}",
+                    kind,
+                    if known.is_empty() {
+                        "(none registered)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                );
+                write!(
+                    f,
+                    "scenario rejected: {base}{}",
+                    suggestion_suffix(kind, known)
+                )
+            }
+            ScenarioError::InvalidComponent { name, reason } => {
+                write!(f, "invalid component '{}': {}", name, reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ScenarioError {}
+
+/// zp2: " — did you mean 'X'?" suffix for error Display impls.
+fn suggestion_suffix(input: &str, candidates: &[String]) -> String {
+    match suggest_similar(input, candidates) {
+        Some(s) => format!(" — did you mean '{s}'?"),
+        None => String::new(),
+    }
+}
+
+pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
+    // Validate tps and duration_s
+    if scenario.tps < 1 {
+        return Err(ScenarioError::Rejected("tps must be >= 1".into()));
+    }
+    if !scenario.duration_s.is_finite() || scenario.duration_s <= 0.0 {
+        return Err(ScenarioError::Rejected(
+            "duration_s must be finite and > 0".into(),
+        ));
+    }
+    // Compute-DoS caps (H2): a hostile scenario with huge tps/duration
+    // could otherwise hang the harness or exhaust memory.
+    const MAX_TPS: u32 = 1_000;
+    const MAX_DURATION_S: f32 = 3_600.0;
+    const MAX_TOTAL_TICKS: u64 = 10_000_000;
+    if scenario.tps > MAX_TPS {
+        return Err(ScenarioError::Rejected(format!(
+            "tps {} exceeds the maximum of {MAX_TPS}",
+            scenario.tps
+        )));
+    }
+    // swarm-dt0: Time<Virtual> clamps incoming deltas to max_delta
+    // (250ms default) — a manual frame duration above that silently
+    // distorts dt. Reject rather than warn: the observed dt would
+    // not match the configured one at all.
+    if scenario.simulated_time && 1.0 / scenario.tps as f64 > 0.250 {
+        return Err(ScenarioError::Rejected(format!(
+            "simulated_time frame duration {:.3}s (tps {}) exceeds the \
+             Time<Virtual> max_delta clamp (0.250s) — dt would be silently \
+             distorted; raise tps above 4",
+            1.0 / scenario.tps as f64,
+            scenario.tps
+        )));
+    }
+    if scenario.duration_s > MAX_DURATION_S {
+        return Err(ScenarioError::Rejected(format!(
+            "duration_s {} exceeds the maximum of {MAX_DURATION_S}",
+            scenario.duration_s
+        )));
+    }
+    // I4 (RF27): reject NaN/negative liveness timeouts — they silently
+    // disable frozen_world detection (timeout_frames 0).
+    if !scenario.liveness.timeout_s.is_finite() || scenario.liveness.timeout_s <= 0.0 {
+        return Err(ScenarioError::Rejected(format!(
+            "liveness.timeout_s must be finite and > 0, got {}",
+            scenario.liveness.timeout_s
+        )));
+    }
+    // le3.33 (RF43 minor): a timeout SMALLER than one frame gives
+    // timeout_frames 0 (cast truncates) — frozen_world silently
+    // disabled. Reject up front instead.
+    if (scenario.liveness.timeout_s * scenario.tps as f32) as u64 == 0 {
+        return Err(ScenarioError::Rejected(format!(
+            "liveness.timeout_s {} is shorter than one frame at tps {} \
+             (frozen-world detection would be silently disabled)",
+            scenario.liveness.timeout_s, scenario.tps
+        )));
+    }
+    let total_ticks = (scenario.duration_s * scenario.tps as f32).ceil() as u64;
+    if total_ticks > MAX_TOTAL_TICKS {
+        return Err(ScenarioError::Rejected(format!(
+            "total ticks ({total_ticks}) exceed the maximum of {MAX_TOTAL_TICKS} \
+             (duration_s {} x tps {})",
+            scenario.duration_s, scenario.tps
+        )));
+    }
+    // Golden-file path safety (H1): scenario.name is embedded into
+    // golden-set file names on disk. Reject anything outside
+    // [A-Za-z0-9_-] so path traversal (e.g. "../../etc/x") cannot
+    // write outside the golden directory.
+    if let Some(name) = &scenario.name {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(ScenarioError::Rejected(format!(
+                "scenario.name '{name}' is invalid: golden-set names may only contain \
+                 [A-Za-z0-9_-] and must be non-empty",
+            )));
+        }
+    }
+    // Bot-specific requirements (C6).
+    use crate::enums::BotType;
+    match scenario.bot.bot_type {
+        BotType::Planner => {
+            if scenario.bot.goals.is_none() {
+                return Err(ScenarioError::Rejected(
+                    "planner bot requires a non-empty goals tree".into(),
+                ));
+            }
+            // Walk the goal tree: primitives with string values and
+            // numeric checks (lt/gt/le/ge) can never fire — reject at
+            // load instead of passing vacuously at runtime.
+            if let Some(goals) = &scenario.bot.goals {
+                let mut bad = Vec::new();
+                walk_goal_checks(goals, &mut bad);
+                if !bad.is_empty() {
+                    return Err(ScenarioError::Rejected(format!(
+                        "planner goal(s) use numeric checks on string values: {}",
+                        bad.join(", ")
+                    )));
+                }
+            }
+        }
+        BotType::Pursuit => {
+            if scenario.bot.agent_target.is_none() && scenario.bot.target.is_none() {
+                return Err(ScenarioError::Rejected(
+                    "pursuit bot requires agent_target or target".into(),
+                ));
+            }
+        }
+        BotType::SyntheticPointer => {
+            if scenario.bot.pointer_clicks.is_empty() {
+                return Err(ScenarioError::Rejected(
+                    "synthetic_pointer bot requires a non-empty pointer_clicks list".into(),
+                ));
+            }
+        }
+        BotType::SyntheticKeyboard => {
+            if scenario.bot.key_presses.is_empty() {
+                return Err(ScenarioError::Rejected(
+                    "synthetic_keyboard bot requires a non-empty key_presses list".into(),
+                ));
+            }
+            for kp in &scenario.bot.key_presses {
+                if parse_key_code(&kp.key).is_none() {
+                    return Err(ScenarioError::Rejected(unknown_key_error(
+                        &kp.key,
+                        Some(kp.frame),
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Z1: actuator selection must be one of the known values.
+    if let Some(actuator) = &scenario.bot.actuator {
+        match actuator.as_str() {
+            "auto" | "intents" | "raw" | "ui" => {}
+            other => {
+                // zp2: did-you-mean for near-miss actuators.
+                let known: Vec<String> = ["auto", "intents", "raw", "ui"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let mut msg = format!(
+                    "bot.actuator '{other}' is invalid: expected one of \
+                     auto | intents | raw | ui"
+                );
+                if let Some(sug) = suggest_similar(other, &known) {
+                    msg.push_str(&format!(" — did you mean '{sug}'?"));
+                }
+                return Err(ScenarioError::Rejected(msg));
+            }
+        }
+    }
+
+    // Invariant names key the eventual-state and dedup tables —
+    // duplicates would silently shadow each other.
+    let mut seen = HashSet::new();
+    for rule in &scenario.invariants {
+        if !seen.insert(rule.name.as_str()) {
+            return Err(ScenarioError::Rejected(format!(
+                "duplicate invariant name '{}' — names must be unique",
+                rule.name
+            )));
+        }
+    }
+    for rule in &scenario.invariants {
+        if rule.rule == crate::enums::InvariantRule::Custom {
+            let check = rule.check.unwrap_or(crate::enums::CheckOp::Le);
+            // Text comparison: only Equals/Ne accept string values.
+            if let Some(v) = &rule.value {
+                if !v.is_number() && check.holds_text("", "").is_none() {
+                    return Err(ScenarioError::Rejected(format!(
+                        "invariant '{}' uses check='{}' with a non-numeric value ({}) — use check:'equals'/'ne' or a numeric threshold",
+                        rule.name, check, v
+                    )));
+                }
+            }
+        }
+        if let Some(mps) = rule.max_delta_per_sec {
+            if mps < 0.0 {
+                return Err(ScenarioError::Rejected(format!(
+                    "invariant '{}' has negative max_delta_per_sec",
+                    rule.name
+                )));
+            }
+        }
+        if rule.differential.is_some() && rule.path.is_none() {
+            return Err(ScenarioError::Rejected(format!(
+                "invariant '{}' uses differential without a TestApi path",
+                rule.name
+            )));
+        }
+        // Time-window sanity (C6).
+        if let Some(ev) = rule.eventually_s {
+            if ev <= 0.0 {
+                return Err(ScenarioError::Rejected(format!(
+                    "invariant '{}' has eventually_s <= 0",
+                    rule.name
+                )));
+            }
+        }
+        if let (Some(after), Some(before)) = (rule.after_s, rule.before_s) {
+            if after >= before {
+                return Err(ScenarioError::Rejected(format!(
+                    "invariant '{}' has after_s ({}) >= before_s ({})",
+                    rule.name, after, before
+                )));
+            }
+        }
+        // Bounds sanity (C6).
+        let bound_pairs = [
+            (rule.min_x, rule.max_x, "x"),
+            (rule.min_y, rule.max_y, "y"),
+            (rule.min_z, rule.max_z, "z"),
+        ];
+        for (min, max, axis) in bound_pairs {
+            if let (Some(lo), Some(hi)) = (min, max) {
+                if lo > hi {
+                    return Err(ScenarioError::Rejected(format!(
+                        "invariant '{}' has min_{} ({}) > max_{} ({})",
+                        rule.name, axis, lo, axis, hi
+                    )));
+                }
+            }
+        }
+        // Expert-rule validation: requires_* only valid when WHEN clause exists
+        if (rule.requires_path.is_some() || rule.requires_check.is_some()) && rule.path.is_none() {
+            return Err(ScenarioError::Rejected(format!(
+                "invariant '{}' specifies requires_* without a WHEN path",
+                rule.name
+            )));
+        }
+        if rule.requires_check.is_some() && rule.requires_value.is_none() {
+            return Err(ScenarioError::Rejected(format!(
+                "invariant '{}' specifies requires_check without requires_value",
+                rule.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+
+/// Recursively collect planner goal primitives that use numeric checks
+/// (lt/gt/le/ge) against string values — these can never be satisfied
+/// and must be rejected at load time (C6).
+fn walk_goal_checks(goal: &crate::planner::GoalNode, bad: &mut Vec<String>) {
+    use crate::planner::GoalNode;
+    match goal {
+        GoalNode::Seq { children } | GoalNode::Any { children, .. } => {
+            for c in children {
+                walk_goal_checks(c, bad);
+            }
+        }
+        GoalNode::Repeat { child, .. } => walk_goal_checks(child, bad),
+        GoalNode::Predicate { .. } => {}
+        GoalNode::Primitive {
+            path, check, value, ..
+        } => {
+            if !value.is_number() && check.holds_text("", "").is_none() {
+                bad.push(format!("{path} check='{}' value={value}", check.symbol()));
+            }
+        }
+    }
+}
+
+/// zp2: the JSON Schema for Scenario (schemars), for the CLI validate
+/// command and external tooling. Same generator as docs/schema.json.
+pub fn scenario_json_schema() -> serde_json::Value {
+    schemars::schema_for!(Scenario).into()
+}
