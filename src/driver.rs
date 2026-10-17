@@ -877,6 +877,15 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_secs_f64(1.0 / tps as f64),
         ));
+        // swarm-dt0: prime Time<Real> BEFORE the first update. Vanilla
+        // Bevy starts Time<Real> with no last_update, so the first
+        // app.update() computes delta = startup->now — frame 1 gets a
+        // zero/near-zero delta while frames 2..N advance the full
+        // manual delta. Priming makes frame 1 uniform with the rest
+        // (port of bevy_headless_test's prime_time).
+        app.world_mut()
+            .resource_mut::<bevy::time::Time<bevy::time::Real>>()
+            .update_with_instant(std::time::Instant::now());
     }
     app.insert_resource(ScenarioResource(std::sync::Arc::new(scenario.clone())));
 

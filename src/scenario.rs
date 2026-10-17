@@ -827,6 +827,19 @@ pub fn validate_scenario(scenario: &Scenario) -> Result<(), ScenarioError> {
             scenario.tps
         )));
     }
+    // swarm-dt0: Time<Virtual> clamps incoming deltas to max_delta
+    // (250ms default) — a manual frame duration above that silently
+    // distorts dt. Reject rather than warn: the observed dt would
+    // not match the configured one at all.
+    if scenario.simulated_time && 1.0 / scenario.tps as f64 > 0.250 {
+        return Err(ScenarioError::Rejected(format!(
+            "simulated_time frame duration {:.3}s (tps {}) exceeds the \
+             Time<Virtual> max_delta clamp (0.250s) — dt would be silently \
+             distorted; raise tps above 4",
+            1.0 / scenario.tps as f64,
+            scenario.tps
+        )));
+    }
     if scenario.duration_s > MAX_DURATION_S {
         return Err(ScenarioError::Rejected(format!(
             "duration_s {} exceeds the maximum of {MAX_DURATION_S}",
