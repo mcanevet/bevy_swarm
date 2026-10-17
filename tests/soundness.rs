@@ -11,8 +11,8 @@ use std::thread;
 #[test]
 fn concurrent_panic_hook_installation_no_race() {
     use bevy::prelude::*;
-    use bevy_swarm::driver::run_scenario;
-    use bevy_swarm::harness::Scenario;
+    use bevy_playtest::driver::run_scenario;
+    use bevy_playtest::harness::Scenario;
 
     let mut handles = vec![];
     for _ in 0..16 {
@@ -36,7 +36,7 @@ fn concurrent_panic_hook_installation_no_race() {
     // 6wt: the panic hook was installed EXACTLY ONCE across all 16
     // concurrent first-uses (strengthened from no-crash-only).
     assert_eq!(
-        bevy_swarm::driver::panic_hook_install_count(),
+        bevy_playtest::driver::panic_hook_install_count(),
         1,
         "hook installer must win exactly once"
     );

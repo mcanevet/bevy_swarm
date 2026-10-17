@@ -5,19 +5,19 @@
 //! Add as a dev-dependency in your game's `Cargo.toml`:
 //! ```toml
 //! [dev-dependencies]
-//! bevy_swarm = "0.1"
+//! bevy_playtest = "0.1"
 //! ```
 //!
 //! Then in your game's `src/test_conventions.rs` (or wherever you define
-//! the contract), implement the traits from `bevy_swarm::contract`:
+//! the contract), implement the traits from `bevy_playtest::contract`:
 //! - Define your `UserIntent` enum (or re-export the default one)
 //! - Implement `TestApiResolve` on your `TestApi` resource
 //! - Register `ResetHooks`, `IntentSurface`, and `Gameplay` marker
 //!
 //! In your test suite, import the harness:
 //! ```rust,no_run
-//! use bevy_swarm::harness::{run_scenario, validate_scenario};
-//! use bevy_swarm::contract::{UserIntent, Gameplay, ResetHooks, IntentSurface};
+//! use bevy_playtest::harness::{run_scenario, validate_scenario};
+//! use bevy_playtest::contract::{UserIntent, Gameplay, ResetHooks, IntentSurface};
 //! ```
 //!
 //! The harness expects:
@@ -26,7 +26,7 @@
 //! - `ResetHooks` and `IntentSurface` resources (provided by this crate's defaults)
 //!
 // Z14: getrandom_backend cfg is set via RUSTFLAGS (a planned
-// `cargo swarm run` wrapper will set it automatically).
+// `cargo bevy-playtest run` wrapper will set it automatically).
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 // le3.12 (RF13): the README is part of the doctest suite — its
@@ -52,10 +52,10 @@ pub mod autotest;
 /// The curated prelude: everything a playtest needs in one glob import.
 ///
 /// ```rust,no_run
-/// use bevy_swarm::prelude::*;
+/// use bevy_playtest::prelude::*;
 /// ```
 ///
-/// This is the SUPPORTED surface of bevy_swarm 0.1. Everything outside
+/// This is the SUPPORTED surface of bevy_playtest 0.1. Everything outside
 /// `prelude` (and the specific modules named in the docs) is internal
 /// machinery with no stability guarantee until the core/adapter split
 /// lands.
@@ -78,7 +78,7 @@ pub mod prelude {
 struct _PreludeSmokeDoctests;
 
 /// Z18.H: crate-root re-exports so the Z10-generated test can call
-/// `bevy_swarm::autotest(GamePlugin, AutotestConfig::from_env())`.
+/// `bevy_playtest::autotest(GamePlugin, AutotestConfig::from_env())`.
 pub use autotest::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.

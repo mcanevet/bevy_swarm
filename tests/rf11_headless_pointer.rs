@@ -1,11 +1,11 @@
 //! RF11 (swarm-m2h.25): headless pointer/ClickEntity acceptance tests.
 
 use bevy::prelude::*;
-use bevy_swarm::branch::{InProcess, ScenarioRunner};
-use bevy_swarm::headless::headless_app_factory;
-use bevy_swarm::raw_input::RawActionQueue;
-use bevy_swarm::scenario::{EntityRef, RawAction, Scenario};
-use bevy_swarm::state::PlaytestState;
+use bevy_playtest::branch::{InProcess, ScenarioRunner};
+use bevy_playtest::headless::headless_app_factory;
+use bevy_playtest::raw_input::RawActionQueue;
+use bevy_playtest::scenario::{EntityRef, RawAction, Scenario};
+use bevy_playtest::state::PlaytestState;
 
 struct TestPlugin;
 impl Plugin for TestPlugin {
@@ -65,17 +65,19 @@ fn rf11_click_entity_releases_between_actions() {
     // Live-scenario gating: the click resolver needs ScenarioResource
     // AND PlaytestState, otherwise the queue is silently ignored
     // (vacuous test).
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
-        serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
-        )
-        .unwrap(),
-    )));
+    app.insert_resource(bevy_playtest::driver::ScenarioResource(
+        std::sync::Arc::new(
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+            )
+            .unwrap(),
+        ),
+    ));
     app.world_mut().insert_resource(PlaytestState::new(60, 42));
-    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
+    app.init_resource::<bevy_playtest::choice::ChoiceStream>();
     // Oracle resources normally installed by run_scenario.
-    app.init_resource::<bevy_swarm::state::Violations>();
-    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+    app.init_resource::<bevy_playtest::state::Violations>();
+    app.init_resource::<bevy_playtest::robustness::RobustnessTracker>();
 
     // Two ClickEntity actions, frames 1 and 8.
     for (frame, target) in [(1usize, "Target"), (8, "Target")] {

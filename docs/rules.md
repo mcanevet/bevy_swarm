@@ -1,8 +1,8 @@
 # Rule Catalog
 
 GENERATED from `src/rules.rs` (`Rule` enum) — do not edit by hand.
-Regenerate with `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.
-Source of truth: `bevy_swarm::rules::Rule`.
+Regenerate with `BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation`.
+Source of truth: `bevy_playtest::rules::Rule`.
 Expectation files (X2) reference only these names.
 
 ## Index

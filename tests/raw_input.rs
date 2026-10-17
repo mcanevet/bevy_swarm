@@ -1,12 +1,12 @@
 //! Z3: Raw input actuator tests (tier-0 games).
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
-use bevy_swarm::driver::PlaytestPlugin;
-use bevy_swarm::harness::Gameplay;
-use bevy_swarm::raw_input::RawActionQueue;
-use bevy_swarm::scenario::{MouseBtn, RawAction};
-use bevy_swarm::state::PlaytestState;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
+use bevy_playtest::driver::PlaytestPlugin;
+use bevy_playtest::harness::Gameplay;
+use bevy_playtest::raw_input::RawActionQueue;
+use bevy_playtest::scenario::{MouseBtn, RawAction};
+use bevy_playtest::state::PlaytestState;
 
 fn build_headless_game() -> App {
     let mut app = App::new();
@@ -146,7 +146,7 @@ fn raw_click_entity_errors_on_missing_resolution() {
         .push_back((
             0,
             RawAction::ClickEntity {
-                target: bevy_swarm::scenario::EntityRef::ByName("Missing".to_string()),
+                target: bevy_playtest::scenario::EntityRef::ByName("Missing".to_string()),
             },
         ));
 
@@ -156,21 +156,23 @@ fn raw_click_entity_errors_on_missing_resolution() {
 
     // The Update-set click resolver is gated on a live scenario, and
     // chaos_bot_system (also gated) needs the choice stream.
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
-        serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
-        )
-        .unwrap(),
-    )));
-    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
-    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+    app.insert_resource(bevy_playtest::driver::ScenarioResource(
+        std::sync::Arc::new(
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+            )
+            .unwrap(),
+        ),
+    ));
+    app.init_resource::<bevy_playtest::choice::ChoiceStream>();
+    app.init_resource::<bevy_playtest::robustness::RobustnessTracker>();
 
     // Run a full frame: PreUpdate defers ClickEntity to the Update
     // pass, which resolves and reports the violation.
     app.update();
 
     // Check that a violation was reported
-    let violations = app.world().resource::<bevy_swarm::state::Violations>();
+    let violations = app.world().resource::<bevy_playtest::state::Violations>();
     assert!(violations
         .entries
         .iter()
@@ -239,7 +241,7 @@ fn raw_gamepad_reports_disabled_violation() {
 
     app.update();
 
-    let violations = app.world().resource::<bevy_swarm::state::Violations>();
+    let violations = app.world().resource::<bevy_playtest::state::Violations>();
     assert!(violations
         .entries
         .iter()
@@ -456,21 +458,23 @@ fn fx8_click_entity_projects_to_viewport() {
         .push_back((
             0,
             RawAction::ClickEntity {
-                target: bevy_swarm::scenario::EntityRef::ByName("Target".to_string()),
+                target: bevy_playtest::scenario::EntityRef::ByName("Target".to_string()),
             },
         ));
 
     let mut state = PlaytestState::new(60, 42);
     state.frame = 0;
     app.world_mut().insert_resource(state);
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
-        serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
-        )
-        .unwrap(),
-    )));
-    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
-    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+    app.insert_resource(bevy_playtest::driver::ScenarioResource(
+        std::sync::Arc::new(
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+            )
+            .unwrap(),
+        ),
+    ));
+    app.init_resource::<bevy_playtest::choice::ChoiceStream>();
+    app.init_resource::<bevy_playtest::robustness::RobustnessTracker>();
 
     app.update();
     // ButtonInput processes the written message on the NEXT frame's

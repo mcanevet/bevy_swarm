@@ -1,15 +1,15 @@
-//! cargo-swarm: CLI scaffolding for bevy_swarm playtests.
+//! cargo-swarm: CLI scaffolding for bevy_playtest playtests.
 //!
 //! Subcommands:
-//! - `cargo swarm init [--package <name>] [--yes]` — detect the game's
+//! - `cargo bevy-playtest init [--package <name>] [--yes]` — detect the game's
 //!   root plugin and generate `tests/swarm.rs` (safe to edit).
-//! - `cargo swarm run [--seeds N] [--duration S]` — run the generated
+//! - `cargo bevy-playtest run [--seeds N] [--duration S]` — run the generated
 //!   test with env overrides; `--plugin <path>` uses the external
 //!   runner (X1 CLI mode) that never touches the game's dev-deps.
-//! - `cargo swarm report` — pretty-print the last autotest report.
+//! - `cargo bevy-playtest report` — pretty-print the last autotest report.
 //!
 //! Install (until the user approves publishing):
-//! `cargo install --path bevy_swarm_cli` from the bevy_swarm checkout.
+//! `cargo install --path bevy_playtest_cli` from the bevy_playtest checkout.
 
 use std::path::PathBuf;
 
@@ -44,10 +44,10 @@ fn main() {
 
 fn print_usage() {
     println!(
-        "cargo-swarm — bevy_swarm CLI\n\
+        "cargo-swarm — bevy_playtest CLI\n\
          \n\
          USAGE:\n\
-         \x20   cargo swarm <SUBCOMMAND>\n\
+         \x20   cargo bevy-playtest <SUBCOMMAND>\n\
          \n\
          SUBCOMMANDS:\n\
          \x20   init    Detect the game's root plugin and generate tests/swarm.rs\n\
@@ -93,7 +93,7 @@ fn cmd_init(args: &[String]) -> i32 {
                 outcome.plugin_path,
                 outcome.package_name
             );
-            println!("add bevy_swarm to [dev-dependencies] if not present");
+            println!("add bevy_playtest to [dev-dependencies] if not present");
             for w in &outcome.warnings {
                 eprintln!("warning: {w}");
             }
@@ -187,7 +187,7 @@ fn cmd_validate(args: &[String]) -> i32 {
 
     // 2. Schema conformance: unknown fields, wrong types. Collected
     // per error, not first-abort.
-    let schema = bevy_swarm::scenario::scenario_json_schema();
+    let schema = bevy_playtest::scenario::scenario_json_schema();
     if let Ok(validator) = jsonschema::validator_for(&schema) {
         if let Err(first) = validator.validate(&value) {
             // validate() returns only the first error; iter_errors
@@ -219,9 +219,9 @@ fn cmd_validate(args: &[String]) -> i32 {
 
     // 3. Semantic checks (validate_scenario): known where possible,
     // all reported at once.
-    match serde_json::from_value::<bevy_swarm::scenario::Scenario>(value) {
+    match serde_json::from_value::<bevy_playtest::scenario::Scenario>(value) {
         Ok(scenario) => {
-            if let Err(e) = bevy_swarm::scenario::validate_scenario(&scenario) {
+            if let Err(e) = bevy_playtest::scenario::validate_scenario(&scenario) {
                 errors.push(
                     e.to_string()
                         .trim_start_matches("scenario rejected: ")
@@ -250,10 +250,10 @@ fn cmd_validate(args: &[String]) -> i32 {
     }
 }
 
-/// smu: `cargo swarm reproduce [--fingerprint <fp>] [--report <path>]`
+/// smu: `cargo bevy-playtest reproduce [--fingerprint <fp>] [--report <path>]`
 /// — load the last (or given) report, pick the failing run matching
 /// the fingerprint (or the first failing run), re-run the generated
-/// test with the EXACT seed pinned via BEVY_SWARM_SEED. The harness's
+/// test with the EXACT seed pinned via BEVY_PLAYTEST_SEED. The harness's
 /// inline failure summary prints to stderr on failure.
 fn cmd_reproduce(args: &[String]) -> i32 {
     let mut fingerprint: Option<String> = None;
@@ -332,10 +332,10 @@ fn cmd_reproduce(args: &[String]) -> i32 {
     let mut cmd =
         std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     cmd.args(["test", "--test", "swarm", "--", "--nocapture"])
-        .env("BEVY_SWARM_SEED", seed.to_string())
-        .env("BEVY_SWARM_SEEDS", "1");
+        .env("BEVY_PLAYTEST_SEED", seed.to_string())
+        .env("BEVY_PLAYTEST_SEEDS", "1");
     if let Some(d) = duration {
-        cmd.env("BEVY_SWARM_DURATION", d.to_string());
+        cmd.env("BEVY_PLAYTEST_DURATION", d.to_string());
     }
     let status = cmd
         .status()

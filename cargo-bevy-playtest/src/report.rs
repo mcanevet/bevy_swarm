@@ -1,4 +1,4 @@
-//! `cargo swarm report`: pretty-print the last autotest report
+//! `cargo bevy-playtest report`: pretty-print the last autotest report
 //! (conventions::runs_dir()/last/report.json).
 
 use std::path::PathBuf;
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 pub fn last_report_path() -> PathBuf {
     // autotest writes runs/<dir>/report.json and a `last` POINTER file
     // containing the run-dir name.
-    let runs = bevy_swarm::conventions::runs_dir();
+    let runs = bevy_playtest::conventions::runs_dir();
     let pointer = runs.join("last");
     match std::fs::read_to_string(&pointer) {
         Ok(dir_name) => runs.join(dir_name.trim()).join("report.json"),

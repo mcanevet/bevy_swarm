@@ -2,7 +2,7 @@
 //! panics or opaque serde failures. Scenarios are user-authored JSON
 //! (the library's PRIMARY interface), so error quality is UX.
 
-use bevy_swarm::harness::Scenario;
+use bevy_playtest::harness::Scenario;
 
 fn parse(json: &str) -> Result<Scenario, serde_json::Error> {
     serde_json::from_str(json)

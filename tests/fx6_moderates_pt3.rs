@@ -2,7 +2,7 @@
 //! unnamed entities, audit-log replay detail comparison.
 
 use bevy::prelude::*;
-use bevy_swarm::oracles::resolve_world_percept;
+use bevy_playtest::oracles::resolve_world_percept;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
@@ -19,9 +19,9 @@ struct ScoreRes(f64);
 fn app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .add_plugins(bevy_swarm::driver::PlaytestPlugin);
-    app.init_resource::<bevy_swarm::contract::TestApi>();
-    app.insert_resource(bevy_swarm::contract::TestApi::default());
+        .add_plugins(bevy_playtest::driver::PlaytestPlugin);
+    app.init_resource::<bevy_playtest::contract::TestApi>();
+    app.insert_resource(bevy_playtest::contract::TestApi::default());
     app
 }
 
@@ -44,7 +44,7 @@ fn fx6_aggregate_sum_over_component_field() {
     let v = resolve_world_percept(a.world(), "Component:Health.0#sum");
     assert_eq!(
         v,
-        Some(bevy_swarm::contract::TestFieldValue::Numeric(42.0)),
+        Some(bevy_playtest::contract::TestFieldValue::Numeric(42.0)),
         "#sum must aggregate the field over all entities with the component"
     );
 }
@@ -67,11 +67,11 @@ fn fx6_aggregate_min_max_over_component_field() {
 
     assert_eq!(
         resolve_world_percept(a.world(), "Component:Health.0#min"),
-        Some(bevy_swarm::contract::TestFieldValue::Numeric(7.0))
+        Some(bevy_playtest::contract::TestFieldValue::Numeric(7.0))
     );
     assert_eq!(
         resolve_world_percept(a.world(), "Component:Health.0#max"),
-        Some(bevy_swarm::contract::TestFieldValue::Numeric(32.0))
+        Some(bevy_playtest::contract::TestFieldValue::Numeric(32.0))
     );
 }
 
@@ -88,7 +88,7 @@ fn fx6_aggregate_on_empty_set() {
 
     assert_eq!(
         resolve_world_percept(a.world(), "Component:Health.0#sum"),
-        Some(bevy_swarm::contract::TestFieldValue::Numeric(0.0)),
+        Some(bevy_playtest::contract::TestFieldValue::Numeric(0.0)),
         "#sum over no entities must be 0, not None (query-count semantics)"
     );
     // min/max over an empty set is undefined — absent.
@@ -111,9 +111,9 @@ fn fx6_digest_covers_resource_percepts() {
     reg.write().register::<ScoreRes>();
     a.insert_resource(ScoreRes(10.0));
 
-    let d1 = bevy_swarm::determinism::canonical_state(a.world());
+    let d1 = bevy_playtest::determinism::canonical_state(a.world());
     a.insert_resource(ScoreRes(20.0));
-    let d2 = bevy_swarm::determinism::canonical_state(a.world());
+    let d2 = bevy_playtest::determinism::canonical_state(a.world());
 
     assert_ne!(
         d1.get("Resource:ScoreRes"),

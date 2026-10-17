@@ -4,10 +4,10 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "In-process acceptance runner for bevy_swarm fixtures: adapter plugins + report writer"
+description = "In-process acceptance runner for bevy_playtest fixtures: adapter plugins + report writer"
 
 [dependencies]
-bevy_swarm = { path = "../.." }
+bevy_playtest = { path = "../.." }
 bevy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

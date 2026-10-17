@@ -10,7 +10,7 @@
 //! as test" flows.
 //!
 //! ```
-//! use bevy_swarm::builder::ScenarioBuilder;
+//! use bevy_playtest::builder::ScenarioBuilder;
 //!
 //! let scenario = ScenarioBuilder::chaos()
 //!     .name("menu-navigation")

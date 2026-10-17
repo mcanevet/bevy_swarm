@@ -1,6 +1,6 @@
 # Explanation: The Zero-Contract Philosophy
 
-*Understanding-oriented — why bevy_swarm requires nothing from your
+*Understanding-oriented — why bevy_playtest requires nothing from your
 game, why the tiers exist, and why invariants beat scripted tests.*
 
 ## The problem with testing games
@@ -12,7 +12,7 @@ stuck?", "does anything go NaN?", "does the game stay alive under
 random input?". Writing those as click-scripts is absurd; writing
 them as per-frame properties is natural.
 
-So bevy_swarm's primary authoring surface is the **invariant** — a
+So bevy_playtest's primary authoring surface is the **invariant** — a
 declared property checked every frame against the live world, by bots
 that explore input space far wider than a human script. You write
 WHAT must hold; the harness finds WHEN it doesn't.
@@ -27,7 +27,7 @@ nothing:
 
 ```rust,no_run
 # fn main() {
-let report = bevy_swarm::autotest(GamePlugin, AutotestConfig::default())?;
+let report = bevy_playtest::autotest(GamePlugin, AutotestConfig::default())?;
 # }
 ```
 
@@ -65,7 +65,7 @@ The design rules the tiers enforce:
 ## Why not full E2E black-box?
 
 External-only tools own their input pipeline — synthetic clicks that
-approximate the real ones. bevy_swarm instead runs INSIDE the Bevy
+approximate the real ones. bevy_playtest instead runs INSIDE the Bevy
 app: bots write the same typed `UserIntent` messages your systems
 consume, oracles query the same ECS world your systems mutate. There
 is no adapter layer to drift, no screenshot heuristics, no

@@ -13,20 +13,20 @@ members = [
     "fixtures/brp",
     "fixtures/multithread_panic",
     "tests/fixture-runner",
-    "bevy_swarm_cli",
+    "cargo-bevy-playtest",
 ]
 
 # Z10: CLI test-fixture crates are standalone workspaces driven by the
 # CLI's own tests; building them as members would pull bevy
 # dev-deps into workspace-wide feature unification.
-exclude = ["bevy_swarm_cli/tests/fixtures"]
+exclude = ["cargo-bevy-playtest/tests/fixtures"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/mcanevet/bevy_swarm"
-homepage = "https://github.com/mcanevet/bevy_swarm"
+repository = "https://github.com/mcanevet/bevy_playtest"
+homepage = "https://github.com/mcanevet/bevy_playtest"
 
 [workspace.dependencies]
 bevy = { version = "0.20.0", default-features = false }
@@ -36,7 +36,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 
 [package]
-name = "bevy_swarm"
+name = "bevy_playtest"
 version.workspace = true
 rust-version = "1.97"
 license.workspace = true
@@ -44,7 +44,7 @@ edition.workspace = true
 description = "ECS-native headless playtesting harness for Bevy games — contract-driven bots, oracles, and crash minimization"
 repository.workspace = true
 homepage.workspace = true
-documentation = "https://docs.rs/bevy_swarm"
+documentation = "https://docs.rs/bevy_playtest"
 readme = "README.md"
 keywords = ["bevy", "gamedev", "testing", "playtesting", "ecs"]
 categories = ["game-development", "development-tools::testing"]
@@ -83,7 +83,7 @@ tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 schemars = "1.2.3"
 # RF9: optional passthrough deps for headless platform plugin detection.
-# A consumer building a winit-enabled game with bevy_swarm
+# A consumer building a winit-enabled game with bevy_playtest
 # default-features=false enables `passthrough-winit` so
 # headless_platform() can reference (and disable) WinitPlugin.
 bevy_winit = { version = "0.20", optional = true }

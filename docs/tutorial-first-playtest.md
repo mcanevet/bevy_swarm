@@ -1,10 +1,10 @@
 # Tutorial: Your First Playtest
 
-*Learning-oriented — hands-on, ~15 minutes. You will add bevy_swarm to a
+*Learning-oriented — hands-on, ~15 minutes. You will add bevy_playtest to a
 small Bevy game, run your first chaotic playtest, and learn to read the
 failure output.*
 
-bevy_swarm runs your game headlessly, drives it with bots, and checks
+bevy_playtest runs your game headlessly, drives it with bots, and checks
 generic oracles — crashes, log errors, soft-locks, NaNs, liveness —
 with **zero semantic contract**: no `TestApi`, no `IntentSurface`, no
 game-code changes. You write WHAT to test, not WHEN to press.
@@ -22,7 +22,7 @@ sequences.
 
 ```toml
 [dev-dependencies]
-bevy_swarm = "0.1"
+bevy_playtest = "0.1"
 ```
 
 ## Step 2: Write the playtest
@@ -41,9 +41,9 @@ impl Plugin for MyGamePlugin {
 
 #[test]
 fn swarm_playtest() {
-    let report = bevy_swarm::autotest(
+    let report = bevy_playtest::autotest(
         MyGamePlugin,
-        bevy_swarm::autotest::AutotestConfig::default(),
+        bevy_playtest::autotest::AutotestConfig::default(),
     )
     .expect("autotest runs");
     assert!(report.passed(), "{}", report.summary());
@@ -75,14 +75,14 @@ On success, you'll see a summary line like:
 autotest: 4 seeds, 0 failing runs (0 unique), 20s total, 100%, gate: pass
 ```
 
-On failure, bevy_swarm prints an **inline failure summary** to stderr
+On failure, bevy_playtest prints an **inline failure summary** to stderr
 *before* writing the report:
 
 ```
 FAILED: 1 failing runs (1 unique fingerprints)
 seed 2: fail (1 violation)
   [dead_verb] ArrowLeft: no gameplay effect observed in 45+ frames [NEW]
-  Repro: BEVY_SWARM_SEED=2 cargo test --test <your swarm test>
+  Repro: BEVY_PLAYTEST_SEED=2 cargo test --test <your swarm test>
 ```
 
 The bracketed name is the violated **rule** (see the
@@ -95,19 +95,19 @@ observed; `[NEW]` marks a fingerprint never seen before (vs `[known]`
 Copy the `Repro:` line verbatim to re-run exactly the failing seed:
 
 ```sh
-BEVY_SWARM_SEED=2 cargo test --test playtest
+BEVY_PLAYTEST_SEED=2 cargo test --test playtest
 ```
 
-Or use the CLI (after `cargo install --path bevy_swarm_cli`):
+Or use the CLI (after `cargo install --path bevy_playtest_cli`):
 
 ```sh
-cargo swarm reproduce            # first failing seed from the last report
-cargo swarm reproduce --fingerprint <fp>  # a specific failure
+cargo bevy-playtest reproduce            # first failing seed from the last report
+cargo bevy-playtest reproduce --fingerprint <fp>  # a specific failure
 ```
 
 ## Where the artifacts live
 
-Every run writes `target/bevy_swarm/runs/<run-id>/`:
+Every run writes `target/bevy_playtest/runs/<run-id>/`:
 
 - `report.json` — the aggregate (per-seed runs, fingerprints, coverage)
 - `seed-<n>.json` — the per-seed `PlaytestReport` with the full action

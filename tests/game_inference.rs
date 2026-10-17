@@ -1,10 +1,10 @@
 //! Z6: gameplay inference from the game's crate path — end to end.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{Gameplay, TestApi, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::game_types::{GameTypes, InferredGameplay};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{Gameplay, TestApi, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::game_types::{GameTypes, InferredGameplay};
+use bevy_playtest::scenario::Scenario;
 
 #[derive(Component)]
 struct PlayerHealth(u32);
@@ -24,7 +24,7 @@ fn build_app() -> App {
     app.add_plugins((
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
         PlaytestPlugin,
     ));
     // What headless_app does for a real game (Z6): classify game-owned

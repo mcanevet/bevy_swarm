@@ -1,4 +1,4 @@
-# How-to: Run bevy_swarm in CI
+# How-to: Run bevy_playtest in CI
 
 *Goal-oriented — wire playtests into GitHub Actions (or GitLab/Jenkins)
 so regressions fail builds but known issues don't.*
@@ -23,7 +23,7 @@ jobs:
         if: always()          # upload reports even (especially) on failure
         with:
           name: swarm-reports
-          path: target/bevy_swarm/runs/
+          path: target/bevy_playtest/runs/
 ```
 
 Headless by design: no GPU, no window, no display server needed —
@@ -61,14 +61,14 @@ context — immune to seed/length churn). The issue DB lives at
 `tests/swarm/issues.json`: fingerprint → state `open|muted|resolved`.
 
 - **CI reads, never writes**: writes happen only locally with
-  `BEVY_SWARM_UPDATE=issues cargo test ...`, then you review and
+  `BEVY_PLAYTEST_UPDATE=issues cargo test ...`, then you review and
   commit the diff
 - Muting requires a justification string (recorded in the DB) —
   silencing without saying why is rejected
 
 ```sh
 # after a red local run:
-BEVY_SWARM_UPDATE=issues cargo test --test playtest
+BEVY_PLAYTEST_UPDATE=issues cargo test --test playtest
 git diff tests/swarm/issues.json   # review, then commit
 ```
 
@@ -90,7 +90,7 @@ per-seed results natively.
 
 - `AutotestConfig::default()` (4 × 5 s) fits a normal test job
 - Reserve `thorough()` (16 × 20 s) for scheduled/nightly jobs
-- Upload `target/bevy_swarm/runs/` as an artifact **always** — the
+- Upload `target/bevy_playtest/runs/` as an artifact **always** — the
   action log in a red run is the debugging starting point
 
 ## Reproducing a CI failure locally
@@ -98,9 +98,9 @@ per-seed results natively.
 CI failure output includes the seed. Pull the artifact, then:
 
 ```sh
-cargo swarm reproduce --report <downloaded-report>/report.json
+cargo bevy-playtest reproduce --report <downloaded-report>/report.json
 # or directly:
-BEVY_SWARM_SEED=<seed> cargo test --test playtest
+BEVY_PLAYTEST_SEED=<seed> cargo test --test playtest
 ```
 
 See [debugging a failing run](howto-debug-failure.md) for the full

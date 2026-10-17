@@ -1,9 +1,9 @@
 //! J0: ChoiceStream — record/replay of bot random choices.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant, TestApi, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant, TestApi, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -11,7 +11,7 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app.insert_resource(TestApi::default());
     app.insert_resource(IntentSurface::new(vec![
@@ -62,7 +62,7 @@ fn choices_replay_reproduces_run() {
     )
     .unwrap();
 
-    let summarize = |rep: &bevy_swarm::driver::PlaytestReport| {
+    let summarize = |rep: &bevy_playtest::driver::PlaytestReport| {
         rep.action_log
             .iter()
             .map(|e| format!("{}:{:?}", e.frame, e.details))
@@ -111,7 +111,7 @@ fn zero_choices_are_simplest() {
 /// unit_f32: draw 0 maps to lo (not 0.0), so shrinking toward 0 means "simplest".
 #[test]
 fn fx6_j0_unit_f32_draw_zero_maps_to_lo() {
-    use bevy_swarm::choice::{ChoiceStream, Continuation};
+    use bevy_playtest::choice::{ChoiceStream, Continuation};
     // Use Continuation::Zeros via with_replay(empty, Zeros) to guarantee draw=0.
     let mut cs_zeros = ChoiceStream::from_seed(0).with_replay(vec![], Continuation::Zeros);
     let val = cs_zeros.unit_f32(0, 10.0, 20.0);
@@ -122,7 +122,7 @@ fn fx6_j0_unit_f32_draw_zero_maps_to_lo() {
 /// record/pop symmetrically (no replay desync).
 #[test]
 fn fx6_j0_midstream_bound_one_no_desync() {
-    use bevy_swarm::choice::{Choice, ChoiceStream};
+    use bevy_playtest::choice::{Choice, ChoiceStream};
     let mut cs = ChoiceStream::from_seed(42);
     // Several normal draws first.
     cs.below(0, 10);
@@ -142,7 +142,7 @@ fn fx6_j0_midstream_bound_one_no_desync() {
         })
         .collect();
     let mut replay_cs = ChoiceStream::from_seed(42)
-        .with_replay(replay_choices, bevy_swarm::choice::Continuation::Prng);
+        .with_replay(replay_choices, bevy_playtest::choice::Continuation::Prng);
     // Re-draw the same frames (bounds don't matter for replay).
     let r0 = replay_cs.below(0, 10);
     let r1 = replay_cs.below(1, 5);

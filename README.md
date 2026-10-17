@@ -1,4 +1,4 @@
-# bevy_swarm
+# bevy_playtest
 
 An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.org) games. Write WHAT to test, not WHEN to press.
 
@@ -6,7 +6,7 @@ An ECS-native, headless, in-process playtesting harness for [Bevy](https://bevy.
 
 ## Quick start (10 minutes)
 
-bevy_swarm runs your game headlessly, drives it with bots, and checks
+bevy_playtest runs your game headlessly, drives it with bots, and checks
 generic oracles — automated checks that watch the world for known
 failure classes (crashes, log errors, soft-locks, NaNs, liveness) —
 with **zero semantic contract**: no `TestApi`, no `IntentSurface`, no
@@ -19,7 +19,7 @@ replayable run. Different seeds explore different input sequences.
 
 ```rust,no_run
 use bevy::prelude::*;
-use bevy_swarm::autotest::{autotest, AutotestConfig};
+use bevy_playtest::autotest::{autotest, AutotestConfig};
 
 # #[derive(Clone, Default)]
 # struct MyGamePlugin;
@@ -43,11 +43,11 @@ Requirements for the in-process mode (stated up front):
   systems still run each frame, they just have no window to draw to.
   Systems reading `Window` or camera output need a guard or the
   subprocess tier.
-- Add bevy_swarm as a dev-dependency:
+- Add bevy_playtest as a dev-dependency:
 
 ```toml
 [dev-dependencies]
-bevy_swarm = "0.1"
+bevy_playtest = "0.1"
 ```
 
 Then `cargo test --test playtest` — that's the whole wiring. A passing
@@ -58,7 +58,7 @@ Once your first run passes, customize WHAT to check: the
 [scenario JSON](docs/schema.json) tells the harness your invariants, and
 the [Scenario Cookbook](docs/scenarios.md) walks through realistic examples.
 [`ScenarioBuilder`](src/builder.rs) is the same thing in type-checked Rust.
-Validate any scenario offline with `cargo swarm validate <file>` —
+Validate any scenario offline with `cargo bevy-playtest validate <file>` —
 typos get did-you-mean suggestions before the game even builds:
 
 ```json
@@ -74,7 +74,7 @@ typos get did-you-mean suggestions before the game even builds:
 
 ### Interpreting a failure report
 
-A failing run writes `target/bevy_swarm/runs/<run-id>/report.json`.
+A failing run writes `target/bevy_playtest/runs/<run-id>/report.json`.
 The three fields to read first:
 
 - `status` — `"fail"` / `"crash"` (a crashed run) / `"pass"`.
@@ -160,7 +160,7 @@ Docs are organized by the [Diataxis](https://diataxis.fr) framework — see [doc
 - **Reference:** [rule catalog](docs/reference-rules.md), [contract tiers](docs/reference-contract-tiers.md), [scenario schema](docs/schema.json), [Scenario Cookbook](docs/scenarios.md)
 - **Explanation:** [zero-contract philosophy](docs/explanation-zero-contract.md), [determinism strategy](docs/explanation-determinism.md), [architecture](docs/explanation-architecture.md)
 
-Workspace layout, artifact paths, update mode (`BEVY_SWARM_UPDATE`), versioning,
+Workspace layout, artifact paths, update mode (`BEVY_PLAYTEST_UPDATE`), versioning,
 rule-name registry, and vocabulary are governed by
 [docs/reference-workspace.md](docs/reference-workspace.md) — the single source of truth.
 
@@ -214,7 +214,7 @@ write `runs/<run-id>/junit.xml` automatically. See
 
 Two loops (see [reference-workspace.md](docs/reference-workspace.md)):
 
-- **Outer loop (acceptance):** plain fixture games with ZERO bevy_swarm
+- **Outer loop (acceptance):** plain fixture games with ZERO bevy_playtest
   plumbing (`fixtures/*`) + JSON expectation files
   (`tests/swarm/expectations/<fixture>/<variant>.json`). The runner
   (`tests/acceptance.rs`) drives the fixture-runner binary — the same
@@ -246,7 +246,7 @@ See the [determinism explanation](docs/explanation-determinism.md) for the full
 strategy, entropy hook, and sharp edges.
 
 ```rust,ignore
-let report = bevy_swarm::determinism::check_determinism(build_app, &scenario, 2)?;
+let report = bevy_playtest::determinism::check_determinism(build_app, &scenario, 2)?;
 if !report.is_deterministic() {
     println!("{:?}", report.first_divergence);
 }

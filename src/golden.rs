@@ -6,7 +6,7 @@
 //! ## Usage
 //! ```no_run
 //! # use bevy::prelude::*;
-//! use bevy_swarm::golden::{check_golden, GoldenSet, Tolerance};
+//! use bevy_playtest::golden::{check_golden, GoldenSet, Tolerance};
 //!
 //! // Load previously recorded golden trajectories.
 //! let golden_set = GoldenSet::load("tests/swarm/golden").unwrap();
@@ -68,7 +68,7 @@ impl Default for GoldenSet {
 /// A single golden file (one scenario's trajectory).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GoldenFile {
-    pub bevy_swarm_version: String,
+    pub bevy_playtest_version: String,
     pub platform: String,
     pub scenario: Scenario,
     /// Inputs that reproduce this run (frame-indexed replay
@@ -221,7 +221,7 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
         let digests: Vec<String> = run_digests.iter().map(|d| format_digest(d.hash)).collect();
 
         let golden = GoldenFile {
-            bevy_swarm_version: env!("CARGO_PKG_VERSION").to_string(),
+            bevy_playtest_version: env!("CARGO_PKG_VERSION").to_string(),
             platform: platform.clone(),
             scenario: scenario.clone(),
             inputs: recorded_replay_inputs(&report),
@@ -255,7 +255,7 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
 /// Check scenarios against their stored golden trajectories.
 ///
 /// Replay stored inputs instead of re-running the seed's chaos.
-/// Rewrites diverged goldens when BEVY_SWARM_UPDATE=golden/all (U1).
+/// Rewrites diverged goldens when BEVY_PLAYTEST_UPDATE=golden/all (U1).
 pub fn check_golden<F: Fn() -> bevy::app::App + Sync>(
     app_factory: F,
     golden_set: &GoldenSet,
@@ -376,13 +376,13 @@ pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
                         summary: format!("diverged at frame {}", frame),
                     };
 
-                    // BEVY_SWARM_UPDATE=golden (via conventions::
+                    // BEVY_PLAYTEST_UPDATE=golden (via conventions::
                     // can_update, U1) rewrites the stored golden with
                     // the current behaviour — an explicit opt-in, not a
                     // silent accept-regression.
                     if update_enabled {
                         let updated = GoldenFile {
-                            bevy_swarm_version: golden.bevy_swarm_version.clone(),
+                            bevy_playtest_version: golden.bevy_playtest_version.clone(),
                             platform: golden.platform.clone(),
                             scenario: replay_scenario.clone(),
                             inputs: golden.inputs.clone(),
@@ -411,7 +411,7 @@ pub fn check_golden_opts<F: Fn() -> bevy::app::App + Sync>(
 }
 
 /// Check if golden update mode is enabled (U1 conventions:
-/// BEVY_SWARM_UPDATE=golden or BEVY_SWARM_UPDATE=all).
+/// BEVY_PLAYTEST_UPDATE=golden or BEVY_PLAYTEST_UPDATE=all).
 pub fn update_golden_enabled() -> bool {
     crate::conventions::can_update("golden")
 }
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn golden_same_on_unchanged_game() {
         // Create a minimal golden set
-        let temp_dir = std::env::temp_dir().join("bevy_swarm_golden_test");
+        let temp_dir = std::env::temp_dir().join("bevy_playtest_golden_test");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -535,7 +535,7 @@ mod tests {
         // For now, just verify the structure compiles and saves
         let path = temp_dir.join("test.golden.json");
         let golden = GoldenFile {
-            bevy_swarm_version: "0.1.0".to_string(),
+            bevy_playtest_version: "0.1.0".to_string(),
             platform: "test".to_string(),
             scenario: scenario.clone(),
             inputs: vec![],

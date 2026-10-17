@@ -1,10 +1,10 @@
 //! I3: Typed Rust API — oracles, goal predicates, bot policies as systems.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{TestApi, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
-use bevy_swarm::typed::PlaytestAppExt;
+use bevy_playtest::contract::{TestApi, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
+use bevy_playtest::typed::PlaytestAppExt;
 
 /// Simple game: Choice{n} awards n points (up to 3 per press once).
 #[derive(Resource)]
@@ -16,7 +16,7 @@ fn build_game_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app.insert_resource(Score(0));
     app.insert_resource(TestApi::default());
@@ -53,7 +53,7 @@ fn fx5_text_ne_violation_proven() {
     {
         let mut api = app
             .world_mut()
-            .resource_mut::<bevy_swarm::contract::TestApi>();
+            .resource_mut::<bevy_playtest::contract::TestApi>();
         api.custom_text
             .insert("status".to_string(), "active".to_string());
     }
@@ -132,7 +132,7 @@ fn typed_oracle_unknown_name_rejected() {
     );
     let err = run_scenario(&mut app, &sc).unwrap_err();
     match err {
-        bevy_swarm::scenario::ScenarioError::Rejected(msg) => {
+        bevy_playtest::scenario::ScenarioError::Rejected(msg) => {
             assert!(msg.contains("nonexistent"), "{}", msg);
         }
         other => panic!("expected Rejected, got {:?}", other),
@@ -218,7 +218,7 @@ fn custom_bot_unknown_policy_rejected() {
     let sc = scenario(r#"{"bot":{"type":"custom","policy":"missing_policy"},"duration_s":0.1}"#);
     let err = run_scenario(&mut app, &sc).unwrap_err();
     match err {
-        bevy_swarm::scenario::ScenarioError::Rejected(msg) => {
+        bevy_playtest::scenario::ScenarioError::Rejected(msg) => {
             assert!(msg.contains("missing_policy"), "{}", msg);
         }
         other => panic!("expected Rejected, got {:?}", other),
@@ -227,8 +227,8 @@ fn custom_bot_unknown_policy_rejected() {
 
 #[test]
 fn minimize_typed_oracle_failure() {
-    use bevy_swarm::enums::PlaytestStatus;
-    use bevy_swarm::harness::{minimize_failure, FailureSignature};
+    use bevy_playtest::enums::PlaytestStatus;
+    use bevy_playtest::harness::{minimize_failure, FailureSignature};
     // B2 minimizes a failure detected by a TYPED oracle: the oracle fires
     // when score > 3; two Choice{2} presses (frames 0 and 30) cause it.
     let sc = scenario(

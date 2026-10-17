@@ -16,7 +16,7 @@
 //!   prevents auto-exit.
 //!
 //! ## Feature parity with Bevy
-//! `bevy_swarm` mirrors Bevy's platform features (`render`, `winit`, `audio`,
+//! `bevy_playtest` mirrors Bevy's platform features (`render`, `winit`, `audio`,
 //! `gilrs`, `log`). Under each `#[cfg(feature)]`, we guard disables with
 //! `contains::<T>()` to avoid panics when the plugin isn't present.
 
@@ -86,7 +86,7 @@ pub(crate) fn offending_plugin_from_payload(
 pub fn headless_platform() -> PluginGroupBuilder {
     let group = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            title: "bevy_swarm headless".to_string(),
+            title: "bevy_playtest headless".to_string(),
             visible: false,
             ..default()
         }),
@@ -95,7 +95,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     });
 
     // FX4.6: strip OS/GPU/process-global plugins by TYPE PRESENCE in
-    // the group — independent of bevy_swarm's own feature cfgs. A game
+    // the group — independent of bevy_playtest's own feature cfgs. A game
     // compiled with default bevy features pulls in WinitPlugin (needs
     // a display), AudioPlugin (rodio), GilrsPlugin (controllers), and
     // TerminalCtrlPlugin (Ctrl-C handlers) — all unusable or unwanted
@@ -104,7 +104,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
     // Winit: requires an event loop; without DISPLAY it panics in build.
     // RF9: gated on passthrough-winit — a weak dep enabled by
     // render/audio/gamepad, or explicitly by a consumer whose game pulls
-    // bevy_winit while bevy_swarm is default-features=false.
+    // bevy_winit while bevy_playtest is default-features=false.
     #[cfg(feature = "passthrough-winit")]
     let group = if group.contains::<bevy_winit::WinitPlugin>() {
         group.disable::<bevy_winit::WinitPlugin>()
@@ -156,8 +156,8 @@ pub fn headless_platform() -> PluginGroupBuilder {
 /// ## Example
 /// ```no_run
 /// use bevy::prelude::*;
-/// use bevy_swarm::headless::headless_app;
-/// use bevy_swarm::harness::{run_scenario, Scenario};
+/// use bevy_playtest::headless::headless_app;
+/// use bevy_playtest::harness::{run_scenario, Scenario};
 ///
 /// #[derive(Clone, Default)]
 /// struct MyGamePlugin;
@@ -171,7 +171,7 @@ pub fn headless_platform() -> PluginGroupBuilder {
 /// ).unwrap();
 /// let mut app = build(); // fresh App per run
 /// let report = run_scenario(&mut app, &scenario).unwrap();
-/// assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
+/// assert_eq!(report.status, bevy_playtest::enums::PlaytestStatus::Pass);
 /// ```
 ///
 /// ## Panics

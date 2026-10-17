@@ -2,8 +2,8 @@
 //! deserializes into Scenario, and passes load-time validation.
 //! Also: ScenarioBuilder round-trip parity with hand-written JSON.
 
-use bevy_swarm::builder::ScenarioBuilder;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::builder::ScenarioBuilder;
+use bevy_playtest::scenario::Scenario;
 
 fn examples_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/scenarios")
@@ -20,7 +20,7 @@ fn cookbook_examples_parse_and_validate() {
         let raw = std::fs::read_to_string(&path).expect("readable");
         let scenario: Scenario = serde_json::from_str(&raw)
             .unwrap_or_else(|e| panic!("{}: deserialize failed: {e}", path.display()));
-        bevy_swarm::scenario::validate_scenario(&scenario)
+        bevy_playtest::scenario::validate_scenario(&scenario)
             .unwrap_or_else(|e| panic!("{}: validation failed: {e}", path.display()));
         count += 1;
     }

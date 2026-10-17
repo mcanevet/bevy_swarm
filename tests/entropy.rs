@@ -9,7 +9,7 @@
 #![cfg(all(feature = "deterministic-entropy", getrandom_backend = "custom"))]
 
 use bevy::prelude::*;
-use bevy_swarm::entropy::{enter_run, exit_run};
+use bevy_playtest::entropy::{enter_run, exit_run};
 
 #[test]
 fn getrandom_fill_is_deterministic() {
@@ -56,9 +56,9 @@ fn uuid_v4_deterministic() {
 }
 #[test]
 fn run_scenario_provides_entropy_scope() {
-    use bevy_swarm::contract::TestApi;
-    use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::contract::TestApi;
+    use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+    use bevy_playtest::scenario::Scenario;
 
     #[derive(Resource, Default)]
     struct LatestUuid(uuid::Uuid);
@@ -86,7 +86,7 @@ fn run_scenario_provides_entropy_scope() {
         });
         app.add_systems(Update, make_uuid_system);
         app.add_systems(Last, spawn_uuid_system);
-        app.insert_resource(bevy_swarm::determinism::StateTrace::default());
+        app.insert_resource(bevy_playtest::determinism::StateTrace::default());
         let rep = run_scenario(&mut app, &scenario).unwrap();
         rep.state_trace
             .iter()
@@ -122,12 +122,12 @@ fn error_layout_assertions() {
 /// test process — see PR description for the SIGABRT proof.)
 #[test]
 fn draw_outside_run_does_not_abort() {
-    bevy_swarm::entropy::reset_fallback_counter();
-    let before = bevy_swarm::entropy::fallback_draw_count();
+    bevy_playtest::entropy::reset_fallback_counter();
+    let before = bevy_playtest::entropy::fallback_draw_count();
     let mut buf = [0u8; 8];
     // Must not panic or abort.
     getrandom04::fill(&mut buf).unwrap();
-    let after = bevy_swarm::entropy::fallback_draw_count();
+    let after = bevy_playtest::entropy::fallback_draw_count();
     assert_eq!(after, before + 1, "unattributed draw must be counted");
 }
 
@@ -145,7 +145,7 @@ fn same_seed_reproduces_across_two_apps() {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(Drawn(Vec::new()));
         // Enter BEFORE any system draws.
-        bevy_swarm::entropy::enter_run(seed);
+        bevy_playtest::entropy::enter_run(seed);
         app.add_systems(Startup, |mut drawn: ResMut<Drawn>| {
             // Draw 4 u64s via getrandom (the underlying source for
             // rand::rng() and uuid v4).
@@ -173,7 +173,7 @@ fn same_seed_reproduces_across_two_apps() {
         }
         app.world_mut().insert_resource(schedules);
         app.update();
-        bevy_swarm::entropy::exit_run();
+        bevy_playtest::entropy::exit_run();
         app.world_mut().resource::<Drawn>().0.clone()
     };
 
@@ -228,8 +228,8 @@ fn fx3_enter_before_factory() {
     // plugin-build draws are seeded). Verified via a plugin that
     // copies its build-time draw into a shared slot: identical across
     // same-seed runs, different across seeds.
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::scenario::Scenario;
     use std::sync::{Arc, Mutex};
 
     struct ProbePlugin(Arc<Mutex<Vec<u8>>>);
@@ -275,8 +275,8 @@ fn fx3_rand_rng_acceptance_matrix() {
     // each run executes on a FRESH thread (ThreadRng is per-thread and
     // cached — the matrix runner's discipline).
     use bevy::prelude::*;
-    use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+    use bevy_playtest::scenario::Scenario;
     use rand::RngExt;
 
     #[derive(Resource, Default)]
@@ -320,9 +320,9 @@ fn fx3_rand_rng_acceptance_matrix() {
 #[cfg(feature = "deterministic-entropy")]
 fn rf10_same_thread_run_scenario_reproducible() {
     use bevy::prelude::*;
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
-    use bevy_swarm::driver::PlaytestPlugin;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::driver::PlaytestPlugin;
+    use bevy_playtest::scenario::Scenario;
     use rand::RngExt;
     use std::sync::{Arc, Mutex};
 
@@ -367,9 +367,9 @@ fn rf10_same_thread_run_scenario_reproducible() {
 #[cfg(feature = "deterministic-entropy")]
 fn rf10_check_determinism_rand_rng_no_false_violation() {
     use bevy::prelude::*;
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
-    use bevy_swarm::driver::PlaytestPlugin;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::driver::PlaytestPlugin;
+    use bevy_playtest::scenario::Scenario;
     use rand::RngExt;
 
     let factory = || {
@@ -408,9 +408,9 @@ fn rf10_check_determinism_rand_rng_no_false_violation() {
 #[cfg(feature = "deterministic-entropy")]
 fn rf10_build_time_vs_runtime_entropy_different() {
     use bevy::prelude::*;
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
-    use bevy_swarm::driver::PlaytestPlugin;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::driver::PlaytestPlugin;
+    use bevy_playtest::scenario::Scenario;
     use std::sync::{Arc, Mutex};
 
     let captured = Arc::new(Mutex::new((Vec::<u8>::new(), Vec::<u8>::new())));

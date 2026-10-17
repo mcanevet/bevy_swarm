@@ -2,9 +2,9 @@
 //! effect rates, dead_verb detection.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{Gameplay, TestApi, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{Gameplay, TestApi, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -12,7 +12,7 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app.insert_resource(TestApi::default());
     app.register_type::<Points>();
@@ -102,7 +102,7 @@ fn dead_verb_detected() {
     app.add_systems(
         Update,
         |mut reader: bevy::ecs::message::MessageReader<UserIntent>,
-         mut api: bevy::ecs::system::ResMut<bevy_swarm::contract::TestApi>| {
+         mut api: bevy::ecs::system::ResMut<bevy_playtest::contract::TestApi>| {
             for intent in reader.read() {
                 if let UserIntent::Move { .. } = intent {
                     let e = api.custom_numeric.entry("moves".into()).or_insert(0.0);

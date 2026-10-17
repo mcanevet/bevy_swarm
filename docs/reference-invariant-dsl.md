@@ -23,6 +23,6 @@ Canonical wire forms (what `docs/schema.json` accepts):
 For how to compose invariants, see the
 [how-to guide](howto-add-invariant.md).
 
-`bevy_swarm::typed` (Rust-native oracle/predicate/policy systems) is
+`bevy_playtest::typed` (Rust-native oracle/predicate/policy systems) is
 **experimental**: usable, but expect breaking changes without a
 major version bump; the JSON DSL is the stable surface for v0.1.

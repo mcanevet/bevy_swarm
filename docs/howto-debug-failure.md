@@ -11,7 +11,7 @@ A failing autotest prints to stderr before writing anything:
 FAILED: 1 failing runs (1 unique fingerprints)
 seed 2: fail (1 violation)
   [stuck_after_intent] no liveness within 0.5s after intent choice#2 (frame 214) [NEW]
-  Repro: BEVY_SWARM_SEED=2 cargo test --test <your swarm test>
+  Repro: BEVY_PLAYTEST_SEED=2 cargo test --test <your swarm test>
 ```
 
 Read it top-down: which seed, which rule, the observed detail, and
@@ -22,16 +22,16 @@ the fingerprint classification (`[NEW]` / `[known]` / `[muted]` /
 
 ```sh
 # Exact seed, exact scenario:
-BEVY_SWARM_SEED=2 cargo test --test playtest
+BEVY_PLAYTEST_SEED=2 cargo test --test playtest
 
 # Or via the CLI (resolves the seed from the last report):
-cargo swarm reproduce
-cargo swarm reproduce --fingerprint <fp>   # a specific failure
+cargo bevy-playtest reproduce
+cargo bevy-playtest reproduce --fingerprint <fp>   # a specific failure
 ```
 
 ## Open the report artifacts
 
-`target/bevy_swarm/runs/<run-id>/`:
+`target/bevy_playtest/runs/<run-id>/`:
 
 | File | What's in it |
 |---|---|
@@ -43,8 +43,8 @@ The **action log** is every input the bot fired, frame-indexed —
 the failing sequence is right there. Pretty-print it:
 
 ```sh
-cargo swarm report          # inline summary from the last run
-jq '.action_log' target/bevy_swarm/runs/<run-id>/seed-2.json
+cargo bevy-playtest report          # inline summary from the last run
+jq '.action_log' target/bevy_playtest/runs/<run-id>/seed-2.json
 ```
 
 ## Minimize the failure
@@ -54,7 +54,7 @@ ready-to-commit regression scenario:
 
 ```rust,no_run
 # fn main() {
-let config = bevy_swarm::autotest::AutotestConfig {
+let config = bevy_playtest::autotest::AutotestConfig {
     minimize_failures: true,
     ..Default::default()
 };
@@ -122,5 +122,5 @@ the gate verdict (`report.gate.passed`) implements new-or-regressed
 semantics: known/muted failures don't fail CI, NEW fingerprints do.
 
 ```sh
-cargo swarm report    # classification + coverage + surface, inline
+cargo bevy-playtest report    # classification + coverage + surface, inline
 ```

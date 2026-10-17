@@ -10,9 +10,9 @@
 //! equals inclusive, ne exclusive at the bound).
 
 use bevy::prelude::*;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::enums::CheckOp;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::enums::CheckOp;
+use bevy_playtest::scenario::Scenario;
 
 /// Ops (wire name, enum) and whether value == bound HOLDS.
 const BOUNDARY_TABLE: &[(&str, CheckOp, bool)] = &[
@@ -35,10 +35,10 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
-    app.insert_resource(bevy_swarm::contract::TestApi::default());
-    app.add_message::<bevy_swarm::contract::UserIntent>();
+    app.insert_resource(bevy_playtest::contract::TestApi::default());
+    app.add_message::<bevy_playtest::contract::UserIntent>();
     app
 }
 
@@ -82,9 +82,10 @@ fn invariant_at_bound_behaves_per_op_semantics() {
     ))
     .unwrap();
     let mut app = build_app();
-    app.add_systems(Update, |mut api: ResMut<bevy_swarm::contract::TestApi>| {
-        api.score = 42
-    });
+    app.add_systems(
+        Update,
+        |mut api: ResMut<bevy_playtest::contract::TestApi>| api.score = 42,
+    );
     let rep = run_scenario(&mut app, &scen).unwrap();
     for (wire, _, expected_holds) in BOUNDARY_TABLE {
         let violated = rep.violations.iter().any(|v| v.rule == format!("b_{wire}"));
@@ -109,9 +110,10 @@ fn eventually_at_bound_behaves_per_op_semantics() {
     )
     .unwrap();
     let mut app = build_app();
-    app.add_systems(Update, |mut api: ResMut<bevy_swarm::contract::TestApi>| {
-        api.score = 42
-    });
+    app.add_systems(
+        Update,
+        |mut api: ResMut<bevy_playtest::contract::TestApi>| api.score = 42,
+    );
     let rep = run_scenario(&mut app, &scen).unwrap();
     assert!(
         !rep.violations.iter().any(|v| v.rule == "ev_le"),
@@ -138,10 +140,13 @@ fn expert_when_at_bound_gates_per_op_semantics() {
     )
     .unwrap();
     let mut app = build_app();
-    app.add_systems(Update, |mut api: ResMut<bevy_swarm::contract::TestApi>| {
-        api.score = 42;
-        api.active_players = 5; // REQUIRE (lt 1) always fails
-    });
+    app.add_systems(
+        Update,
+        |mut api: ResMut<bevy_playtest::contract::TestApi>| {
+            api.score = 42;
+            api.active_players = 5; // REQUIRE (lt 1) always fails
+        },
+    );
     let rep = run_scenario(&mut app, &scen).unwrap();
     // WHEN le @ 42 holds -> REQUIRE failure reported.
     assert!(
@@ -162,7 +167,7 @@ fn expert_when_at_bound_gates_per_op_semantics() {
 /// QueryCount, via oracles).
 #[test]
 fn count_query_at_bound_behaves_per_op_semantics() {
-    use bevy_swarm::contract::Gameplay;
+    use bevy_playtest::contract::Gameplay;
     let scen: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[
             {"name":"cq_ge","rule":"custom","query":{"with":["Gameplay"],"without":[]},"check":"ge","value":3},
@@ -199,9 +204,10 @@ fn planner_primitive_at_bound_behaves_per_op_semantics() {
     let run = |scenario_json: String| {
         let scen: Scenario = serde_json::from_str(&scenario_json).unwrap();
         let mut app = build_app();
-        app.add_systems(Update, |mut api: ResMut<bevy_swarm::contract::TestApi>| {
-            api.score = 42
-        });
+        app.add_systems(
+            Update,
+            |mut api: ResMut<bevy_playtest::contract::TestApi>| api.score = 42,
+        );
         run_scenario(&mut app, &scen).unwrap()
     };
 

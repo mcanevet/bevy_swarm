@@ -230,7 +230,7 @@ fn build_app_with_bounds_bug() -> App {
 
 #[test]
 fn regression_roundtrip_one_file_per_fingerprint() {
-    let dir = std::env::temp_dir().join(format!("bevy_swarm_regr_test_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bevy_playtest_regr_test_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
 
     // Write two records with different fingerprints.
@@ -290,7 +290,7 @@ fn regression_roundtrip_one_file_per_fingerprint() {
 fn sweep_replays_regressions_first() {
     // run_regressions_and_sweep loads persisted records, replays them,
     // then sweeps. The regression dir here is empty → pure sweep.
-    let dir = std::env::temp_dir().join(format!("bevy_swarm_regr_empty_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bevy_playtest_regr_empty_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 

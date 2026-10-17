@@ -11,7 +11,7 @@ events, timeouts, and language-agnostic test runners over HTTP + JSON.
 As of 2026-10-07 the goal is **Proposed, unstaffed** — no design docs, no
 working group.
 
-bevy_swarm's `agent` feature already exposes: `playtest/schema`,
+bevy_playtest's `agent` feature already exposes: `playtest/schema`,
 `playtest/observe`, `playtest/intent`, `playtest/key`, `playtest/pointer`,
 `playtest/reset`, `playtest/cheat`, `playtest/actions`, `playtest/state`,
 `playtest/screenshot`, `playtest/diagnostics`, plus a readiness gate
@@ -27,7 +27,7 @@ and `diagnostics` land in Bevy 0.21 (main), not 0.20 (Z17 tracks them).
 
 ### 1. Overlap with upstream BRP methods
 
-| Upstream (0.20) | bevy_swarm today | Verdict |
+| Upstream (0.20) | bevy_playtest today | Verdict |
 |---|---|---|
 | `world.query`, `world.get`, `world.spawn`, `world.insert/remove/mutate`, `world.write_message`, `world.watch` | `playtest/observe` (path-based reads) | Overlaps. Keep `observe` — it resolves game-agnostic percept paths (`Component:Foo.bar`, `Resource:Bar.field`, `TestApi.*`) rather than requiring clients to understand entity ids. |
 | Presence/absence checks (#25894) | `eventually_s` + invariants | Keep: ours are scenario-embedded, not client-polled. |
@@ -72,7 +72,7 @@ bead; this spike records only the requirement.
 
 Posting upstream requires the user's explicit approval (policy), and the
 goal is unstaffed — commentary now buys nothing. Revisit when the goal is
-staffed or when `bevy_swarm` hits a stable release. Internal rule: never
+staffed or when `bevy_playtest` hits a stable release. Internal rule: never
 mention internal bead ids or downstream personas in any future upstream
 communication; describe features generically.
 

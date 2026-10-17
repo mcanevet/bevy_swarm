@@ -1,4 +1,4 @@
-# Explanation: What bevy_swarm Catches
+# Explanation: What bevy_playtest Catches
 
 *Understanding-oriented — the failure classes covered, how capture
 works, and the known limitations.*
@@ -52,7 +52,7 @@ works, and the known limitations.*
   the run active when it lands. For strict isolation, use the
   external subprocess tiers (smoke / BRP-driven).
 
-## What bevy_swarm does NOT check
+## What bevy_playtest does NOT check
 
 **Rendering/pixels.** Headless runs strip the render family — a
 game that renders nothing would otherwise pass. The structural

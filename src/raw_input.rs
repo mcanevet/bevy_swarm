@@ -744,7 +744,7 @@ fn connect_virtual_gamepad(
     events.write(GamepadConnectionEvent {
         gamepad: pad,
         connection: GamepadConnection::Connected {
-            name: "bevy_swarm_virtual".to_string(),
+            name: "bevy_playtest_virtual".to_string(),
             vendor_id: None,
             product_id: None,
         },

@@ -230,7 +230,7 @@ pub struct RegressionsAndSweepReport {
 }
 
 /// Should new regression files be written? U1 conventions:
-/// BEVY_SWARM_UPDATE=regressions (or =all).
+/// BEVY_PLAYTEST_UPDATE=regressions (or =all).
 pub fn update_regressions_enabled() -> bool {
     crate::conventions::can_update("regressions")
 }
@@ -238,7 +238,7 @@ pub fn update_regressions_enabled() -> bool {
 /// Run persisted regressions first (replay), then sweep new seeds.
 /// Returns a combined report. FX12 (E3): replay outcomes are TRACKED
 /// (still_fails), new failures are persisted (one file per
-/// fingerprint) when BEVY_SWARM_UPDATE=regressions, and one
+/// fingerprint) when BEVY_PLAYTEST_UPDATE=regressions, and one
 /// ScenarioError aborts only that seed (handled inside sweep_seeds).
 pub fn run_regressions_and_sweep<F: Fn() -> bevy::app::App + Sync>(
     runner: &InProcess<F>,

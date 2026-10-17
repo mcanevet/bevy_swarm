@@ -2,12 +2,12 @@
 //! actuator selection, vacuity guard.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{
+use bevy_playtest::contract::{
     CheckedScope, ContractTier, Gameplay, IntentSurface, SurfaceVariant, TestConventionsPlugin,
 };
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
-use bevy_swarm::enums::PlaytestStatus;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
+use bevy_playtest::enums::PlaytestStatus;
+use bevy_playtest::scenario::Scenario;
 
 fn scenario_json(bot: &str) -> Scenario {
     serde_json::from_str(bot).unwrap()
@@ -254,7 +254,7 @@ fn tier_detection_resolver_only() {
     app.add_plugins((MinimalPlugins, SemanticGamePlugin, PlaytestPlugin));
     // Remove TestApi but keep a resolver registered by TestConventionsPlugin.
     app.world_mut()
-        .remove_resource::<bevy_swarm::contract::TestApi>();
+        .remove_resource::<bevy_playtest::contract::TestApi>();
 
     let scenario =
         scenario_json(r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.2,"invariants":[]}"#);
@@ -295,7 +295,7 @@ fn actuator_invalid_rejects_at_load() {
     // Deserializes fine (field is a String); validation happens in
     // validate_scenario.
     let scenario = result.unwrap();
-    let err = bevy_swarm::scenario::validate_scenario(&scenario);
+    let err = bevy_playtest::scenario::validate_scenario(&scenario);
     assert!(err.is_err(), "invalid actuator must reject at load");
 }
 
@@ -442,7 +442,7 @@ fn liveness_timeout_rejects_nan_negative() {
     let bad_neg: Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.5,"invariants":[],"liveness":{"timeout_s":-1.0}}"#,
     ).unwrap();
-    let err = bevy_swarm::scenario::validate_scenario(&bad_neg);
+    let err = bevy_playtest::scenario::validate_scenario(&bad_neg);
     assert!(
         err.is_err(),
         "negative timeout must reject at validate_scenario"

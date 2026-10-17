@@ -2,9 +2,9 @@
 //! softlocks are caught, turn-based idling is legitimate.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{Gameplay, TestApi, TestConventionsPlugin, TurnBased, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{Gameplay, TestApi, TestConventionsPlugin, TurnBased, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -43,7 +43,7 @@ fn card_game_not_frozen() {
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(
         rep.status,
-        bevy_swarm::enums::PlaytestStatus::Pass,
+        bevy_playtest::enums::PlaytestStatus::Pass,
         "a card game mutating Hand must not be flagged frozen: {:?}",
         rep.violations
     );
@@ -117,7 +117,7 @@ fn turn_based_idle_ok() {
     let rep = run_scenario(&mut app, &scenario).unwrap();
     assert_eq!(
         rep.status,
-        bevy_swarm::enums::PlaytestStatus::Pass,
+        bevy_playtest::enums::PlaytestStatus::Pass,
         "idle turn-based worlds are legitimately paused: {:?}",
         rep.violations
     );
@@ -160,7 +160,7 @@ fn rf43_quiet_pause_in_old_run_not_frozen() {
     // between moves is shorter than the 2s timeout, so it never does.
     // Runs the real walker fixture in-process (same shape as the bug
     // report repro).
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
     use fixture_runner::WalkerAdapterPlugin;
     use fixture_walker::WalkerGamePlugin;
     for seed in [1u64, 2, 3] {
@@ -175,11 +175,11 @@ fn rf43_quiet_pause_in_old_run_not_frozen() {
                     bevy::MinimalPlugins,
                     bevy::transform::TransformPlugin,
                     PlaytestPlugin,
-                    bevy_swarm::contract::TestConventionsPlugin,
+                    bevy_playtest::contract::TestConventionsPlugin,
                 ));
-                app.insert_resource(bevy_swarm::contract::IntentSurface::new(vec![
-                    bevy_swarm::contract::SurfaceVariant::Move,
-                    bevy_swarm::contract::SurfaceVariant::Wait,
+                app.insert_resource(bevy_playtest::contract::IntentSurface::new(vec![
+                    bevy_playtest::contract::SurfaceVariant::Move,
+                    bevy_playtest::contract::SurfaceVariant::Wait,
                 ]));
                 app.add_plugins(WalkerAdapterPlugin);
                 app.add_plugins(WalkerGamePlugin);

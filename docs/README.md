@@ -1,4 +1,4 @@
-# bevy_swarm Documentation
+# bevy_playtest Documentation
 
 Documentation follows the [Diataxis](https://diataxis.fr) framework:
 four quadrants by purpose.
@@ -40,7 +40,7 @@ four quadrants by purpose.
 - [Security (agent)](reference-security.md) — threat model, token
 - [Usage/API](reference-usage.md) — single-scenario API, env vars,
   features
-- API reference: [docs.rs/bevy_swarm](https://docs.rs/bevy_swarm)
+- API reference: [docs.rs/bevy_playtest](https://docs.rs/bevy_playtest)
 
 ## Explanation — understanding-oriented
 

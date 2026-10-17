@@ -1,9 +1,9 @@
 //! Fixture runner CLI: run a fixture with a scenario and write the report
 
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant};
-use bevy_swarm::conventions;
-use bevy_swarm::driver::PlaytestPlugin;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant};
+use bevy_playtest::conventions;
+use bevy_playtest::driver::PlaytestPlugin;
+use bevy_playtest::scenario::Scenario;
 use fixture_runner::{
     headless_app, write_report, RegressionPairAdapterPlugin, SpawnerAdapterPlugin,
     SpinnerAdapterPlugin, TurnBasedAdapterPlugin, WalkerAdapterPlugin,
@@ -55,25 +55,25 @@ fn main() {
     // Z18 (swarm-m2h.19): scaffold "none" — the zero-contract path.
     // The app is the fixture's PLAIN game plugin: no adapter, no
     // IntentSurface, no TestConventionsPlugin. Z18 (swarm-m2h.19):
-    // run through bevy_swarm::autotest — headless_app_factory adds
+    // run through bevy_playtest::autotest — headless_app_factory adds
     // PlaytestPlugin and Z6 GameTypes inference automatically. The
     // run dir receives report.json (AutotestReport), one
     // seed-<n>.json PlaytestReport per seed, and junit.xml.
     if scaffold.as_deref() == Some("none") || fixture == "lone" {
         let seeds: Vec<u64> = vec![scenario.bot.seed];
         let base = scenario;
-        let config = bevy_swarm::AutotestConfig {
+        let config = bevy_playtest::AutotestConfig {
             seeds: Some(seeds),
             duration_s: base.duration_s,
             parallel: 1,
             minimize_failures: false,
             max_failures: None,
             base_scenario: base,
-            ..bevy_swarm::AutotestConfig::default()
+            ..bevy_playtest::AutotestConfig::default()
         };
         macro_rules! plain_autotest {
             ($plugin:expr) => {{
-                let report = bevy_swarm::autotest_with(|| $plugin, config)
+                let report = bevy_playtest::autotest_with(|| $plugin, config)
                     .expect("autotest (scaffold none)");
                 if let Some(out) = &out_path {
                     if let Some(parent) = out.parent() {
@@ -90,7 +90,7 @@ fn main() {
                     let target_dir =
                         std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
                     let run_dir = std::path::Path::new(&target_dir)
-                        .join("bevy_swarm/runs")
+                        .join("bevy_playtest/runs")
                         .join(report.run_id.clone().expect("run id"));
                     let mut entries: Vec<_> = std::fs::read_dir(&run_dir)
                         .expect("run dir exists")
@@ -140,7 +140,7 @@ fn main() {
 
     let build_app = || {
         let mut app = headless_app();
-        app.add_plugins(bevy_swarm::contract::TestConventionsPlugin);
+        app.add_plugins(bevy_playtest::contract::TestConventionsPlugin);
         app.add_plugins(PlaytestPlugin);
         // Insert AFTER TestConventionsPlugin so it persists
 
@@ -184,15 +184,16 @@ fn main() {
         app
     };
 
-    let runner = bevy_swarm::branch::InProcess { factory: build_app };
-    let report = bevy_swarm::branch::ScenarioRunner::run(&runner, &scenario).expect("run scenario");
+    let runner = bevy_playtest::branch::InProcess { factory: build_app };
+    let report =
+        bevy_playtest::branch::ScenarioRunner::run(&runner, &scenario).expect("run scenario");
     emit_report(&report, &scenario, out_path);
 }
 
 /// Shared report-writing tail for both scaffold paths: canonical run
 /// dir, --out override, runs/last pointer, status summary.
 fn emit_report(
-    report: &bevy_swarm::driver::PlaytestReport,
+    report: &bevy_playtest::driver::PlaytestReport,
     scenario: &Scenario,
     out_path: Option<std::path::PathBuf>,
 ) {
@@ -222,7 +223,7 @@ fn emit_report(
         .unwrap_or_else(|e| panic!("write {}: {}", out.display(), e));
     }
     // runs/last convention: copy of the latest run dir (conventions §2)
-    let last = bevy_swarm::conventions::runs_dir().join("last");
+    let last = bevy_playtest::conventions::runs_dir().join("last");
     let _ = std::fs::remove_dir_all(&last);
     if let Some(parent) = last.parent() {
         let _ = std::fs::create_dir_all(parent);

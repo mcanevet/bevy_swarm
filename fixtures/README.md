@@ -1,6 +1,6 @@
 # Fixtures
 
-Plain Bevy games for the outer-loop acceptance suite. Zero bevy_swarm plumbing.
+Plain Bevy games for the outer-loop acceptance suite. Zero bevy_playtest plumbing.
 
 ## Fixture list
 
@@ -15,7 +15,7 @@ Plain Bevy games for the outer-loop acceptance suite. Zero bevy_swarm plumbing.
 ## Adding a fixture
 
 1. Create `fixtures/<game>/` with `Cargo.toml`, `src/lib.rs`, `src/main.rs`, `README.md`.
-2. Depend on **bevy only** (no bevy_swarm).
+2. Depend on **bevy only** (no bevy_playtest).
 3. Wire bugs via `FIXTURE_BUG` env var at startup (one build per fixture).
 4. Add adapter in `tests/fixture-runner/src/lib.rs` + arm in `main.rs`.
 5. Write expectation files under `tests/swarm/expectations/<game>/` (clean.json + bug_*.json).

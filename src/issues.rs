@@ -2,7 +2,7 @@
 //!
 //! The DB lives at `tests/swarm/issues.json` (conventions §U1):
 //! records keyed by T1 fingerprint with state open|muted|resolved.
-//! Writes happen ONLY under `BEVY_SWARM_UPDATE=issues` (CI reads).
+//! Writes happen ONLY under `BEVY_PLAYTEST_UPDATE=issues` (CI reads).
 //! The classification + gate are library functions so Z18's autotest
 //! can adopt the default gate (NewOrRegressed).
 

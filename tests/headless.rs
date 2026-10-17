@@ -1,7 +1,7 @@
 //! Z2: headless App builder + bundled-DefaultPlugins detection (integration).
 
 use bevy::prelude::*;
-use bevy_swarm::headless::headless_app;
+use bevy_playtest::headless::headless_app;
 
 #[derive(Resource, Default)]
 struct GameRan;
@@ -110,15 +110,15 @@ fn headless_platform_runs_with_winit_without_display() {
 }
 
 // RF9: headless_platform disables Winit by runtime presence even when
-// bevy_swarm is compiled with default-features=false.
+// bevy_playtest is compiled with default-features=false.
 #[test]
 fn rf9_headless_no_display_default_features_false() {
     // This test verifies that headless_app() works without a DISPLAY
-    // when bevy_swarm is compiled with default-features=false (the
+    // when bevy_playtest is compiled with default-features=false (the
     // game may still pull bevy_winit). The winit disable is now
     // unconditional via the direct bevy_winit dep.
     use bevy::prelude::*;
-    use bevy_swarm::autotest::{autotest, AutotestConfig};
+    use bevy_playtest::autotest::{autotest, AutotestConfig};
 
     #[derive(Clone, Default)]
     struct Rf9TestPlugin;

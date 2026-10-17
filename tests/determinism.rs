@@ -1,12 +1,12 @@
 //! A4: Determinism self-check oracle — bug/fix pair style tests.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::TestConventionsPlugin;
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant};
-use bevy_swarm::determinism::{check_determinism, DigestHooks};
-use bevy_swarm::driver::PlaytestPlugin;
-use bevy_swarm::harness::Gameplay;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::TestConventionsPlugin;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant};
+use bevy_playtest::determinism::{check_determinism, DigestHooks};
+use bevy_playtest::driver::PlaytestPlugin;
+use bevy_playtest::harness::Gameplay;
+use bevy_playtest::scenario::Scenario;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn build_game() -> App {
@@ -121,7 +121,7 @@ fn no_overhead_without_state_trace() {
     // The digest system early-returns when StateTrace is absent — a
     // normal run's report has no state_trace and identical results.
     let mut app = build_game();
-    let rep = bevy_swarm::driver::run_scenario(&mut app, &scenario(9)).unwrap();
+    let rep = bevy_playtest::driver::run_scenario(&mut app, &scenario(9)).unwrap();
     assert!(rep.state_trace.is_none());
 }
 
@@ -129,7 +129,7 @@ fn no_overhead_without_state_trace() {
 fn fx6_a4_late_divergence_reported_with_fields() {
     // Divergence INTRODUCED at frame 30 must report frame 30 (not a
     // frame-0 comparison producing no differing fields).
-    use bevy_swarm::harness::PlaytestState;
+    use bevy_playtest::harness::PlaytestState;
     let builder = || {
         let mut app = build_game();
         app.add_systems(
@@ -168,8 +168,8 @@ fn fx6_a4_late_divergence_reported_with_fields() {
 /// as reset_hook_panicked, run continues.
 #[test]
 fn fx6_reset_hook_panick_is_caught_and_reported() {
-    use bevy_swarm::contract::ResetHooks;
-    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    use bevy_playtest::contract::ResetHooks;
+    let scenario: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"tps":60,"setup":{"resets":[{"kind":"boom"}]}}"#,
     )
     .unwrap();
@@ -177,14 +177,14 @@ fn fx6_reset_hook_panick_is_caught_and_reported() {
     app.add_plugins((
         bevy::prelude::MinimalPlugins,
         bevy::transform::TransformPlugin,
-        bevy_swarm::driver::PlaytestPlugin,
+        bevy_playtest::driver::PlaytestPlugin,
     ));
     let mut hooks = ResetHooks::default();
     hooks.register("boom", |_world: &mut bevy::prelude::World| {
         panic!("reset hook exploded");
     });
     app.insert_resource(hooks);
-    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario).unwrap();
+    let report = bevy_playtest::driver::run_scenario(&mut app, &scenario).unwrap();
     assert!(
         report
             .violations
@@ -200,8 +200,8 @@ fn fx6_reset_hook_panick_is_caught_and_reported() {
 /// (the CheatHooks resource survives the panic).
 #[test]
 fn fx6_cheat_hook_panick_is_caught_and_reported() {
-    use bevy_swarm::contract::CheatHooks;
-    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    use bevy_playtest::contract::CheatHooks;
+    let scenario: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.2,"tps":60,"setup":{"cheats":[{"frame":1,"kind":"boom"},{"frame":3,"kind":"later"}]}}"#,
     )
     .unwrap();
@@ -209,7 +209,7 @@ fn fx6_cheat_hook_panick_is_caught_and_reported() {
     app.add_plugins((
         bevy::prelude::MinimalPlugins,
         bevy::transform::TransformPlugin,
-        bevy_swarm::driver::PlaytestPlugin,
+        bevy_playtest::driver::PlaytestPlugin,
     ));
     let mut hooks = CheatHooks::default();
     hooks.register("boom", |_world: &mut bevy::prelude::World| {
@@ -220,7 +220,7 @@ fn fx6_cheat_hook_panick_is_caught_and_reported() {
     });
     app.insert_resource(hooks);
     app.insert_resource(LaterCheatRan(false));
-    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario).unwrap();
+    let report = bevy_playtest::driver::run_scenario(&mut app, &scenario).unwrap();
     assert!(
         report
             .violations
@@ -245,13 +245,13 @@ struct LaterCheatRan(bool);
 /// run completes (crash status) and the report is still produced.
 #[test]
 fn fx6_planner_resolver_panic_keeps_violations_resource() {
-    use bevy_swarm::contract::{RegisterTestApi, TestApiResolve};
+    use bevy_playtest::contract::{RegisterTestApi, TestApiResolve};
 
     #[derive(bevy::prelude::Resource)]
     struct PanicApi;
 
     impl TestApiResolve for PanicApi {
-        fn resolve(&self, _path: &str) -> Option<bevy_swarm::contract::TestFieldValue> {
+        fn resolve(&self, _path: &str) -> Option<bevy_playtest::contract::TestFieldValue> {
             panic!("resolver exploded");
         }
     }
@@ -259,7 +259,7 @@ fn fx6_planner_resolver_panic_keeps_violations_resource() {
     static RESOLVE_CALLED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
 
-    let scenario: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let scenario: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.score","check":"above","value":10,"emit":[{"intent":"wait"}]}},"duration_s":0.2,"tps":60,"invariants":[]}"#,
     )
     .unwrap();
@@ -267,13 +267,13 @@ fn fx6_planner_resolver_panic_keeps_violations_resource() {
     app.add_plugins((
         bevy::prelude::MinimalPlugins,
         bevy::transform::TransformPlugin,
-        bevy_swarm::driver::PlaytestPlugin,
+        bevy_playtest::driver::PlaytestPlugin,
     ));
     app.insert_resource(PanicApi);
     app.register_test_api::<PanicApi>();
     RESOLVE_CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
     // The run must not hang or drop the Violations resource mid-flight.
-    let report = bevy_swarm::driver::run_scenario(&mut app, &scenario);
+    let report = bevy_playtest::driver::run_scenario(&mut app, &scenario);
     let rep = report.expect("run must complete (panic caught), not error");
     eprintln!("STATUS: {:?} VIOLATIONS: {:?}", rep.status, rep.violations);
     // After the run, the report's violation extraction already proves
@@ -281,7 +281,7 @@ fn fx6_planner_resolver_panic_keeps_violations_resource() {
     // an unwrap panic inside run_scenario instead of a report.
     assert!(
         app.world()
-            .get_resource::<bevy_swarm::harness::Violations>()
+            .get_resource::<bevy_playtest::harness::Violations>()
             .is_some(),
         "Violations resource must survive a mid-run resolver panic"
     );

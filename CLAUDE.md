@@ -80,8 +80,8 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ```bash
 cargo build -p fixture-runner  # REQUIRED before acceptance tests
-cargo test -p bevy_swarm --lib # Unit tests
-cargo test -p bevy_swarm --test fx0_gate # Gate integrity tests
+cargo test -p bevy_playtest --lib # Unit tests
+cargo test -p bevy_playtest --test fx0_gate # Gate integrity tests
 cargo test --workspace --all-features # Full battery (end of bead)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --check
@@ -92,7 +92,7 @@ cargo fmt --check
 
 ## Architecture Overview
 
-`bevy_swarm` is an in-process playtest harness for Bevy games: typed
+`bevy_playtest` is an in-process playtest harness for Bevy games: typed
 intent bots (chaos/replay/planner/pursuit) drive the game through
 `UserIntent` messages; oracle systems evaluate invariants each frame;
 the driver (`src/driver.rs`) pumps the schedule and collects a
@@ -103,7 +103,7 @@ acceptance suite (`tests/acceptance.rs`, run via `fixture-runner`).
 
 ## Conventions & Patterns
 
-- **Zero-contract fixtures:** `fixtures/*` have NO bevy_swarm dependency.
+- **Zero-contract fixtures:** `fixtures/*` have NO bevy_playtest dependency.
 - **Acceptance tests:** run `cargo build -p fixture-runner` first (stale
   binary = misleading failures).
 - **Post-review process:** implement per bead, test, PR, green CI,

@@ -51,7 +51,7 @@ pub fn non_reflected_gameplay_changed_since(world: &World, since: Tick, now: Tic
     // RF43 moderate: components invisible to the value digest (plain
     // #[derive(Component)] game types, never registered in the type
     // registry) fall back to change-tick semantics. Identified by
-    // COMPONENT NAME: not bevy/bevy_swarm (those are engine/harness —
+    // COMPONENT NAME: not bevy/bevy_playtest (those are engine/harness —
     // e.g. GlobalTransform is re-propagated every frame) and not
     // present in the reflect registry (those follow value semantics
     // via the digest; re-written-same-value must stay frozen).
@@ -84,7 +84,7 @@ pub fn non_reflected_gameplay_changed_since(world: &World, since: Tick, now: Tic
                 let name = info.name();
                 !(name.starts_with("bevy_")
                     || name.starts_with("bevy::")
-                    || name.starts_with("bevy_swarm"))
+                    || name.starts_with("bevy_playtest"))
                     && !reflected.contains(cid)
             }
             None => false,

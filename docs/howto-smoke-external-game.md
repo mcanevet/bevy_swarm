@@ -11,14 +11,14 @@ about 30 seconds:
 ## The BRP tier (observe-only)
 
 Bevy's `bevy_remote` feature exposes a query/inspect protocol over
-HTTP. bevy_swarm's CLI can connect, observe, and run generic oracles:
+HTTP. bevy_playtest's CLI can connect, observe, and run generic oracles:
 
 ```sh
 # game side: one documented build flag, zero code
 cargo run --features bevy/bevy_remote
 
 # harness side:
-cargo swarm smoke <brp-url> --duration 30
+cargo bevy-playtest smoke <brp-url> --duration 30
 ```
 
 You get: crash detection, log-error capture, liveness, state digests.

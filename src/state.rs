@@ -362,13 +362,13 @@ pub fn snapshot_systems_with_tick(world: &mut World) -> SystemSnapshot {
 /// FX12 (C3): harness systems are excluded from game coverage. The
 /// original hardcoded list of 8 modules silently went stale — newer
 /// harness modules (liveness, effects, raw_input, identity, sinks,
-/// game_types) inflated game coverage. Matching the whole `bevy_swarm`
+/// game_types) inflated game coverage. Matching the whole `bevy_playtest`
 /// crate prefix is exhaustive by construction: every harness system
 /// lives there, and games/fxtures define their systems elsewhere.
-/// bevy_swarm::verify:: under cfg(test) is exempted explicitly so
+/// bevy_playtest::verify:: under cfg(test) is exempted explicitly so
 /// coverage of TEST-game systems is still measurable in unit tests.
 pub fn is_harness_system(name: &str) -> bool {
-    name.contains("bevy_swarm::") && !name.contains("bevy_swarm::verify::")
+    name.contains("bevy_playtest::") && !name.contains("bevy_playtest::verify::")
 }
 
 pub fn system_coverage(before: &HashMap<String, u32>, world: &mut World) -> SystemCoverage {

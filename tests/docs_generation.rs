@@ -2,17 +2,17 @@
 //! kind, meaning, what it detects, false-positive modes) — the catalog
 //! cannot drift from the registry.
 //!
-//! Regenerate with: `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`
+//! Regenerate with: `BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation`
 
-use bevy_swarm::rules::Rule;
+use bevy_playtest::rules::Rule;
 
 fn generate_rules_md() -> String {
     let mut out = String::new();
     out.push_str("# Rule Catalog\n\n");
     out.push_str(
         "GENERATED from `src/rules.rs` (`Rule` enum) — do not edit by hand.\n\
-         Regenerate with `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.\n\
-         Source of truth: `bevy_swarm::rules::Rule`.\n\
+         Regenerate with `BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation`.\n\
+         Source of truth: `bevy_playtest::rules::Rule`.\n\
          Expectation files (X2) reference only these names.\n\n",
     );
 
@@ -67,12 +67,12 @@ fn rules_doc_is_generated() {
         return;
     }
 
-    if std::env::var("BEVY_SWARM_UPDATE").is_ok() {
+    if std::env::var("BEVY_PLAYTEST_UPDATE").is_ok() {
         std::fs::write(&path, generated).expect("write docs/rules.md");
         panic!("docs/rules.md REGENERATED — commit the diff");
     }
     panic!(
         "docs/rules.md is stale: the Rule registry changed without \
-         regenerating. Run: BEVY_SWARM_UPDATE=schema cargo test --test docs_generation"
+         regenerating. Run: BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation"
     );
 }

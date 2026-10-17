@@ -1,8 +1,8 @@
 //! Z18: autotest() integration — config defaults, env overrides, report.
 
 use bevy::prelude::*;
-use bevy_swarm::autotest::{autotest, autotest_with, AutotestConfig};
-use bevy_swarm::contract::ContractTier;
+use bevy_playtest::autotest::{autotest, autotest_with, AutotestConfig};
+use bevy_playtest::contract::ContractTier;
 use serial_test::serial;
 
 #[derive(Clone, Default)]
@@ -29,7 +29,7 @@ fn autotest_runs_and_writes_report() {
     // from the per-run Z1 scopes (fixture-derived, not hardcoded).
     assert_eq!(
         report.schema_version,
-        bevy_swarm::conventions::SCHEMA_VERSION
+        bevy_playtest::conventions::SCHEMA_VERSION
     );
     assert_eq!(report.harness_mode, "in_process");
     assert!(
@@ -47,7 +47,7 @@ fn autotest_runs_and_writes_report() {
     assert!(summary.contains("2 seeds"), "summary: {summary}");
     // Report file was written under target/.
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
-    let runs_dir = std::path::Path::new(&target).join("bevy_swarm/runs");
+    let runs_dir = std::path::Path::new(&target).join("bevy_playtest/runs");
     assert!(
         std::fs::read_dir(&runs_dir)
             .map(|entries| entries
@@ -83,7 +83,7 @@ fn autotest_adds_playtest_plugin_frames_gt_zero() {
 #[test]
 fn autotest_unique_run_ids_and_last_pointer() {
     // Use a unique output dir to isolate from other tests.
-    let unique = format!("bevy_swarm/runs-fx4-{}", std::process::id());
+    let unique = format!("bevy_playtest/runs-fx4-{}", std::process::id());
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
     let runs_dir = std::path::Path::new(&target).join(&unique);
     let _ = std::fs::remove_dir_all(&runs_dir); // clean slate
@@ -146,7 +146,7 @@ fn autotest_unique_run_ids_and_last_pointer() {
 /// FX4.4: default raw surface non-empty.
 #[test]
 fn default_raw_surface_nonempty() {
-    use bevy_swarm::scenario::RawSurface;
+    use bevy_playtest::scenario::RawSurface;
     let surface = RawSurface::default();
     assert!(!surface.keys.is_empty(), "default keys must be non-empty");
     // Movement keys only (arrows + WASD): tier-0 games frequently
@@ -174,8 +174,8 @@ fn default_raw_surface_nonempty() {
 #[test]
 fn default_persona_uniform() {
     assert_eq!(
-        bevy_swarm::enums::Persona::default(),
-        bevy_swarm::enums::Persona::Uniform
+        bevy_playtest::enums::Persona::default(),
+        bevy_playtest::enums::Persona::Uniform
     );
 }
 
@@ -188,7 +188,7 @@ fn autotest_finds_dead_left_key_without_adapter() {
     let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
     // 60Hz over 6s: 360 samples, ~45 per key — well past the 10-sample
     // dead_verb threshold for the dead keys.
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     ).unwrap();
     let config = AutotestConfig {
@@ -210,7 +210,7 @@ fn autotest_finds_dead_left_key_without_adapter() {
 #[test]
 #[serial]
 fn autotest_clean_walker_passes() {
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     ).unwrap();
     let config = AutotestConfig {
@@ -232,7 +232,7 @@ fn autotest_clean_walker_passes() {
 #[test]
 fn autotest_counts_scenario_errors_as_failures() {
     // Planner bot without goals -> ScenarioError::Rejected at validate.
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"planner"},"duration_s":0.2,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
@@ -375,7 +375,7 @@ fn rf8_static_game_undrivable_not_frozen() {
 #[test]
 #[serial]
 fn rf8_non_clone_plugin_via_factory() {
-    use bevy_swarm::autotest::autotest_factory;
+    use bevy_playtest::autotest::autotest_factory;
 
     struct NonClonePlugin {
         _data: std::sync::Mutex<Vec<u8>>,
@@ -448,14 +448,14 @@ impl Plugin for FailingGamePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, |mut commands: Commands| {
             commands.spawn((
-                bevy_swarm::contract::Gameplay,
+                bevy_playtest::contract::Gameplay,
                 Name::new("bad"),
                 Transform::default(),
             ));
         })
         .add_systems(
             Update,
-            |mut q: Query<&mut Transform, With<bevy_swarm::contract::Gameplay>>| {
+            |mut q: Query<&mut Transform, With<bevy_playtest::contract::Gameplay>>| {
                 for mut t in &mut q {
                     t.translation.x = f32::NAN;
                 }
@@ -472,7 +472,7 @@ fn z18_config(seeds: u64, dir_suffix: &str) -> AutotestConfig {
         minimize_failures: false,
         max_failures: None,
         output_dir: std::path::PathBuf::from(format!(
-            "bevy_swarm/runs-z18-{}-{}",
+            "bevy_playtest/runs-z18-{}-{}",
             dir_suffix,
             std::process::id()
         )),
@@ -495,7 +495,7 @@ fn z18_isolate_state(suffix: &str) {
     // earlier run would flip classifications.
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create state dir");
-    std::env::set_var("BEVY_SWARM_STATE_DIR", &dir);
+    std::env::set_var("BEVY_PLAYTEST_STATE_DIR", &dir);
 }
 
 /// Z18.F + T13: two consecutive autotests — the second classifies the
@@ -503,8 +503,8 @@ fn z18_isolate_state(suffix: &str) {
 #[test]
 #[serial]
 fn z18_gate_second_run_knows_fingerprint() {
-    use bevy_swarm::fingerprint::Fingerprint;
-    use bevy_swarm::issues::{IssueDb, IssueRecord, IssueState};
+    use bevy_playtest::fingerprint::Fingerprint;
+    use bevy_playtest::issues::{IssueDb, IssueRecord, IssueState};
 
     z18_isolate_state("gate");
 
@@ -520,7 +520,7 @@ fn z18_gate_second_run_knows_fingerprint() {
 
     // Populate the DB with the observed fingerprints (open).
     let mut db = IssueDb::default();
-    let observed: Vec<(bevy_swarm::fingerprint::Fingerprint, u64, String, u64)> = first
+    let observed: Vec<(bevy_playtest::fingerprint::Fingerprint, u64, String, u64)> = first
         .failures
         .iter()
         .map(|f| {
@@ -556,7 +556,7 @@ fn z18_gate_second_run_knows_fingerprint() {
 #[test]
 #[serial]
 fn z18_regressions_replayed_first() {
-    use bevy_swarm::sweep::{write_regression, RegressionRecord};
+    use bevy_playtest::sweep::{write_regression, RegressionRecord};
 
     z18_isolate_state("reg");
 
@@ -571,7 +571,7 @@ fn z18_regressions_replayed_first() {
         .clone();
 
     // Persist a regression record for that fingerprint.
-    let reg_dir = bevy_swarm::conventions::regressions_dir();
+    let reg_dir = bevy_playtest::conventions::regressions_dir();
     let mut scen = cfg.base_scenario.clone();
     scen.duration_s = 0.05;
     write_regression(
@@ -696,7 +696,7 @@ fn z18_junit_xml_strict_parse() {
 #[serial]
 fn failure_summary_lists_violations_and_repro() {
     let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
@@ -713,7 +713,7 @@ fn failure_summary_lists_violations_and_repro() {
     assert!(summary.contains("FAILED:"), "{summary}");
     assert!(summary.contains("seed "), "{summary}");
     assert!(summary.contains("dead_verb"), "{summary}");
-    assert!(summary.contains("Repro: BEVY_SWARM_SEED="), "{summary}");
+    assert!(summary.contains("Repro: BEVY_PLAYTEST_SEED="), "{summary}");
 }
 
 /// smu: a passing report has an empty-concept failure summary — i.e.
@@ -721,7 +721,7 @@ fn failure_summary_lists_violations_and_repro() {
 #[test]
 #[serial]
 fn passing_report_has_no_failure_summary_content() {
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":5.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
@@ -743,7 +743,7 @@ fn passing_report_has_no_failure_summary_content() {
 #[serial]
 fn minimized_failure_written_as_standalone_file() {
     let _fixture_bug_guard = FixtureBugGuard::set(Some("dead_left_key"));
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
@@ -773,9 +773,9 @@ fn minimized_failure_written_as_standalone_file() {
         if name.starts_with("regression-") && name.ends_with(".json") {
             found_regression = true;
             let raw = std::fs::read_to_string(run_dir.join(&name)).unwrap();
-            let parsed: bevy_swarm::scenario::Scenario =
+            let parsed: bevy_playtest::scenario::Scenario =
                 serde_json::from_str(&raw).expect("standalone regression parses as Scenario");
-            bevy_swarm::scenario::validate_scenario(&parsed)
+            bevy_playtest::scenario::validate_scenario(&parsed)
                 .expect("standalone regression validates");
         }
     }

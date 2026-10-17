@@ -4,8 +4,8 @@
 #![cfg(feature = "agent")]
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
-use bevy_swarm::driver::PlaytestPlugin;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
+use bevy_playtest::driver::PlaytestPlugin;
 use std::net::{IpAddr, Ipv4Addr};
 
 fn world_with_token(token: Option<String>) -> bevy::ecs::world::World {
@@ -17,14 +17,14 @@ fn world_with_token(token: Option<String>) -> bevy::ecs::world::World {
         PlaytestPlugin,
     ));
     app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-    app.insert_resource(bevy_swarm::agent::AgentAuthToken(token));
+    app.insert_resource(bevy_playtest::agent::AgentAuthToken(token));
     app.finish();
     std::mem::take(app.world_mut())
 }
 
 #[test]
 fn non_loopback_rejected_without_opt_in() {
-    let cfg = bevy_swarm::agent::AgentConfig {
+    let cfg = bevy_playtest::agent::AgentConfig {
         addr: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
         ..Default::default()
     };
@@ -32,10 +32,12 @@ fn non_loopback_rejected_without_opt_in() {
     assert!(err.contains("allow_remote"), "got: {err}");
 
     // Loopback passes without opt-in.
-    assert!(bevy_swarm::agent::AgentConfig::default().validate().is_ok());
+    assert!(bevy_playtest::agent::AgentConfig::default()
+        .validate()
+        .is_ok());
 
     // Explicit opt-in passes (FX10: remote requires a non-empty token).
-    let cfg = bevy_swarm::agent::AgentConfig {
+    let cfg = bevy_playtest::agent::AgentConfig {
         allow_remote: true,
         token: Some("sekrit".into()),
         ..cfg
@@ -49,25 +51,25 @@ fn token_required_when_configured() {
     let world = world_with_token(Some("sekrit".into()));
 
     // No token → INVALID_REQUEST.
-    let err = bevy_swarm::agent::__test_observe(&world, None).unwrap_err();
+    let err = bevy_playtest::agent::__test_observe(&world, None).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 
     // Wrong token → INVALID_REQUEST.
     let params = serde_json::json!({"path": "TestApi.score", "token": "wrong"});
-    let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
+    let err = bevy_playtest::agent::__test_observe(&world, Some(params)).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 
     // Right token → passes auth (may fail later for other reasons, but
     // not with INVALID_REQUEST auth error on the token).
     let params = serde_json::json!({"path": "TestApi.score", "token": "sekrit"});
-    let res = bevy_swarm::agent::__test_observe(&world, Some(params));
+    let res = bevy_playtest::agent::__test_observe(&world, Some(params));
     assert!(res.is_ok() || res.unwrap_err().code != error_codes::INVALID_REQUEST);
 
     // C2 default-deny: no token configured (hand-built App) → auth
     // FAILURE, not open access.
     let world = world_with_token(None);
     let params = serde_json::json!({"path": "TestApi.score"});
-    let res = bevy_swarm::agent::__test_observe(&world, Some(params));
+    let res = bevy_playtest::agent::__test_observe(&world, Some(params));
     assert!(
         matches!(&res, Err(e) if e.code == error_codes::INVALID_REQUEST),
         "missing AgentAuthToken must reject, got: {res:?}"
@@ -80,7 +82,7 @@ fn release_guard_decision_function() {
     // deny_in_release; in release it errs. The decision is exercised
     // via the unit-testable validate() in the other tests; here we
     // check the deny flag plumbing exists and defaults off.
-    let cfg = bevy_swarm::agent::AgentConfig::default();
+    let cfg = bevy_playtest::agent::AgentConfig::default();
     assert!(!cfg.deny_in_release);
     assert_eq!(cfg.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert_eq!(cfg.port, 15702);
@@ -96,7 +98,7 @@ fn fx10_constant_time_compare() {
     // different content must be rejected without leaking which byte
     // differed (behaviorally indistinguishable, but the helper is
     // exposed for direct testing).
-    use bevy_swarm::agent::__test_token_eq;
+    use bevy_playtest::agent::__test_token_eq;
     assert!(__test_token_eq("sekrit", "sekrit"));
     assert!(!__test_token_eq("sekrit", "sekrut"));
     assert!(!__test_token_eq("sekrit", "sekritt"));
@@ -108,12 +110,12 @@ fn fx10_constant_time_compare() {
 fn fx10_deny_in_release_defaults_true_for_remote() {
     // allow_remote: true + deny_in_release unset -> effective default is
     // deny (remote exposure in release is the dangerous case).
-    let cfg = bevy_swarm::agent::AgentConfig {
+    let cfg = bevy_playtest::agent::AgentConfig {
         allow_remote: true,
         ..Default::default()
     };
     assert!(cfg.effective_deny_in_release());
-    assert!(!bevy_swarm::agent::AgentConfig::default().effective_deny_in_release());
+    assert!(!bevy_playtest::agent::AgentConfig::default().effective_deny_in_release());
 }
 
 // ---------------------------------------------------------------------------
@@ -230,8 +232,8 @@ fn fx10_http_world_methods_require_token() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -301,8 +303,8 @@ fn fx10_render_world_remote_methods_empty() {
         .world_mut()
         .init_resource::<bevy::render::RenderScheduleOrder>();
     app.insert_sub_app(bevy::render::RenderApp, render_sub);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -329,12 +331,12 @@ fn fx10_empty_token_is_unset() {
     // caller sending token: "") ...
     let world = world_with_token(Some("".into()));
     let params = serde_json::json!({"path": "TestApi.score", "token": ""});
-    let res = bevy_swarm::agent::__test_observe(&world, Some(params));
+    let res = bevy_playtest::agent::__test_observe(&world, Some(params));
     // An unset token must not authenticate anyone: observe either
     // succeeds (no auth required) or fails for non-auth reasons.
     let _ = res;
     // And allow_remote without a non-empty token must be refused.
-    let cfg = bevy_swarm::agent::AgentConfig {
+    let cfg = bevy_playtest::agent::AgentConfig {
         allow_remote: true,
         token: Some("".into()),
         ..Default::default()
@@ -350,9 +352,9 @@ fn fx10_release_guard_decision_tested_directly() {
     // The release-path decision must be testable regardless of the
     // current build profile: with the effective deny flag true, the
     // guard must error.
-    let err = bevy_swarm::agent::release_guard_decision(true).unwrap_err();
+    let err = bevy_playtest::agent::release_guard_decision(true).unwrap_err();
     assert!(err.contains("RELEASE"), "got: {err}");
-    assert!(bevy_swarm::agent::release_guard_decision(false).is_ok());
+    assert!(bevy_playtest::agent::release_guard_decision(false).is_ok());
 }
 
 #[test]
@@ -361,12 +363,12 @@ fn c2_default_deny_rejects_without_token() {
     // Even on loopback, a hand-built App with no token must reject
     // ALL token-guarded methods (default-deny, not default-open).
     let world = world_with_token(None);
-    let err = bevy_swarm::agent::__test_observe(&world, None).unwrap_err();
+    let err = bevy_playtest::agent::__test_observe(&world, None).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 
     // Providing a token param does not help — none is configured.
     let params = serde_json::json!({"path": "TestApi.score", "token": "anything"});
-    let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
+    let err = bevy_playtest::agent::__test_observe(&world, Some(params)).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 }
 
@@ -378,7 +380,7 @@ fn h3_overlong_token_param_rejected_first() {
     let world = world_with_token(Some("sekrit".into()));
     let long_token = "x".repeat(4096);
     let params = serde_json::json!({"path": "TestApi.score", "token": long_token});
-    let err = bevy_swarm::agent::__test_observe(&world, Some(params)).unwrap_err();
+    let err = bevy_playtest::agent::__test_observe(&world, Some(params)).unwrap_err();
     assert_eq!(err.code, error_codes::INVALID_REQUEST);
 }
 
@@ -393,14 +395,14 @@ fn le35_every_playtest_method_requires_token() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
         },
     ));
-    for method in bevy_swarm::agent::PLAYTEST_METHODS {
+    for method in bevy_playtest::agent::PLAYTEST_METHODS {
         let resp = brp_roundtrip(
             &mut app,
             port,
@@ -428,8 +430,8 @@ fn le35_state_no_panic_on_missing_resources() {
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
     // NOTE: no TestConventionsPlugin — ActionLog/GameVersion absent.
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -461,8 +463,8 @@ fn le35_actions_no_panic_on_missing_action_log() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -495,8 +497,8 @@ fn le35_empty_token_is_rejected() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("".into()), // explicit empty — treated as unset
             ..Default::default()
@@ -528,8 +530,8 @@ fn le35_late_registered_method_removed() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -578,8 +580,8 @@ fn le324_update_inserted_method_never_served() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -643,8 +645,8 @@ fn le324_reset_cheat_missing_hooks_no_panic() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -698,8 +700,8 @@ fn le337_http_request_during_frame_rogue_method_not_served() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()
@@ -768,8 +770,8 @@ fn le337_game_reregistered_allowed_method_keeps_guarded_handler() {
     let port = free_port();
     let mut app = bevy::app::App::new();
     app.add_plugins(bevy::MinimalPlugins);
-    app.add_plugins(bevy_swarm::agent::AgentPlugin::new(
-        bevy_swarm::agent::AgentConfig {
+    app.add_plugins(bevy_playtest::agent::AgentPlugin::new(
+        bevy_playtest::agent::AgentConfig {
             port,
             token: Some("sekrit".into()),
             ..Default::default()

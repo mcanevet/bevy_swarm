@@ -22,7 +22,7 @@
 //! run_scenario installs the error handler and panic hook automatically;
 //! the public functions here are for advanced/embedded use.
 //! ```
-//! use bevy_swarm::sinks::{RunId, set_current_run, drain_run};
+//! use bevy_playtest::sinks::{RunId, set_current_run, drain_run};
 //!
 //! let run = RunId::new();
 //! set_current_run(run);
@@ -214,7 +214,7 @@ pub fn ensure_global_subscriber() {
         // tracing setup).
         if tracing::subscriber::set_global_default(subscriber).is_err() {
             eprintln!(
-                "bevy_swarm: log capture OFF — another tracing subscriber is already \
+                "bevy_playtest: log capture OFF — another tracing subscriber is already \
                  installed (game-provided LogPlugin?). Errors logged via tracing will \
                  not appear in the playtest report."
             );

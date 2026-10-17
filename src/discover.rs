@@ -179,7 +179,7 @@ pub fn diff_snapshots(
 /// harness resources.
 fn is_harness_owned(key: &str) -> bool {
     key.starts_with("census.")
-        || key.starts_with("bevy_swarm::")
+        || key.starts_with("bevy_playtest::")
         || key.starts_with("Resource:RawAction")
         || key.starts_with("Resource:ActionEffects")
         || key.starts_with("Resource:Violations")
@@ -529,9 +529,9 @@ fn static_device_readers(app: &bevy::prelude::App) -> (Vec<(String, Vec<String>)
         for (_key, swa) in systems {
             use bevy::ecs::system::System;
             let name = swa.name().to_string();
-            // Only GAME systems: skip bevy_swarm (harness) and
+            // Only GAME systems: skip bevy_playtest (harness) and
             // bevy_* (engine).
-            if name.starts_with("bevy_swarm::") || name.starts_with("bevy_") {
+            if name.starts_with("bevy_playtest::") || name.starts_with("bevy_") {
                 continue;
             }
             let combined = match swa.access() {

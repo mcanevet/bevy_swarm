@@ -7,45 +7,45 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Runtime output root: `target/bevy_swarm/`
+/// Runtime output root: `target/bevy_playtest/`
 pub fn output_root() -> PathBuf {
     let target = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
-    target.join("bevy_swarm")
+    target.join("bevy_playtest")
 }
 
-/// Run reports: `target/bevy_swarm/runs/`
+/// Run reports: `target/bevy_playtest/runs/`
 pub fn runs_dir() -> PathBuf {
     output_root().join("runs")
 }
 
-/// Failure isolates: `target/bevy_swarm/failures/`
+/// Failure isolates: `target/bevy_playtest/failures/`
 pub fn failures_dir() -> PathBuf {
     output_root().join("failures")
 }
 
-/// HTML site: `target/bevy_swarm/site/`
+/// HTML site: `target/bevy_playtest/site/`
 pub fn site_dir() -> PathBuf {
     output_root().join("site")
 }
 
-/// Bisect worktrees: `target/bevy_swarm/bisect/`
+/// Bisect worktrees: `target/bevy_playtest/bisect/`
 pub fn bisect_dir() -> PathBuf {
     output_root().join("bisect")
 }
 
-/// Coverage index: `target/bevy_swarm/coverage-index.json`
+/// Coverage index: `target/bevy_playtest/coverage-index.json`
 pub fn coverage_index_path() -> PathBuf {
     output_root().join("coverage-index.json")
 }
 
-/// Special-build directory: `target/bevy_swarm-build/`
+/// Special-build directory: `target/bevy_playtest-build/`
 pub fn special_build_root() -> PathBuf {
     let target = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("target"));
-    target.join("bevy_swarm-build")
+    target.join("bevy_playtest-build")
 }
 
 /// Persisted files root: `tests/swarm/`
@@ -59,7 +59,7 @@ pub fn persisted_root() -> PathBuf {
     // ledger (issues.json, regressions/, ...) per process. nextest
     // runs each test in its OWN process, so #[serial] cannot prevent
     // cross-test interference with the shared paths.
-    std::env::var_os("BEVY_SWARM_STATE_DIR")
+    std::env::var_os("BEVY_PLAYTEST_STATE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("tests/swarm"))
 }
@@ -98,9 +98,9 @@ pub fn perf_baseline_path() -> PathBuf {
 ///
 /// Valid values: `golden,issues,model,perf,regressions` or `all`.
 /// Without this env var, no persisted files are written.
-pub const ENV_UPDATE: &str = "BEVY_SWARM_UPDATE";
+pub const ENV_UPDATE: &str = "BEVY_PLAYTEST_UPDATE";
 
-/// Parse `BEVY_SWARM_UPDATE` into an allow-list.
+/// Parse `BEVY_PLAYTEST_UPDATE` into an allow-list.
 ///
 /// Returns `None` if the env var is unset (no writes allowed).
 /// Returns `UpdateMode::All` if set to `all`.
@@ -241,7 +241,7 @@ mod tests {
         let saved = std::env::var("CARGO_TARGET_DIR").ok();
         std::env::remove_var("CARGO_TARGET_DIR");
         let root = output_root();
-        assert!(root.ends_with("target/bevy_swarm"));
+        assert!(root.ends_with("target/bevy_playtest"));
         if let Some(s) = saved {
             std::env::set_var("CARGO_TARGET_DIR", s);
         }
@@ -253,7 +253,7 @@ mod tests {
         let saved = std::env::var("CARGO_TARGET_DIR").ok();
         std::env::set_var("CARGO_TARGET_DIR", "/custom/out");
         let root = output_root();
-        assert_eq!(root, std::path::PathBuf::from("/custom/out/bevy_swarm"));
+        assert_eq!(root, std::path::PathBuf::from("/custom/out/bevy_playtest"));
         match saved {
             Some(s) => std::env::set_var("CARGO_TARGET_DIR", s),
             None => std::env::remove_var("CARGO_TARGET_DIR"),
@@ -267,7 +267,7 @@ mod tests {
         let saved = std::env::var("CARGO_TARGET_DIR").ok();
         std::env::remove_var("CARGO_TARGET_DIR");
         let root = special_build_root();
-        assert!(root.ends_with("target/bevy_swarm-build"));
+        assert!(root.ends_with("target/bevy_playtest-build"));
         if let Some(s) = saved {
             std::env::set_var("CARGO_TARGET_DIR", s);
         }

@@ -2,7 +2,7 @@
 //!
 //! Per bead X1:
 //! - runs each fixture variant via the fixture-runner binary (the user path)
-//! - reads the report JSON FILE (target/bevy_swarm/runs/last/report.json),
+//! - reads the report JSON FILE (target/bevy_playtest/runs/last/report.json),
 //!   not the in-memory struct
 //! - validates schema_version and must_report / must_not_report
 //! - strict xfail semantics for "pending" cases
@@ -84,7 +84,7 @@ fn fixture_runner_bin() -> std::path::PathBuf {
             "release"
         };
         // le3.7 (RF3/stale-binary): NEVER trust a pre-existing
-        // binary — `cargo test -p bevy_swarm` does NOT rebuild other
+        // binary — `cargo test -p bevy_playtest` does NOT rebuild other
         // packages' bins. Always run `cargo build -p fixture-runner`
         // (a cheap no-op when fresh) so the tested binary reflects
         // current fixture/harness sources.
@@ -139,7 +139,7 @@ fn run_case_with_scenario(
 
     // Per-case unique report path (FX2: no races on a shared
     // runs/last path). Conventions put run reports under
-    // target/bevy_swarm/runs/<run_id>/report.json — use a case-named
+    // target/bevy_playtest/runs/<run_id>/report.json — use a case-named
     // id so parallel test threads never collide.
     // le3.7 (RF3): pid alone is NOT enough under `cargo test`
     // (threads share a pid) — add the current thread id AND a unique
@@ -158,7 +158,7 @@ fn run_case_with_scenario(
     let target = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into());
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(&target)
-        .join("bevy_swarm/runs")
+        .join("bevy_playtest/runs")
         .join(&case_id);
     std::fs::create_dir_all(&out_dir).expect("create per-case out dir");
     let out_path = out_dir.join("report.json");
@@ -541,12 +541,12 @@ fn acceptance_suite() {
     );
 }
 
-/// Hard rule (bead X1): no file under fixtures/ may mention bevy_swarm
+/// Hard rule (bead X1): no file under fixtures/ may mention bevy_playtest
 /// harness plumbing. Fixture crates depend on bevy ONLY.
 #[test]
 fn fixtures_have_no_harness_plumbing() {
     let forbidden = [
-        "bevy_swarm",
+        "bevy_playtest",
         "TestApi",
         "UserIntent",
         "IntentSurface",
@@ -1011,12 +1011,12 @@ fn build_fixture_bin(package: &str) -> std::path::PathBuf {
 /// Z19 (m2h.20): smoke runner with stderr classifier on a crashing binary.
 #[test]
 fn smoke_crashing_binary_yields_crash_status() {
-    use bevy_swarm::smoke::smoke_run;
+    use bevy_playtest::smoke::smoke_run;
 
     let binary = build_fixture_bin("fixture_bin_only");
     let report = smoke_run(&binary, &[], 5).expect("smoke_run succeeds");
 
-    assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Crash);
+    assert_eq!(report.status, bevy_playtest::enums::PlaytestStatus::Crash);
     assert_eq!(report.harness_mode, "external_smoke");
     assert!(report.violations.iter().any(|v| v.rule == "panic"));
 }
@@ -1026,14 +1026,14 @@ fn smoke_crashing_binary_yields_crash_status() {
 /// noise).
 #[test]
 fn smoke_clean_binary_passes() {
-    use bevy_swarm::smoke::smoke_run;
+    use bevy_playtest::smoke::smoke_run;
 
     let binary = build_fixture_bin("fixture_bin_only_clean");
     let report = smoke_run(&binary, &[], 30).expect("smoke_run succeeds");
 
     assert_eq!(
         report.status,
-        bevy_swarm::enums::PlaytestStatus::Pass,
+        bevy_playtest::enums::PlaytestStatus::Pass,
         "clean binary must pass: violations={:?}",
         report.violations
     );
@@ -1046,7 +1046,7 @@ fn smoke_clean_binary_passes() {
 /// liveness oracle polled a changing world, and no crash is reported.
 #[test]
 fn brp_external_run_observes_live_game() {
-    use bevy_swarm::external::{external_brp_run, ExternalBrpConfig};
+    use bevy_playtest::external::{external_brp_run, ExternalBrpConfig};
 
     let binary = build_fixture_bin("fixture_brp");
     let config = ExternalBrpConfig {
@@ -1060,7 +1060,7 @@ fn brp_external_run_observes_live_game() {
     assert_eq!(report.harness_mode, "external_driven");
     assert_eq!(
         report.status,
-        bevy_swarm::enums::PlaytestStatus::Pass,
+        bevy_playtest::enums::PlaytestStatus::Pass,
         "live BRP game must pass: violations={:?} warnings={:?}",
         report.violations,
         report.warnings
@@ -1088,7 +1088,7 @@ fn brp_external_run_observes_live_game() {
 /// the unreachable endpoint as an error.
 #[test]
 fn brp_external_run_reports_unreachable_endpoint() {
-    use bevy_swarm::external::{external_brp_run, ExternalBrpConfig};
+    use bevy_playtest::external::{external_brp_run, ExternalBrpConfig};
 
     let binary = build_fixture_bin("fixture_bin_only_clean");
     let config = ExternalBrpConfig {

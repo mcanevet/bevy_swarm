@@ -1,8 +1,8 @@
 ```rust,no_run
-// The SUPPORTED surface of bevy_swarm 0.1: the quick-start pattern
+// The SUPPORTED surface of bevy_playtest 0.1: the quick-start pattern
 // compiles with ONLY the prelude.
 use bevy::prelude::*;
-use bevy_swarm::prelude::*;
+use bevy_playtest::prelude::*;
 
 #[derive(Component)]
 struct Player;

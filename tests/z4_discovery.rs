@@ -1,7 +1,7 @@
 //! Z4 (swarm-m2h.5): input-surface discovery by differential probing.
 
-use bevy_swarm::discover::{discover_surface, ProbeConfig};
-use bevy_swarm::headless::headless_app_factory;
+use bevy_playtest::discover::{discover_surface, ProbeConfig};
+use bevy_playtest::headless::headless_app_factory;
 
 /// Scoped FIXTURE_BUG mutation (same pattern as tests/autotest.rs).
 struct FixtureBugGuard {
@@ -30,7 +30,7 @@ impl Drop for FixtureBugGuard {
 
 fn surface_for(
     plugin_factory: impl Fn() -> fixture_walker::WalkerGamePlugin + Send + Sync + 'static,
-) -> bevy_swarm::discover::DiscoveredSurface {
+) -> bevy_playtest::discover::DiscoveredSurface {
     discover_surface(
         headless_app_factory(plugin_factory),
         &ProbeConfig {
@@ -170,7 +170,7 @@ fn z4_discovery_is_bounded() {
 #[test]
 fn z4_raw_surface_from_discovered() {
     let surface = surface_for(|| fixture_walker::WalkerGamePlugin);
-    let raw = bevy_swarm::scenario::RawSurface::from_discovered(&surface);
+    let raw = bevy_playtest::scenario::RawSurface::from_discovered(&surface);
     assert!(!raw.keys.is_empty());
     assert!(!raw.mouse_buttons);
     assert!(!raw.gamepad);
@@ -188,17 +188,17 @@ fn z4_raw_surface_from_discovered() {
 #[test]
 #[serial_test::serial]
 fn z4_autotest_clean_walker_no_dead_verb_after_discovery() {
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":6.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
-    let config = bevy_swarm::autotest::AutotestConfig {
+    let config = bevy_playtest::autotest::AutotestConfig {
         num_seeds: 1,
         parallel: 1,
         base_scenario: sc,
-        ..bevy_swarm::autotest::AutotestConfig::default()
+        ..bevy_playtest::autotest::AutotestConfig::default()
     };
-    let report = bevy_swarm::autotest::autotest(fixture_walker::WalkerGamePlugin, config)
+    let report = bevy_playtest::autotest::autotest(fixture_walker::WalkerGamePlugin, config)
         .expect("autotest runs");
     assert!(
         !report.failures.iter().any(|f| f.rule == "dead_verb"),
@@ -218,18 +218,18 @@ fn z4_autotest_clean_walker_no_dead_verb_after_discovery() {
 #[serial_test::serial]
 fn z4_autotest_finds_dead_left_key_with_discovery() {
     let _guard = FixtureBugGuard::set(Some("dead_left_key"));
-    let sc: bevy_swarm::scenario::Scenario = serde_json::from_str(
+    let sc: bevy_playtest::scenario::Scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":1,"input_rate_hz":10},"duration_s":20.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}"#,
     )
     .unwrap();
-    let config = bevy_swarm::autotest::AutotestConfig {
+    let config = bevy_playtest::autotest::AutotestConfig {
         num_seeds: 1,
         duration_s: 20.0,
         parallel: 1,
         base_scenario: sc,
-        ..bevy_swarm::autotest::AutotestConfig::default()
+        ..bevy_playtest::autotest::AutotestConfig::default()
     };
-    let report = bevy_swarm::autotest::autotest(fixture_walker::WalkerGamePlugin, config)
+    let report = bevy_playtest::autotest::autotest(fixture_walker::WalkerGamePlugin, config)
         .expect("autotest runs");
     assert!(
         report.failures.iter().any(|f| f.rule == "dead_verb"),

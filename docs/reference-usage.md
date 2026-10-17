@@ -3,7 +3,7 @@
 Programmatic, single-scenario execution (what `autotest` builds on):
 
 ```rust,no_run
-use bevy_swarm::harness::{run_scenario, Scenario};
+use bevy_playtest::harness::{run_scenario, Scenario};
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 let scenario: Scenario = serde_json::from_str(
@@ -12,7 +12,7 @@ let scenario: Scenario = serde_json::from_str(
 
 let mut app = build_your_headless_app(); // your game's plugins + PlaytestPlugin
 let report = run_scenario(&mut app, &scenario)?;
-assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
+assert_eq!(report.status, bevy_playtest::enums::PlaytestStatus::Pass);
 # Ok(())
 # }
 # fn build_your_headless_app() -> bevy::prelude::App { unimplemented!() }
@@ -22,12 +22,12 @@ assert_eq!(report.status, bevy_swarm::enums::PlaytestStatus::Pass);
 
 | Variable | Purpose |
 |---|---|
-| `BEVY_SWARM_UPDATE` | categories allowed to rewrite goldens/expectations |
-| `BEVY_SWARM_SEEDS` | override seed sweep range |
-| `BEVY_SWARM_SEED` | pin ONE exact seed for reproduction (wins over SEEDS) |
-| `BEVY_SWARM_DURATION` | override default scenario duration |
-| `BEVY_SWARM_THREADS` | parallel worker count for matrix runs |
-| `BEVY_SWARM_AGENT_TOKEN` | auth token for the agent feature |
+| `BEVY_PLAYTEST_UPDATE` | categories allowed to rewrite goldens/expectations |
+| `BEVY_PLAYTEST_SEEDS` | override seed sweep range |
+| `BEVY_PLAYTEST_SEED` | pin ONE exact seed for reproduction (wins over SEEDS) |
+| `BEVY_PLAYTEST_DURATION` | override default scenario duration |
+| `BEVY_PLAYTEST_THREADS` | parallel worker count for matrix runs |
+| `BEVY_PLAYTEST_AGENT_TOKEN` | auth token for the agent feature |
 | `SWARM_TRANSFORM_DESYNC_TOL` | tolerance for transform desync detection |
 
 ## Feature flags

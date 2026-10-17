@@ -61,7 +61,7 @@ jobs:
         run: |
           # Crate-presence check: bevy feature names never matched the old
           # grep (bevy_render vs render). Check the crates directly.
-          MATCHES=$(cargo tree -p bevy_swarm --no-default-features -e normal --prefix none | grep -cE '^(bevy_render|bevy_winit|bevy_audio|wgpu|winit|cpal) ' || true)
+          MATCHES=$(cargo tree -p bevy_playtest --no-default-features -e normal --prefix none | grep -cE '^(bevy_render|bevy_winit|bevy_audio|wgpu|winit|cpal) ' || true)
           if [ "$MATCHES" != "0" ]; then
             echo "FAIL: no-default-features pulls render/winit/audio crates"
             exit 1
@@ -70,7 +70,7 @@ jobs:
         run: |
           # Sanity-check the check itself: with --features render the grep
           # must find crates, and this step verifies that (expected fail).
-          MATCHES=$(cargo tree -p bevy_swarm --no-default-features --features render -e normal --prefix none | grep -cE '^(bevy_render|bevy_winit|bevy_audio|wgpu|winit|cpal) ' || true)
+          MATCHES=$(cargo tree -p bevy_playtest --no-default-features --features render -e normal --prefix none | grep -cE '^(bevy_render|bevy_winit|bevy_audio|wgpu|winit|cpal) ' || true)
           if [ "$MATCHES" = "0" ]; then
             echo "FAIL: negative control — check is vacuous, render crates not detected"
             exit 1

@@ -98,7 +98,7 @@ Every capability of the invariant DSL against a wired TestApi:
 Validate offline before running the game:
 
 ```sh
-cargo swarm validate my-scenario.json
+cargo bevy-playtest validate my-scenario.json
 ```
 
 Syntax + schema + semantic checks, all errors at once, with
@@ -110,7 +110,7 @@ JSON is data-friendly; Rust is author-friendly. The
 [`ScenarioBuilder`](../src/builder.rs) API compiles the structure:
 
 ```rust,no_run
-use bevy_swarm::builder::ScenarioBuilder;
+use bevy_playtest::builder::ScenarioBuilder;
 
 let scenario = ScenarioBuilder::chaos()
     .name("hp-watch")

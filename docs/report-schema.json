@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/mcanevet/bevy_swarm/raw/main/docs/report-schema.json",
-  "title": "bevy_swarm PlaytestReport",
-  "description": "Public JSON contract for bevy_swarm playtest reports. Breaking changes require a schema_version bump and CHANGELOG entry.",
+  "$id": "https://github.com/mcanevet/bevy_playtest/raw/main/docs/report-schema.json",
+  "title": "bevy_playtest PlaytestReport",
+  "description": "Public JSON contract for bevy_playtest playtest reports. Breaking changes require a schema_version bump and CHANGELOG entry.",
   "type": "object",
   "required": [
     "schema_version",

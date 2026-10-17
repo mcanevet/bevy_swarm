@@ -2,8 +2,8 @@
 //! game LogPlugin captures; parallel runs don't drop panics.
 
 use bevy::prelude::*;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::harness::Scenario;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::harness::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -11,7 +11,7 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app
 }
@@ -58,8 +58,8 @@ fn parallel_pool_panic_attributed_to_every_active_run() {
     // AsyncComputeTaskPool; seeds 2/3 do nothing. Reverting to
     // newest-run routing makes seed1 pass and (usually) seed3 fail.
     use bevy::tasks::AsyncComputeTaskPool;
-    use bevy_swarm::branch::{run_matrix, InProcess};
-    use bevy_swarm::contract::CheatHooks;
+    use bevy_playtest::branch::{run_matrix, InProcess};
+    use bevy_playtest::contract::CheatHooks;
     use std::collections::HashMap;
 
     let mk_variant = |name: &str, cheat: bool| {
@@ -115,7 +115,7 @@ fn parallel_pool_panic_attributed_to_every_active_run() {
             .collect();
         if outcome.variant_name == "seed1" {
             assert!(
-                outcome.report.status == bevy_swarm::enums::PlaytestStatus::Fail,
+                outcome.report.status == bevy_playtest::enums::PlaytestStatus::Fail,
                 "seed1 (panicking variant) must FAIL, got {:?} violations={:?}",
                 outcome.report.status,
                 outcome.report.violations

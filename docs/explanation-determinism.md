@@ -1,12 +1,12 @@
 # Explanation: Determinism Strategy
 
 *Understanding-oriented — why replay and minimization need
-determinism, how bevy_swarm achieves it, and where the remaining
+determinism, how bevy_playtest achieves it, and where the remaining
 sharp edges are.*
 
 ## Why determinism is load-bearing
 
-bevy_swarm's failure workflow promises: a red run gives you a
+bevy_playtest's failure workflow promises: a red run gives you a
 **seed**, re-running that seed reproduces the failure, and
 minimization can shrink the failing input sequence to a committable
 regression scenario. All three are lies if the scenario isn't
@@ -17,7 +17,7 @@ So determinism is verified, not assumed:
 
 ```rust,no_run
 # fn main() {
-let report = bevy_swarm::determinism::check_determinism(
+let report = bevy_playtest::determinism::check_determinism(
     || build_app(), &scenario, 2)?;
 if !report.is_deterministic() {
     println!("{:?}", report.first_divergence);
@@ -54,11 +54,11 @@ silently injects true randomness into "deterministic" games. The
   your game draws entropy at odd times without failing spurious
 
 Enable with both the feature AND the cfg (they go together — the
-harness's own `cargo swarm` wrapper plans to set both):
+harness's own `cargo bevy-playtest` wrapper plans to set both):
 
 ```sh
 RUSTFLAGS='--cfg getrandom_backend="custom"' \
-  cargo test --features bevy_swarm/deterministic-entropy
+  cargo test --features bevy_playtest/deterministic-entropy
 ```
 
 ### 3. Wall-clock time
@@ -98,12 +98,12 @@ lies about reproduction wastes more debugging time than no tool.
 ## The hook, precisely
 
 Enable the `deterministic-entropy` feature AND set the cfg (they go
-together — a `cargo swarm run` wrapper that sets both automatically
+together — a `cargo bevy-playtest run` wrapper that sets both automatically
 is planned):
 
 ```sh
 RUSTFLAGS='--cfg getrandom_backend="custom"' \
-  cargo test --features bevy_swarm/deterministic-entropy
+  cargo test --features bevy_playtest/deterministic-entropy
 ```
 
 The custom backend hook (`__getrandom_v03_custom`) intercepts all

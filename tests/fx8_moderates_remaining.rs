@@ -2,12 +2,12 @@
 //! exactly-one gamepad assert, raw-action audit+replay, UI clicks headless.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
-use bevy_swarm::driver::PlaytestPlugin;
-use bevy_swarm::harness::Gameplay;
-use bevy_swarm::raw_input::RawActionQueue;
-use bevy_swarm::scenario::{MouseBtn, RawAction};
-use bevy_swarm::state::PlaytestState;
+use bevy_playtest::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin};
+use bevy_playtest::driver::PlaytestPlugin;
+use bevy_playtest::harness::Gameplay;
+use bevy_playtest::raw_input::RawActionQueue;
+use bevy_playtest::scenario::{MouseBtn, RawAction};
+use bevy_playtest::state::PlaytestState;
 
 fn build_headless_no_window() -> App {
     let mut app = App::new();
@@ -264,7 +264,7 @@ fn fx8_raw_actions_logged_to_audit() {
     app.update();
 
     // Check action log contains raw actions
-    let log = app.world().resource::<bevy_swarm::contract::ActionLog>();
+    let log = app.world().resource::<bevy_playtest::contract::ActionLog>();
 
     let has_key = log.entries.iter().any(|e| e.action.starts_with("raw:key:"));
     let has_mouse = log
@@ -278,7 +278,7 @@ fn fx8_raw_actions_logged_to_audit() {
 
 #[test]
 fn fx8_raw_actions_replayable() {
-    use bevy_swarm::minimize::action_to_replay_intent;
+    use bevy_playtest::minimize::action_to_replay_intent;
 
     let mut app = App::new();
     app.add_plugins((
@@ -323,8 +323,8 @@ fn fx8_raw_actions_replayable() {
     app.update();
 
     // Convert action log to timed actions and check replayability
-    let log = app.world().resource::<bevy_swarm::contract::ActionLog>();
-    let timed_actions = bevy_swarm::scenario::action_log_to_timed_actions(&log.entries);
+    let log = app.world().resource::<bevy_playtest::contract::ActionLog>();
+    let timed_actions = bevy_playtest::scenario::action_log_to_timed_actions(&log.entries);
 
     assert!(!timed_actions.is_empty(), "action log should have entries");
 
@@ -369,14 +369,16 @@ fn build_headless_ui_app() -> App {
         SurfaceVariant::Wait,
     ]));
     // Harness systems are gated on a live scenario.
-    app.insert_resource(bevy_swarm::driver::ScenarioResource(std::sync::Arc::new(
-        serde_json::from_str(
-            r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
-        )
-        .unwrap(),
-    )));
-    app.init_resource::<bevy_swarm::choice::ChoiceStream>();
-    app.init_resource::<bevy_swarm::robustness::RobustnessTracker>();
+    app.insert_resource(bevy_playtest::driver::ScenarioResource(
+        std::sync::Arc::new(
+            serde_json::from_str(
+                r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#,
+            )
+            .unwrap(),
+        ),
+    ));
+    app.init_resource::<bevy_playtest::choice::ChoiceStream>();
+    app.init_resource::<bevy_playtest::robustness::RobustnessTracker>();
     app.world_mut().spawn((
         Name::new("Player"),
         Gameplay,
@@ -486,9 +488,9 @@ fn fx2_headless_ui_click_presses_interaction() {
 #[test]
 fn rf16_gamepad_button_audited() {
     use bevy::prelude::*;
-    use bevy_swarm::raw_input::RawActionQueue;
-    use bevy_swarm::scenario::RawAction;
-    use bevy_swarm::state::PlaytestState;
+    use bevy_playtest::raw_input::RawActionQueue;
+    use bevy_playtest::scenario::RawAction;
+    use bevy_playtest::state::PlaytestState;
 
     let mut app = App::new();
     app.add_plugins((
@@ -530,7 +532,7 @@ fn rf16_gamepad_button_audited() {
     app.world_mut().insert_resource(state);
     app.update();
 
-    let log = app.world().resource::<bevy_swarm::contract::ActionLog>();
+    let log = app.world().resource::<bevy_playtest::contract::ActionLog>();
     assert!(
         !log.entries.is_empty(),
         "gamepad button must be written to the audit log"
@@ -545,10 +547,10 @@ fn rf16_gamepad_button_audited() {
 #[test]
 fn rf16_raw_replay_and_minimization() {
     use bevy::prelude::*;
-    use bevy_swarm::branch::{InProcess, ScenarioRunner};
-    use bevy_swarm::headless::headless_app_factory;
-    use bevy_swarm::minimize::minimize_failure;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::{InProcess, ScenarioRunner};
+    use bevy_playtest::headless::headless_app_factory;
+    use bevy_playtest::minimize::minimize_failure;
+    use bevy_playtest::scenario::Scenario;
     struct TestPlugin;
     impl Plugin for TestPlugin {
         fn build(&self, app: &mut App) {
@@ -571,10 +573,10 @@ fn rf16_raw_replay_and_minimization() {
 
     // Replay the audit log and verify digest matches
     let log = &report.action_log;
-    let timed_actions = bevy_swarm::scenario::action_log_to_timed_actions(log);
+    let timed_actions = bevy_playtest::scenario::action_log_to_timed_actions(log);
     let replay_inputs: Vec<serde_json::Value> = timed_actions
         .iter()
-        .filter_map(bevy_swarm::minimize::action_to_replay_intent)
+        .filter_map(bevy_playtest::minimize::action_to_replay_intent)
         .enumerate()
         .map(|(i, intent)| {
             let frame = timed_actions[i].frame;
@@ -593,7 +595,7 @@ fn rf16_raw_replay_and_minimization() {
     let replay_report = replay_runner.run(&replay_scenario).unwrap();
 
     // Digests must match
-    fn final_digest(r: &bevy_swarm::driver::PlaytestReport) -> Option<u64> {
+    fn final_digest(r: &bevy_playtest::driver::PlaytestReport) -> Option<u64> {
         r.state_trace.as_ref()?.last().map(|d| d.hash)
     }
     assert_eq!(

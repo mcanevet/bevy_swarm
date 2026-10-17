@@ -92,7 +92,7 @@ pub struct AgentConfig {
     /// Bind port (BRP default 15702).
     pub port: u16,
     /// Shared-secret token. When set (config or
-    /// `BEVY_SWARM_AGENT_TOKEN` env), EVERY remotely reachable method
+    /// `BEVY_PLAYTEST_AGENT_TOKEN` env), EVERY remotely reachable method
     /// requires `params.token` to match; mismatches return
     /// INVALID_REQUEST. `playtest/*` guards inside `brp_params`;
     /// read-only `world.*` and discovery methods are wrapped with the
@@ -110,7 +110,7 @@ impl Default for AgentConfig {
         Self {
             addr: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             port: 15702,
-            token: std::env::var("BEVY_SWARM_AGENT_TOKEN")
+            token: std::env::var("BEVY_PLAYTEST_AGENT_TOKEN")
                 .ok()
                 .filter(|t| !t.is_empty()),
             allow_remote: false,
@@ -138,7 +138,7 @@ impl AgentConfig {
             // up yet during Plugin::build, so bevy::log::warn! would
             // be lost).
             eprintln!(
-                "WARNING: bevy_swarm agent feature is active in a RELEASE build —                  BRP exposes arbitrary world reads and mutation."
+                "WARNING: bevy_playtest agent feature is active in a RELEASE build —                  BRP exposes arbitrary world reads and mutation."
             );
         }
         if !self.addr.is_loopback() && !self.allow_remote {
@@ -149,7 +149,7 @@ impl AgentConfig {
         }
         if self.allow_remote && self.token.as_deref().unwrap_or("").is_empty() {
             return Err(
-                "allow_remote: true requires a non-empty token (config or BEVY_SWARM_AGENT_TOKEN)"
+                "allow_remote: true requires a non-empty token (config or BEVY_PLAYTEST_AGENT_TOKEN)"
                     .to_string(),
             );
         }
@@ -454,8 +454,8 @@ impl Plugin for AgentPlugin {
                 let generated =
                     generate_random_token().expect("agent token generation from OS randomness");
                 eprintln!(
-                    "bevy_swarm agent: no BEVY_SWARM_AGENT_TOKEN configured; \
-                 generated a random session token. Set BEVY_SWARM_AGENT_TOKEN \
+                    "bevy_playtest agent: no BEVY_PLAYTEST_AGENT_TOKEN configured; \
+                 generated a random session token. Set BEVY_PLAYTEST_AGENT_TOKEN \
                  to use the agent programmatically. Token: {generated}"
                 );
                 generated
@@ -1309,7 +1309,7 @@ pub fn __test_token_eq(a: &str, b: &str) -> bool {
 /// release must error out.
 #[doc(hidden)]
 pub fn release_guard_decision(deny: bool) -> Result<(), String> {
-    let msg = "bevy_swarm agent feature is active in a RELEASE build —                        BRP exposes arbitrary world reads and mutation.                        Never ship builds with the agent enabled.";
+    let msg = "bevy_playtest agent feature is active in a RELEASE build —                        BRP exposes arbitrary world reads and mutation.                        Never ship builds with the agent enabled.";
     if deny {
         Err(msg.to_string())
     } else {

@@ -14,7 +14,7 @@ per-scenario, reversible, and auditable:
 
 ```sh
 # after a red local run:
-BEVY_SWARM_UPDATE=issues cargo test --test playtest
+BEVY_PLAYTEST_UPDATE=issues cargo test --test playtest
 git diff tests/swarm/issues.json   # review before committing
 ```
 
@@ -66,4 +66,4 @@ strictness where you want it.
 - Don't mute to make a flaky test green — flaky means nondeterministic,
   fix that first (see [determinism](explanation-determinism.md))
 - Don't edit reports or expectations by hand —
-  `BEVY_SWARM_UPDATE` modes with committed diffs are the audit path
+  `BEVY_PLAYTEST_UPDATE` modes with committed diffs are the audit path

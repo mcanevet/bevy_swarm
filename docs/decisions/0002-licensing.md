@@ -8,7 +8,7 @@ Accepted.
 
 ## Context
 
-- bevy_swarm is an ECS-native playtesting harness for Bevy games.
+- bevy_playtest is an ECS-native playtesting harness for Bevy games.
 - Bevy itself uses dual MIT/Apache-2.0 licensing.
 - The Rust ecosystem standard is dual licensing without a Contributor License Agreement (CLA).
 - The project owner (Mickaël Canévet) intends to keep licensing stable and contributor-friendly.

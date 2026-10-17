@@ -2,9 +2,9 @@
 //! update-env approval workflow.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::TestApi;
-use bevy_swarm::golden::{check_golden, record_golden, GoldenOutcome, GoldenSet, Tolerance};
-use bevy_swarm::headless::headless_app;
+use bevy_playtest::contract::TestApi;
+use bevy_playtest::golden::{check_golden, record_golden, GoldenOutcome, GoldenSet, Tolerance};
+use bevy_playtest::headless::headless_app;
 
 /// Damage formula flag: version A (original) vs B (changed logic).
 /// FX9: per-app resource — a global static toggled mid-run by other
@@ -35,7 +35,7 @@ impl Plugin for GamePlugin {
         app.init_resource::<EnemyDamage>();
         app.add_systems(Update, damage_system);
         app.add_systems(Last, sync_damage_to_api);
-        app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
+        app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
         app.insert_resource(TestApi {
             score: 0,
             active_players: 0,
@@ -57,7 +57,7 @@ fn game_v2() -> App {
     app
 }
 
-fn scenario(seed: u64) -> bevy_swarm::scenario::Scenario {
+fn scenario(seed: u64) -> bevy_playtest::scenario::Scenario {
     serde_json::from_str(&format!(
         r#"{{"bot":{{"type":"chaos","seed":{}}},"duration_s":0.05}}"#,
         seed
@@ -66,7 +66,7 @@ fn scenario(seed: u64) -> bevy_swarm::scenario::Scenario {
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("bevy_swarm_golden_{tag}"));
+    let dir = std::env::temp_dir().join(format!("bevy_playtest_golden_{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -79,8 +79,8 @@ fn golden_same_on_unchanged_game() {
 
     // Cross-check determinism: two fresh runs of the same scenario
     let d = |app: &mut App| {
-        app.insert_resource(bevy_swarm::determinism::StateTrace::default());
-        let rep = bevy_swarm::driver::run_scenario(app, &scen).unwrap();
+        app.insert_resource(bevy_playtest::determinism::StateTrace::default());
+        let rep = bevy_playtest::driver::run_scenario(app, &scen).unwrap();
         rep.state_trace
             .iter()
             .flatten()
@@ -150,12 +150,12 @@ fn golden_missing_is_not_same() {
 #[test]
 #[serial_test::serial]
 fn golden_update_env_rewrites() {
-    // FX9: convention is BEVY_SWARM_UPDATE=golden, not
-    // BEVY_SWARM_UPDATE_GOLDEN.
-    unsafe { std::env::set_var("BEVY_SWARM_UPDATE", "golden") };
-    assert!(bevy_swarm::golden::update_golden_enabled());
-    unsafe { std::env::remove_var("BEVY_SWARM_UPDATE") };
-    assert!(!bevy_swarm::golden::update_golden_enabled());
+    // FX9: convention is BEVY_PLAYTEST_UPDATE=golden, not
+    // BEVY_PLAYTEST_UPDATE_GOLDEN.
+    unsafe { std::env::set_var("BEVY_PLAYTEST_UPDATE", "golden") };
+    assert!(bevy_playtest::golden::update_golden_enabled());
+    unsafe { std::env::remove_var("BEVY_PLAYTEST_UPDATE") };
+    assert!(!bevy_playtest::golden::update_golden_enabled());
 }
 
 #[test]
@@ -174,8 +174,8 @@ fn golden_path_sanitization_rejects_traversal() {
     for name in bad_names {
         let mut scen = scenario(42);
         scen.name = Some(name.to_string());
-        let err =
-            bevy_swarm::scenario::validate_scenario(&scen).expect_err("must reject invalid name");
+        let err = bevy_playtest::scenario::validate_scenario(&scen)
+            .expect_err("must reject invalid name");
         assert!(
             err.to_string().contains("invalid"),
             "rejected for wrong reason: {err}"
@@ -187,7 +187,7 @@ fn golden_path_sanitization_rejects_traversal() {
     for name in good_names {
         let mut scen = scenario(42);
         scen.name = Some(name.to_string());
-        bevy_swarm::scenario::validate_scenario(&scen).expect("must accept valid name");
+        bevy_playtest::scenario::validate_scenario(&scen).expect("must accept valid name");
     }
 }
 
@@ -196,11 +196,11 @@ fn scenario_duration_tps_caps_reject_dos() {
     // H2: tps/duration combos that imply enormous tick counts must be
     // rejected at validation time.
     let reject = |tps: u32, dur: f64| {
-        let scen: bevy_swarm::scenario::Scenario = serde_json::from_str(&format!(
+        let scen: bevy_playtest::scenario::Scenario = serde_json::from_str(&format!(
             r#"{{"bot":{{"type":"chaos","seed":1}},"tps":{tps},"duration_s":{dur}}}"#
         ))
         .unwrap();
-        bevy_swarm::scenario::validate_scenario(&scen).expect_err("must reject");
+        bevy_playtest::scenario::validate_scenario(&scen).expect_err("must reject");
     };
 
     reject(1_001, 1.0); // tps over cap
@@ -211,8 +211,8 @@ fn scenario_duration_tps_caps_reject_dos() {
     reject(100, 200_000.0); // 20M ticks — over tick cap only
 
     // Boundary: 1000 tps x 3600 s = 3.6M ticks is accepted.
-    let ok: bevy_swarm::scenario::Scenario =
+    let ok: bevy_playtest::scenario::Scenario =
         serde_json::from_str(r#"{"bot":{"type":"chaos","seed":1},"tps":1000,"duration_s":3600.0}"#)
             .unwrap();
-    bevy_swarm::scenario::validate_scenario(&ok).expect("boundary combo must be accepted");
+    bevy_playtest::scenario::validate_scenario(&ok).expect("boundary combo must be accepted");
 }

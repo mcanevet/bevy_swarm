@@ -5,12 +5,12 @@
 //! - Test passes WITH the fix
 
 use bevy::prelude::*;
-use bevy_swarm::contract::TestApi;
-use bevy_swarm::golden::{
+use bevy_playtest::contract::TestApi;
+use bevy_playtest::golden::{
     check_golden, check_golden_opts, record_golden, GoldenOutcome, GoldenSet, Tolerance,
 };
-use bevy_swarm::headless::headless_app;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::headless::headless_app;
+use bevy_playtest::scenario::Scenario;
 use std::fs;
 use std::path::PathBuf;
 
@@ -51,9 +51,9 @@ fn nondet_system(
 
 fn react_to_intents(
     mut counter: ResMut<CounterResource>,
-    mut intents: MessageReader<bevy_swarm::contract::UserIntent>,
+    mut intents: MessageReader<bevy_playtest::contract::UserIntent>,
 ) {
-    use bevy_swarm::contract::UserIntent;
+    use bevy_playtest::contract::UserIntent;
     for intent in intents.read() {
         if matches!(intent, UserIntent::Choice { .. }) {
             counter.0 += 5;
@@ -82,7 +82,7 @@ struct SurfaceGamePlugin {
 
 impl Plugin for SurfaceGamePlugin {
     fn build(&self, app: &mut App) {
-        use bevy_swarm::contract::{IntentSurface, SurfaceVariant};
+        use bevy_playtest::contract::{IntentSurface, SurfaceVariant};
         let surface = if self.reversed_surface {
             vec![
                 SurfaceVariant::Wait,
@@ -100,7 +100,7 @@ impl Plugin for SurfaceGamePlugin {
         app.init_resource::<CounterResource>();
         app.add_systems(Update, (increment_system, react_to_intents));
         app.add_systems(Last, sync_counter_to_api);
-        app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
+        app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
         app.insert_resource(TestApi {
             score: 0,
             active_players: 0,
@@ -137,7 +137,7 @@ impl Plugin for NondetGamePlugin {
         }
         app.add_systems(Update, (speed_system, nondet_system));
         app.add_systems(Last, sync_counter_to_api);
-        app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
+        app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
         app.insert_resource(TestApi {
             score: 0,
             active_players: 0,
@@ -173,7 +173,7 @@ impl Plugin for CounterGamePlugin {
         app.init_resource::<CounterResource>();
         app.add_systems(Update, increment_system);
         app.add_systems(Last, sync_counter_to_api);
-        app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
+        app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
         app.insert_resource(TestApi {
             score: 0,
             active_players: 0,
@@ -192,7 +192,7 @@ fn surface_game(reversed_surface: bool) -> impl Fn() -> App {
 }
 
 fn temp_fx9_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bevy_swarm_fx9_{tag}"));
+    let dir = std::env::temp_dir().join(format!("bevy_playtest_fx9_{tag}"));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -223,7 +223,7 @@ fn fx9_item1_snapshots_show_increasing_values() {
     let (_, _golden_file) = &golden_set.scenarios.first().unwrap();
     let golden_path = dir.join(format!("scenario-chaos-{}.golden.json", scenario.bot.seed));
     let json = fs::read_to_string(&golden_path).unwrap();
-    let golden: bevy_swarm::golden::GoldenFile = serde_json::from_str(&json).unwrap();
+    let golden: bevy_playtest::golden::GoldenFile = serde_json::from_str(&json).unwrap();
 
     // CRITICAL: Snapshots must show strictly increasing counter values
     // If all snapshots are the same (final state), this fails
@@ -274,7 +274,7 @@ fn fx9_item2_replay_uses_stored_inputs_not_chaos() {
     // Load golden to verify inputs were stored.
     let golden_path = dir.join(format!("scenario-chaos-{}.golden.json", scenario.bot.seed));
     let json = fs::read_to_string(&golden_path).unwrap();
-    let golden: bevy_swarm::golden::GoldenFile = serde_json::from_str(&json).unwrap();
+    let golden: bevy_playtest::golden::GoldenFile = serde_json::from_str(&json).unwrap();
 
     // FIX ITEM 2: GoldenFile.inputs should now contain structured
     // ReplayInput entries (not just strings), enabling proper replay.
@@ -309,7 +309,7 @@ fn fx9_item2_replay_uses_stored_inputs_not_chaos() {
 /// TEST: Float change within tol passes, outside fails with both values shown.
 #[test]
 fn fx9_item3_tolerance_applied_and_both_values_shown() {
-    use bevy_swarm::golden::diff_states;
+    use bevy_playtest::golden::diff_states;
 
     let tol = Tolerance {
         abs_tol: 0.1,
@@ -391,7 +391,7 @@ fn fx9_item4_determinism_precheck_before_golden_compare() {
     }
 }
 
-/// ITEM 5: BEVY_SWARM_UPDATE=golden rewrite
+/// ITEM 5: BEVY_PLAYTEST_UPDATE=golden rewrite
 ///
 /// BUG: Just sets env var, doesn't actually rewrite golden file.
 /// FIX: check_golden rewrites the golden file when update mode is enabled.
@@ -407,12 +407,12 @@ fn fx9_item5_update_mode_rewrites_golden() {
     let golden_path = dir.join(format!("scenario-chaos-{}.golden.json", scenario.bot.seed));
     let initial_digests = {
         let json = fs::read_to_string(&golden_path).unwrap();
-        let golden: bevy_swarm::golden::GoldenFile = serde_json::from_str(&json).unwrap();
+        let golden: bevy_playtest::golden::GoldenFile = serde_json::from_str(&json).unwrap();
         golden.digests.clone()
     };
 
     // Run check with the CHANGED game (speed=2 → diverges) and
-    // force_update=true (stands in for BEVY_SWARM_UPDATE=golden,
+    // force_update=true (stands in for BEVY_PLAYTEST_UPDATE=golden,
     // without the env-var race between parallel tests).
     let set = GoldenSet {
         scenarios: vec![(
@@ -426,7 +426,7 @@ fn fx9_item5_update_mode_rewrites_golden() {
 
     // The golden file must now hold the NEW digests (rewritten).
     let json = fs::read_to_string(&golden_path).unwrap();
-    let rewritten: bevy_swarm::golden::GoldenFile = serde_json::from_str(&json).unwrap();
+    let rewritten: bevy_playtest::golden::GoldenFile = serde_json::from_str(&json).unwrap();
     assert_ne!(
         rewritten.digests, initial_digests,
         "update mode must rewrite the golden with the diverged (current) digests"
@@ -491,7 +491,7 @@ fn fx9_item7_length_mismatch_sets_all_same_false() {
     // Load golden
     let golden_path = dir.join(format!("scenario-chaos-{}.golden.json", scenario.bot.seed));
     let json = fs::read_to_string(&golden_path).unwrap();
-    let mut golden: bevy_swarm::golden::GoldenFile = serde_json::from_str(&json).unwrap();
+    let mut golden: bevy_playtest::golden::GoldenFile = serde_json::from_str(&json).unwrap();
 
     // Corrupt the golden by truncating digests
     let original_len = golden.digests.len();

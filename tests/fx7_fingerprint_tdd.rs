@@ -3,7 +3,7 @@
 //! Tests written FIRST; each maps to a re-review checklist item.
 //! Mutations of the fixes must make the corresponding test FAIL.
 
-use bevy_swarm::fingerprint::{config_normalizer, Normalizer};
+use bevy_playtest::fingerprint::{config_normalizer, Normalizer};
 
 // ---------------------------------------------------------------------------
 // Item 1: merge_keys must merge ONLY messages containing the key
@@ -123,7 +123,7 @@ fn fx7_config_normalizer_reads_tests_swarm_config() {
 fn fx7_config_normalizer_missing_file_falls_back_to_default() {
     // Point at a cwd where no config exists: config_normalizer reads
     // conventions::config_path() (cwd-relative "tests/swarm/config.json").
-    let tmp = std::env::temp_dir().join("bevy_swarm_fx7_nocfg");
+    let tmp = std::env::temp_dir().join("bevy_playtest_fx7_nocfg");
     std::fs::create_dir_all(&tmp).unwrap();
     let cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&tmp).unwrap();
@@ -145,20 +145,20 @@ fn fx7_config_normalizer_missing_file_falls_back_to_default() {
 #[test]
 #[serial_test::serial]
 fn fx7_e2e_walker_panic_on_edge_one_fingerprint_across_seeds() {
-    use bevy_swarm::branch::ScenarioRunner;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::ScenarioRunner;
+    use bevy_playtest::scenario::Scenario;
 
     let _fixture_bug_guard = FixtureBugGuard::set(Some("panic_on_edge"));
 
-    let mut fps: Vec<bevy_swarm::fingerprint::Fingerprint> = vec![];
+    let mut fps: Vec<bevy_playtest::fingerprint::Fingerprint> = vec![];
     let mut saw_panic = false;
     for seed in [1u64, 2, 3] {
         let scen: Scenario = serde_json::from_str(&format!(
             r#"{{"bot":{{"type":"chaos","seed":{seed},"input_rate_hz":10}},"duration_s":6.0,"invariants":[],"deny_ambiguities":false,"single_threaded":true}}"#
         ))
         .unwrap();
-        let factory = || bevy_swarm::headless::headless_app(fixture_walker::WalkerGamePlugin)();
-        let runner = bevy_swarm::branch::InProcess { factory };
+        let factory = || bevy_playtest::headless::headless_app(fixture_walker::WalkerGamePlugin)();
+        let runner = bevy_playtest::branch::InProcess { factory };
         let rep = runner.run(&scen).unwrap();
         for v in &rep.violations {
             if v.rule == "panic" {
@@ -185,8 +185,8 @@ fn fx7_e2e_walker_panic_on_edge_one_fingerprint_across_seeds() {
 #[test]
 #[serial_test::serial]
 fn fx7_e2e_spawner_leak_two_entity_counts_one_fingerprint() {
-    use bevy_swarm::branch::ScenarioRunner;
-    use bevy_swarm::scenario::Scenario;
+    use bevy_playtest::branch::ScenarioRunner;
+    use bevy_playtest::scenario::Scenario;
 
     let _fixture_bug_guard = FixtureBugGuard::set(Some("leak"));
 
@@ -200,11 +200,11 @@ fn fx7_e2e_spawner_leak_two_entity_counts_one_fingerprint() {
     )
     .unwrap();
 
-    let factory = || bevy_swarm::headless::headless_app(fixture_spawner::SpawnerGamePlugin)();
-    let runner = bevy_swarm::branch::InProcess { factory };
+    let factory = || bevy_playtest::headless::headless_app(fixture_spawner::SpawnerGamePlugin)();
+    let runner = bevy_playtest::branch::InProcess { factory };
     // Two seeds: the leak fires with different per-run details (frames,
     // contexts) while remaining the SAME bug — fingerprints must collapse.
-    let mut leak_fps: Vec<bevy_swarm::fingerprint::Fingerprint> = vec![];
+    let mut leak_fps: Vec<bevy_playtest::fingerprint::Fingerprint> = vec![];
     let mut first_violations: Option<Vec<String>> = None;
     for seed in [42u64, 7] {
         let mut s = scen.clone();

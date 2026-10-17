@@ -2,15 +2,15 @@
 //!
 //! Provides:
 //! - `AutotestConfig`: single source of defaults with env overrides
-//!   (BEVY_SWARM_SEEDS, BEVY_SWARM_DURATION, BEVY_SWARM_THREADS)
+//!   (BEVY_PLAYTEST_SEEDS, BEVY_PLAYTEST_DURATION, BEVY_PLAYTEST_THREADS)
 //! - `autotest::<P>(game_plugin, config)`: headless multi-run harness
 //! - `AutotestReport`: schema_version, contract_tier, harness_mode, scope,
 //!   runs, failures, coverage, summary(), written to
-//!   `target/bevy_swarm/runs/<run-id>/report.json`
+//!   `target/bevy_playtest/runs/<run-id>/report.json`
 //!
 //! ## Quick Start
 //! ```no_run
-//! use bevy_swarm::autotest::{autotest, AutotestConfig};
+//! use bevy_playtest::autotest::{autotest, AutotestConfig};
 //!
 //! # use bevy::prelude::*;
 //! # #[derive(Clone, Default)]
@@ -36,11 +36,23 @@ use crate::scenario::Scenario;
 use crate::state::Coverage;
 
 /// Environment variable names for overrides.
-const ENV_SEEDS: &str = "BEVY_SWARM_SEEDS";
-const ENV_DURATION: &str = "BEVY_SWARM_DURATION";
-const ENV_THREADS: &str = "BEVY_SWARM_THREADS";
+const ENV_SEEDS: &str = "BEVY_PLAYTEST_SEEDS";
+const ENV_DURATION: &str = "BEVY_PLAYTEST_DURATION";
+const ENV_THREADS: &str = "BEVY_PLAYTEST_THREADS";
 /// smu: pin ONE exact seed (reproduction). Wins over ENV_SEEDS.
-const ENV_SEED: &str = "BEVY_SWARM_SEED";
+const ENV_SEED: &str = "BEVY_PLAYTEST_SEED";
+
+/// wyx: pre-rename aliases — BEVY_SWARM_* still honored if the new
+/// name isn't set (cheap backward compatibility for existing CI).
+fn env_override(new_name: &str) -> Option<String> {
+    match std::env::var(new_name) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            let legacy = new_name.replace("BEVY_PLAYTEST_", "BEVY_SWARM_");
+            std::env::var(&legacy).ok()
+        }
+    }
+}
 
 /// Configuration for `autotest()` — single source of defaults with
 /// environment overrides.
@@ -89,7 +101,7 @@ impl Default for AutotestConfig {
             max_failures: Some(10),
             gate: crate::issues::GateSerde::default(),
             base_scenario: default_chaos_scenario(),
-            output_dir: PathBuf::from("bevy_swarm/runs"),
+            output_dir: PathBuf::from("bevy_playtest/runs"),
         }
     }
 }
@@ -109,17 +121,17 @@ impl AutotestConfig {
     /// Load config with environment overrides applied.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Ok(seeds) = std::env::var(ENV_SEEDS) {
+        if let Some(seeds) = env_override(ENV_SEEDS).as_deref() {
             if let Ok(n) = seeds.parse::<u64>() {
                 cfg.num_seeds = n;
             }
         }
-        if let Ok(duration) = std::env::var(ENV_DURATION) {
+        if let Some(duration) = env_override(ENV_DURATION).as_deref() {
             if let Ok(d) = duration.parse::<f32>() {
                 cfg.duration_s = d;
             }
         }
-        if let Ok(threads) = std::env::var(ENV_THREADS) {
+        if let Some(threads) = env_override(ENV_THREADS).as_deref() {
             if let Ok(t) = threads.parse::<usize>() {
                 cfg.parallel = t;
             }
@@ -463,7 +475,7 @@ impl AutotestReport {
                 ));
             }
             out.push_str(&format!(
-                "  Repro: BEVY_SWARM_SEED={} cargo test --test <your swarm test>\n",
+                "  Repro: BEVY_PLAYTEST_SEED={} cargo test --test <your swarm test>\n",
                 run.seed
             ));
         }
@@ -530,32 +542,20 @@ where
     let start_iso = crate::conventions::iso_timestamp(start_ts);
 
     // FX4.5: apply environment overrides on top of the explicit config
-    // (BEVY_SWARM_SEEDS / _DURATION / _THREADS win when set).
+    // (BEVY_PLAYTEST_SEEDS / _DURATION / _THREADS win when set).
     let mut config = config;
-    if let Some(n) = std::env::var(ENV_SEEDS)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-    {
+    if let Some(n) = env_override(ENV_SEEDS).and_then(|v| v.parse::<u64>().ok()) {
         config.num_seeds = n;
     }
-    // smu: exact-seed pinning (BEVY_SWARM_SEED=N) — the repro path
-    // for `cargo swarm reproduce` and CI failure hints.
-    if let Some(seed) = std::env::var(ENV_SEED)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-    {
+    // smu: exact-seed pinning (BEVY_PLAYTEST_SEED=N) — the repro path
+    // for `cargo bevy-playtest reproduce` and CI failure hints.
+    if let Some(seed) = env_override(ENV_SEED).and_then(|v| v.parse::<u64>().ok()) {
         config.seeds = Some(vec![seed]);
     }
-    if let Some(d) = std::env::var(ENV_DURATION)
-        .ok()
-        .and_then(|v| v.parse::<f32>().ok())
-    {
+    if let Some(d) = env_override(ENV_DURATION).and_then(|v| v.parse::<f32>().ok()) {
         config.duration_s = d;
     }
-    if let Some(th) = std::env::var(ENV_THREADS)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
+    if let Some(th) = env_override(ENV_THREADS).and_then(|v| v.parse::<usize>().ok()) {
         config.parallel = th;
     }
 
@@ -966,7 +966,7 @@ fn write_report(
 
     // cj8.14 (E2): JUnit XML for CI dashboards, per U1 convention
     // runs/<run-id>/junit.xml.
-    let junit = report.to_junit("bevy_swarm.autotest");
+    let junit = report.to_junit("bevy_playtest.autotest");
     std::fs::write(run_dir.join("junit.xml"), junit)?;
 
     // Conventions §2: write a `last` pointer to the latest run.
@@ -1141,6 +1141,6 @@ mod tests {
             s.contains("[bounds_violation] Entity \"player\" translation.y = -15.3"),
             "{s}"
         );
-        assert!(s.contains("Repro: BEVY_SWARM_SEED=42"), "{s}");
+        assert!(s.contains("Repro: BEVY_PLAYTEST_SEED=42"), "{s}");
     }
 }

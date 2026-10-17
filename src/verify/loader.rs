@@ -165,7 +165,7 @@ fn violation_keeps_first_detail() {
 
 #[test]
 fn system_coverage_excludes_harness() {
-    // Harness-owned systems (bevy_swarm::) must be excluded from both
+    // Harness-owned systems (bevy_playtest::) must be excluded from both
     // executed and registered lists; fraction() reflects only game systems.
     let mut app = build_app_no_scoring();
     let before = crate::state::snapshot_systems(app.world_mut());

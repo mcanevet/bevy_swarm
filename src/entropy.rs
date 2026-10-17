@@ -8,14 +8,14 @@
 //! ## Usage
 //! Enable the `deterministic-entropy` feature and set `RUSTFLAGS`:
 //! ```bash
-//! RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_swarm/deterministic-entropy
+//! RUSTFLAGS='--cfg getrandom_backend="custom"' cargo test --features bevy_playtest/deterministic-entropy
 //! ```
-//! (planned: a `cargo swarm run` wrapper that sets both automatically).
+//! (planned: a `cargo bevy-playtest run` wrapper that sets both automatically).
 
 use std::cell::RefCell;
 
 /// Domain separator to avoid correlating entropy streams across
-/// different bevy_swarm subsystems.
+/// different bevy_playtest subsystems.
 const ENTROPY_DOMAIN: u64 = 0xBEAF_57A2;
 
 // Thread-local deterministic RNG stream. None = fallback to the
@@ -105,9 +105,9 @@ pub fn enter_run(seed: u64) {
     // entropy interception silently no-ops in that misconfiguration.
     #[cfg(all(feature = "deterministic-entropy", not(getrandom_backend = "custom")))]
     eprintln!(
-        "bevy_swarm: deterministic-entropy feature is enabled but the getrandom \
+        "bevy_playtest: deterministic-entropy feature is enabled but the getrandom \
          custom-backend cfg is NOT set. Rebuild with RUSTFLAGS='--cfg getrandom_backend=\"custom\"' \
-         (a planned `cargo swarm run` wrapper sets it automatically); entropy interception is inactive and runs are NOT \
+         (a planned `cargo bevy-playtest run` wrapper sets it automatically); entropy interception is inactive and runs are NOT \
          deterministic."
     );
     STREAM.with(|s| {

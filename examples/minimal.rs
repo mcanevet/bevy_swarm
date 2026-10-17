@@ -3,7 +3,7 @@
 //! Run: `cargo run --example minimal`
 
 use bevy::prelude::*;
-use bevy_swarm::prelude::*;
+use bevy_playtest::prelude::*;
 
 #[derive(Component)]
 struct Player;

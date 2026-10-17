@@ -2,9 +2,9 @@
 
 use bevy::ecs::reflect::AppTypeRegistry;
 use bevy::prelude::*;
-use bevy_swarm::contract::{Gameplay, TestApi, UserIntent};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{Gameplay, TestApi, UserIntent};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -12,7 +12,7 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app.insert_resource(TestApi::default());
     app.add_message::<UserIntent>();
@@ -197,7 +197,7 @@ fn equals_margin_is_negative_distance() {
     // le3.34 (RF44): exact equality now yields a strictly POSITIVE
     // epsilon margin (was 0.0 — made max(-0, rho_R) = -0, breaking
     // overall<0 iff fail).
-    assert!((r.per_invariant["exact"].0 - bevy_swarm::robustness::EPSILON).abs() < 1e-12);
+    assert!((r.per_invariant["exact"].0 - bevy_playtest::robustness::EPSILON).abs() < 1e-12);
     assert!((r.per_invariant["off_by_three"].0 - (-3.0)).abs() < 1e-9);
     assert!(
         rep.violations.iter().any(|v| v.rule == "off_by_three"),
@@ -535,7 +535,7 @@ fn run_text_expert(
     when_phase: &str,
     when_expect: &str,
     healing: bool,
-) -> bevy_swarm::driver::PlaytestReport {
+) -> bevy_playtest::driver::PlaytestReport {
     // Policy: WHEN phase == when_expect, REQUIRE healing == 1.
     let healing_num: f64 = if healing { 1.0 } else { 0.0 };
     let scen: Scenario = serde_json::from_str(&format!(

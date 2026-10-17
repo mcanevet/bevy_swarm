@@ -533,13 +533,13 @@ thread_local! {
 /// The returned report carries status, violations (rule names from the
 /// [`crate::rules`] registry), coverage, and the frame-indexed action
 /// log. Reports are also written to
-/// `target/bevy_swarm/runs/<run-id>/report.json`.
+/// `target/bevy_playtest/runs/<run-id>/report.json`.
 ///
 /// ## Example
 /// ```no_run
 /// use bevy::prelude::*;
-/// use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-/// use bevy_swarm::scenario::Scenario;
+/// use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+/// use bevy_playtest::scenario::Scenario;
 ///
 /// # fn game_app() -> App { unimplemented!() }
 /// let scenario: Scenario = serde_json::from_str(
@@ -1500,7 +1500,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
                      causes: a menu needs a click the monkey can't find; input is gated \
                      behind a state; broken headless build. Next step: run surface \
                      discovery to see what inputs your game actually reacts to: \
-                     `bevy_swarm::discover::discover_surface` (or `cargo swarm discover`) \
+                     `bevy_playtest::discover::discover_surface` (or `cargo bevy-playtest discover`) \
                      on your app builder, then target the discovered verbs in the \
                      scenario's bot config.",
                     total_actions,

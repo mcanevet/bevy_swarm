@@ -41,7 +41,7 @@ declared helpers (TestApi, IntentSurface, typed oracles), the report states
 `RemotePlugin`/`BrpClient` and the BRP HTTP verbs.
 
 **Important:** "Zero hand-written lines" (CLI scaffolding) is convenience, not a
-contract claim. Whether a human or `cargo swarm init` writes the test file, a new
+contract claim. Whether a human or `cargo bevy-playtest init` writes the test file, a new
 file enters the repo either way. The zero-contract guarantee is about *semantic*
 requirements (no TestApi, no IntentSurface), not about typing effort. Enabling
 a cargo feature at build time (e.g. `bevy_remote`) is a *thin build-time
@@ -53,9 +53,9 @@ as "zero contract".
 ## 1. Cargo Workspace
 
 **Members:**
-- `.` — the `bevy_swarm` library crate (publishable)
-- `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_swarm dependency)
-- `bevy_swarm_cli/` — optional CLI binary for scaffolding (`cargo swarm init`); convenience only, not part of the zero-contract guarantee
+- `.` — the `bevy_playtest` library crate (publishable)
+- `fixtures/*` — plain fixture games for black-box testing (zero-contract: no bevy_playtest dependency)
+- `cargo-bevy-playtest/` — optional CLI binary for scaffolding (`cargo bevy-playtest init`); convenience only, not part of the zero-contract guarantee
 
 **Shared dependencies** (single place to pin, per Z0):
 
@@ -67,15 +67,15 @@ serde_json = "1"
 ```
 
 **Publish policy:**
-- `bevy_swarm` — publishable
+- `bevy_playtest` — publishable
 - All other members — `publish = false`
 
 ## 2. Output Artifacts (Never Committed)
 
-All runtime outputs live under `target/bevy_swarm/`:
+All runtime outputs live under `target/bevy_playtest/`:
 
 ```
-target/bevy_swarm/
+target/bevy_playtest/
 ├── runs/
 │   ├── <run-id>/
 │   │   ├── report.json          # Main report (schema_version field)
@@ -92,9 +92,9 @@ target/bevy_swarm/
 **Run ID format:** `<UTC_yyyymmddThhmmssZ>-<16hex>` — 16 hex chars mix a
 process-local counter, nanoseconds and the PID (`conventions.rs`). It is
 UNIQUE per run, not a content hash of scenario+seed.
-(helper: `bevy_swarm::conventions::run_id`).
+(helper: `bevy_playtest::conventions::run_id`).
 
-**Build directory for special builds** (Z14 entropy cfg, R4): `target/bevy_swarm-build/`
+**Build directory for special builds** (Z14 entropy cfg, R4): `target/bevy_playtest-build/`
 (separate from the outputs; respects `CARGO_TARGET_DIR`).
 
 ## 3. Persisted, Reviewable Files (Committed by Humans)
@@ -120,7 +120,7 @@ tests/swarm/
 Every persisted file and every report has a top-level `schema_version: <int>`.
 
 - Readers reject newer versions with a clear error
-  (`bevy_swarm::conventions::SCHEMA_VERSION`).
+  (`bevy_playtest::conventions::SCHEMA_VERSION`).
 - `schema_version` stays **1** until the v0.2 release (RV v0.2 freezes it).
 - After that, breaking changes bump it.
 - Sub-reports (determinism, golden, sweep, run summary, mutation) are **embedded**
@@ -128,38 +128,38 @@ Every persisted file and every report has a top-level `schema_version: <int>`.
 - Report schema: [report-schema.json](report-schema.json) (owned by X1's schema test).
 - Scenario schema: [schema.json](schema.json) — GENERATED from `Scenario` via
   schemars; regenerate with
-  `BEVY_SWARM_UPDATE=schema cargo test --test schema_doc` (drift-guarded).
+  `BEVY_PLAYTEST_UPDATE=schema cargo test --test schema_doc` (drift-guarded).
 - Rule catalog: [rules.md](rules.md) — GENERATED from the `Rule` enum; regenerate
-  with `BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.
+  with `BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation`.
 
 ## 5. Update Mode
 
 ```bash
-BEVY_SWARM_UPDATE=golden,issues,model,perf,regressions,schema  # or 'all'
+BEVY_PLAYTEST_UPDATE=golden,issues,model,perf,regressions,schema  # or 'all'
 ```
 
 Environment variables read by the harness (full table):
 
 | Variable | Purpose |
 |---|---|
-| `BEVY_SWARM_UPDATE` | categories allowed to rewrite goldens/expectations |
-| `BEVY_SWARM_SEEDS` | override seed sweep range |
-| `BEVY_SWARM_SEED` | pin ONE exact seed for reproduction (wins over SEEDS) |
-| `BEVY_SWARM_DURATION` | override default scenario duration |
-| `BEVY_SWARM_THREADS` | parallel worker count for matrix runs |
-| `BEVY_SWARM_AGENT_TOKEN` | auth token for the agent feature |
+| `BEVY_PLAYTEST_UPDATE` | categories allowed to rewrite goldens/expectations |
+| `BEVY_PLAYTEST_SEEDS` | override seed sweep range |
+| `BEVY_PLAYTEST_SEED` | pin ONE exact seed for reproduction (wins over SEEDS) |
+| `BEVY_PLAYTEST_DURATION` | override default scenario duration |
+| `BEVY_PLAYTEST_THREADS` | parallel worker count for matrix runs |
+| `BEVY_PLAYTEST_AGENT_TOKEN` | auth token for the agent feature |
 | `SWARM_TRANSFORM_DESYNC_TOL` | tolerance for transform desync detection |
 
-- Without `BEVY_SWARM_UPDATE`, nothing under `tests/swarm/` or `docs/` is written by
+- Without `BEVY_PLAYTEST_UPDATE`, nothing under `tests/swarm/` or `docs/` is written by
   CHECK paths; `record_golden` is an explicit library call that always writes.
 - CI never commits changes (external side effects need user approval).
 - Insta-style semantics: only the listed categories update.
-- Helpers: `bevy_swarm::conventions::{parse_update_mode, can_update}`.
+- Helpers: `bevy_playtest::conventions::{parse_update_mode, can_update}`.
 
 ## 6. Rule-Name Registry
 
 - Registry doc: [rules.md](rules.md)
-- Code constants: `bevy_swarm::rules`
+- Code constants: `bevy_playtest::rules`
 
 Every oracle emits a registry constant; X2 expectations reference only registry
 names. `crash` is a report **status**, not a rule. Rules previously described only

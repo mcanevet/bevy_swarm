@@ -1,9 +1,9 @@
 //! I2: compiled invariants — load-time rejection, archetype-level counts.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::Gameplay;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::{Scenario, ScenarioError};
+use bevy_playtest::contract::Gameplay;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::{Scenario, ScenarioError};
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -11,7 +11,7 @@ fn build_app() -> App {
         bevy::MinimalPlugins,
         bevy::transform::TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app
 }

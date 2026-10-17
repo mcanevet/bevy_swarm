@@ -4,7 +4,7 @@ The authoritative per-rule reference is the generated catalog:
 
 → **[rules.md](rules.md)** — generated from `src/rules.rs` (`Rule`
 enum); regenerate with
-`BEVY_SWARM_UPDATE=schema cargo test --test docs_generation`.
+`BEVY_PLAYTEST_UPDATE=schema cargo test --test docs_generation`.
 
 Every rule documents: what it detects, false-positive modes, and its
 kind (`major` = gates run status, `informational` = reported only).

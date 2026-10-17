@@ -1,9 +1,9 @@
 //! Z7: generic error oracles — Bevy error handler, log capture, panic capture.
 
 use bevy::prelude::*;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::enums::PlaytestStatus;
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::enums::PlaytestStatus;
+use bevy_playtest::scenario::Scenario;
 
 fn scenario_json() -> Scenario {
     serde_json::from_str(r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[]}"#)
@@ -78,7 +78,7 @@ fn panic_violation_has_frame_gt_zero() {
     // Panic at frame 5.
     app.add_systems(
         Update,
-        |frame: Option<Res<bevy_swarm::state::PlaytestState>>| {
+        |frame: Option<Res<bevy_playtest::state::PlaytestState>>| {
             let f = frame.map(|s| s.frame).unwrap_or(0);
             if f == 5 {
                 panic!("mid-run panic");
@@ -145,7 +145,7 @@ fn parallel_runs_route_errors_independently() {
 /// rule, target) across 20 snapshots of a freshly-repopulated map.
 #[test]
 fn violation_snapshot_order_stable_across_repopulations() {
-    use bevy_swarm::state::Violations;
+    use bevy_playtest::state::Violations;
     let mut orders: Vec<Vec<String>> = Vec::new();
     for _ in 0..20 {
         let mut v = Violations::default();
@@ -233,7 +233,7 @@ fn log_events_captured_as_violations() {
     app.add_plugins(PlaytestPlugin);
     app.add_systems(
         Update,
-        |frame: Option<Res<bevy_swarm::state::PlaytestState>>| {
+        |frame: Option<Res<bevy_playtest::state::PlaytestState>>| {
             let f = frame.map(|s| s.frame).unwrap_or(0);
             if f == 3 {
                 bevy::log::error!("boom log");
@@ -276,7 +276,7 @@ fn planner_string_lt_rejected_at_load() {
         r#"{"bot":{"type":"planner","goals":{"kind":"primitive","path":"TestApi.game_phase","check":"gt","value":"menu","emit":[]}},"duration_s":0.1,"invariants":[]}"#,
     );
     let scenario = res.expect("parses");
-    let err = bevy_swarm::scenario::validate_scenario(&scenario)
+    let err = bevy_playtest::scenario::validate_scenario(&scenario)
         .expect_err("lt on a string must be rejected at load");
     assert!(
         err.to_string().contains("game_phase"),
@@ -293,7 +293,7 @@ fn invariant_string_ne_accepted() {
         r#"{"bot":{"type":"chaos","seed":1},"duration_s":0.1,"invariants":[{"name":"phase_not_menu","rule":"custom","path":"TestApi.game_phase","check":"ne","value":"menu"}]}"#,
     );
     let scenario = res.expect("parses");
-    bevy_swarm::scenario::validate_scenario(&scenario).expect("ne on strings is valid");
+    bevy_playtest::scenario::validate_scenario(&scenario).expect("ne on strings is valid");
 }
 
 /// Z7: sink dedupe groups repeated identical errors — 3 distinct
@@ -411,7 +411,7 @@ fn fps_floor_reports_informational() {
 /// LogPlugin::custom_layer — no racing set_global_default).
 #[test]
 fn le311_log_capture_with_game_logplugin() {
-    use bevy_swarm::headless::headless_app;
+    use bevy_playtest::headless::headless_app;
     // A trivial game plugin that logs an error every frame.
     #[derive(Clone, Default)]
     struct NoisyGame;
@@ -458,7 +458,7 @@ fn le311_sink_fingerprint_stable_across_durations() {
             r#"{{"bot":{{"type":"replay","inputs":[]}},"duration_s":{dur},"invariants":[]}}"#
         ))
         .unwrap();
-        let build = bevy_swarm::headless::headless_app(NoisyGame);
+        let build = bevy_playtest::headless::headless_app(NoisyGame);
         let mut app = build();
         let rep = run_scenario(&mut app, &sc).unwrap();
         let entry = rep
@@ -510,7 +510,7 @@ fn le311_suppressed_errors_surface_in_report() {
         r#"{"bot":{"type":"replay","inputs":[]},"duration_s":0.1,"invariants":[]}"#,
     )
     .unwrap();
-    let build = bevy_swarm::headless::headless_app(SuppressingGame);
+    let build = bevy_playtest::headless::headless_app(SuppressingGame);
     let mut app = build();
     let rep = run_scenario(&mut app, &sc).unwrap();
     assert!(
@@ -538,7 +538,7 @@ fn le311_reuse_after_rejected_run() {
             });
         }
     }
-    let build = bevy_swarm::headless::headless_app(NoisyGame);
+    let build = bevy_playtest::headless::headless_app(NoisyGame);
     let mut app = build();
     // Rejected #1: unknown reset kind (rejects BEFORE install).
     let bad: Scenario = serde_json::from_str(

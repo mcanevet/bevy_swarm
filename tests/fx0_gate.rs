@@ -22,9 +22,9 @@ use serial_test::serial;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_swarm::branch::{InProcess, ScenarioRunner};
-use bevy_swarm::contract::*;
-use bevy_swarm::harness::Scenario;
+use bevy_playtest::branch::{InProcess, ScenarioRunner};
+use bevy_playtest::contract::*;
+use bevy_playtest::harness::Scenario;
 use fixture_regression_pair::RegressionPairGamePlugin;
 use fixture_runner::{
     headless_app, RegressionPairAdapterPlugin, SpawnerAdapterPlugin, SpinnerAdapterPlugin,
@@ -81,16 +81,17 @@ fn clean_golden_dir(fixture: &str, name: &str, seed: u64, scenario_json: &str) -
     if let Some(dir) = MEMO.lock().unwrap().get(&key) {
         return dir.clone();
     }
-    let dir = std::env::temp_dir().join(format!("bevy_swarm_fx0_golden_{fixture}_{name}_{seed}"));
+    let dir =
+        std::env::temp_dir().join(format!("bevy_playtest_fx0_golden_{fixture}_{name}_{seed}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let scenario: bevy_swarm::scenario::Scenario =
+    let scenario: bevy_playtest::scenario::Scenario =
         serde_json::from_str(scenario_json).expect("parse scenario");
     let fixture_owned = fixture.to_string();
     let factory = move || build_app_for(&fixture_owned);
     // Clean run: FIXTURE_BUG unset.
     let _guard = FixtureBugGuard::set(None);
-    bevy_swarm::golden::record_golden(factory, &[scenario], &dir).expect("record clean golden");
+    bevy_playtest::golden::record_golden(factory, &[scenario], &dir).expect("record clean golden");
     let dir_str = dir.to_string_lossy().to_string();
     MEMO.lock().unwrap().insert(key, dir_str.clone());
     dir_str
@@ -143,7 +144,7 @@ fn build_scenario_json(fixture: &str, variant: &str, seed: u64) -> String {
 fn build_app_for(fixture: &str) -> App {
     let mut app = headless_app();
     app.add_plugins(TestConventionsPlugin);
-    app.add_plugins(bevy_swarm::driver::PlaytestPlugin);
+    app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
     match fixture {
         "spinner" => {
             app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
@@ -217,7 +218,7 @@ fn run_fixture(
     variant: &str,
     scenario_json: &str,
     enable_bug: bool,
-) -> bevy_swarm::driver::PlaytestReport {
+) -> bevy_playtest::driver::PlaytestReport {
     let scenario: Scenario = serde_json::from_str(scenario_json).expect("parse scenario");
     let fixture = fixture.to_string();
     let mut env_bug = None;
@@ -242,13 +243,13 @@ fn run_fixture(
     result.expect("run scenario")
 }
 
-fn violation_rules(report: &bevy_swarm::driver::PlaytestReport) -> Vec<String> {
+fn violation_rules(report: &bevy_playtest::driver::PlaytestReport) -> Vec<String> {
     report.violations.iter().map(|v| v.rule.clone()).collect()
 }
 
-fn check_clean_pass(report: &bevy_swarm::driver::PlaytestReport, seed: u64) -> Vec<String> {
+fn check_clean_pass(report: &bevy_playtest::driver::PlaytestReport, seed: u64) -> Vec<String> {
     let mut errors = Vec::new();
-    if report.status != bevy_swarm::enums::PlaytestStatus::Pass {
+    if report.status != bevy_playtest::enums::PlaytestStatus::Pass {
         errors.push(format!(
             "clean seed {} expected pass, got {:?}",
             seed, report.status
@@ -266,7 +267,7 @@ fn check_clean_pass(report: &bevy_swarm::driver::PlaytestReport, seed: u64) -> V
 }
 
 fn check_bug_signal(
-    report: &bevy_swarm::driver::PlaytestReport,
+    report: &bevy_playtest::driver::PlaytestReport,
     expect: &Value,
     seed: u64,
 ) -> Vec<String> {
@@ -276,9 +277,9 @@ fn check_bug_signal(
     let want_status = expect.get("status").and_then(|s| s.as_str());
     if let Some(want) = want_status {
         let got = match report.status {
-            bevy_swarm::enums::PlaytestStatus::Pass => "pass",
-            bevy_swarm::enums::PlaytestStatus::Fail => "fail",
-            bevy_swarm::enums::PlaytestStatus::Crash => "crash",
+            bevy_playtest::enums::PlaytestStatus::Pass => "pass",
+            bevy_playtest::enums::PlaytestStatus::Fail => "fail",
+            bevy_playtest::enums::PlaytestStatus::Crash => "crash",
         };
         if got != want {
             errors.push(format!(
@@ -287,7 +288,7 @@ fn check_bug_signal(
             ));
         }
     }
-    let violation_objects: Vec<&bevy_swarm::state::ViolationEntry> =
+    let violation_objects: Vec<&bevy_playtest::state::ViolationEntry> =
         report.violations.iter().collect();
     if let Some(must) = expect.get("must_report").and_then(|m| m.as_array()) {
         for entry in must {
@@ -587,7 +588,7 @@ fn fx0_bug_signals_do_not_fire_with_bug_disabled() {
 #[serial]
 #[test]
 fn fx0_autotest_coverage_nonzero() {
-    use bevy_swarm::autotest::{autotest, AutotestConfig};
+    use bevy_playtest::autotest::{autotest, AutotestConfig};
 
     let config = AutotestConfig::default();
     let report = autotest(WalkerGamePlugin, config).expect("autotest runs");

@@ -1,9 +1,9 @@
 //! FX6 B1: planner Select target resolution + violation on miss.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::Gameplay;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::Gameplay;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::scenario::Scenario;
 
 fn build_app() -> App {
     let mut app = App::new();
@@ -11,7 +11,7 @@ fn build_app() -> App {
         MinimalPlugins,
         TransformPlugin,
         PlaytestPlugin,
-        bevy_swarm::contract::TestConventionsPlugin,
+        bevy_playtest::contract::TestConventionsPlugin,
     ));
     app
 }

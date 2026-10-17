@@ -213,7 +213,7 @@ mod tests {
     use super::*;
 
     // Local crate-simulating components: names resolve to
-    // "bevy_swarm::game_types::tests::<Name>" — a "game" prefix here.
+    // "bevy_playtest::game_types::tests::<Name>" — a "game" prefix here.
     #[derive(Component)]
     struct PlayerHealth;
 
@@ -225,7 +225,7 @@ mod tests {
 
     fn types() -> GameTypes {
         GameTypes {
-            prefixes: vec!["bevy_swarm::game_types".to_string()],
+            prefixes: vec!["bevy_playtest::game_types".to_string()],
         }
     }
 
@@ -254,7 +254,7 @@ mod tests {
         // PlayerHealth has no Reflect derive; classification works via
         // ComponentInfo::name() anyway.
         let types = types();
-        assert!(types.is_game_type("bevy_swarm::game_types::PlayerHealth"));
+        assert!(types.is_game_type("bevy_playtest::game_types::PlayerHealth"));
         assert!(!types.is_game_type("bevy_transform::Transform"));
     }
 

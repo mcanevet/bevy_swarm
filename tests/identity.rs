@@ -1,10 +1,10 @@
 //! I1: identity index + deterministic StableId integration tests.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::Gameplay;
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin};
-use bevy_swarm::identity::{IdentityIndex, StableId};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::Gameplay;
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin};
+use bevy_playtest::identity::{IdentityIndex, StableId};
+use bevy_playtest::scenario::Scenario;
 
 fn scenario_json(bot: &str) -> Scenario {
     serde_json::from_str(bot).unwrap()
@@ -36,7 +36,7 @@ fn stable_ids_deterministic() {
         // Mid-run spawner.
         app.add_systems(
             Update,
-            |mut commands: Commands, frame: Res<bevy_swarm::harness::PlaytestState>| {
+            |mut commands: Commands, frame: Res<bevy_playtest::harness::PlaytestState>| {
                 if frame.frame == 3 {
                     commands.spawn((Gameplay, Name::new("MidRun"), Transform::default()));
                 }
@@ -76,9 +76,9 @@ fn replay_select_unnamed_via_stable_id() {
         scenario_json(r#"{"bot":{"type":"chaos","seed":11},"duration_s":0.2,"invariants":[]}"#);
 
     let mut app = build_app();
-    app.add_plugins(bevy_swarm::contract::TestConventionsPlugin);
-    app.insert_resource(bevy_swarm::contract::IntentSurface::new(vec![
-        bevy_swarm::contract::SurfaceVariant::Select,
+    app.add_plugins(bevy_playtest::contract::TestConventionsPlugin);
+    app.insert_resource(bevy_playtest::contract::IntentSurface::new(vec![
+        bevy_playtest::contract::SurfaceVariant::Select,
     ]));
     app.add_systems(Startup, |mut commands: Commands| {
         commands.spawn((Gameplay, Transform::default())); // unnamed only
@@ -86,7 +86,7 @@ fn replay_select_unnamed_via_stable_id() {
     let rep = run_scenario(&mut app, &scenario).unwrap();
 
     // Find select intents in the audit log.
-    let selects: Vec<&bevy_swarm::contract::ActionEntry> = rep
+    let selects: Vec<&bevy_playtest::contract::ActionEntry> = rep
         .action_log
         .iter()
         .filter(|e| e.action == "intent:select")
@@ -109,7 +109,7 @@ fn replay_select_unnamed_via_stable_id() {
 #[test]
 fn name_index_tracks_rename_and_despawn() {
     let mut app = build_app();
-    use bevy_swarm::contract::TestConventionsPlugin;
+    use bevy_playtest::contract::TestConventionsPlugin;
     app.add_plugins(TestConventionsPlugin);
 
     let world = app.world_mut();
@@ -149,7 +149,7 @@ fn index_lookup_matches_scan() {
     };
 
     let mut app = build_app();
-    use bevy_swarm::contract::TestConventionsPlugin;
+    use bevy_playtest::contract::TestConventionsPlugin;
     app.add_plugins(TestConventionsPlugin);
     let world = app.world_mut();
 
@@ -212,7 +212,7 @@ fn fx6_i1_second_run_no_stable_id_collision() {
     // Second run on the same App: entities existing at reset (from the
     // first run) plus entities spawned mid-second-run must all carry
     // DISTINCT StableIds, and by_name lookups must survive the reset.
-    use bevy_swarm::identity::{IdentityIndex, StableId};
+    use bevy_playtest::identity::{IdentityIndex, StableId};
 
     let mut app = build_app();
     app.add_systems(Startup, |mut commands: Commands| {
@@ -222,7 +222,7 @@ fn fx6_i1_second_run_no_stable_id_collision() {
     // Mid-run spawner (active in BOTH runs).
     app.add_systems(
         Update,
-        |mut commands: Commands, frame: Res<bevy_swarm::harness::PlaytestState>| {
+        |mut commands: Commands, frame: Res<bevy_playtest::harness::PlaytestState>| {
             if frame.frame == 3 {
                 commands.spawn((Gameplay, Name::new("MidRun"), Transform::default()));
             }
@@ -265,7 +265,7 @@ fn fx6_i1_second_run_no_stable_id_collision() {
 #[test]
 fn fx6_i1_reinsert_restores_by_name_and_advances_next_stable() {
     // Demonstrates the bug: reset() clears by_name, so replay by name fails.
-    use bevy_swarm::identity::IdentityIndex;
+    use bevy_playtest::identity::IdentityIndex;
 
     let mut app = build_app();
     app.add_systems(Startup, |mut commands: Commands| {

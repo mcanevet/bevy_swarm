@@ -1,14 +1,14 @@
 //! Z1 (swarm-m2h.2, consolidated amendment 2): artifact-level tier
 //! fidelity. The STANDALONE fixture crate `fixture_lone` (no adapter
-//! plugin, no bevy_swarm dep) is run at each tier; report.json must
+//! plugin, no bevy_playtest dep) is run at each tier; report.json must
 //! carry contract_tier and an ACCURATE unchecked scope. Adding each
 //! contract piece moves the tier; inactive oracle families are listed
 //! with reasons.
 
 use bevy::prelude::*;
-use bevy_swarm::contract::{ContractTier, IntentSurface, SurfaceVariant, TestConventionsPlugin};
-use bevy_swarm::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::contract::{ContractTier, IntentSurface, SurfaceVariant, TestConventionsPlugin};
+use bevy_playtest::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
+use bevy_playtest::scenario::Scenario;
 
 fn run_matrix(app: &mut App) -> PlaytestReport {
     let scenario: Scenario = serde_json::from_str(
@@ -138,7 +138,7 @@ fn matrix_observable_signal() {
     // component (fixture_lone::Gameplay is NOT the harness marker) —
     // spawn a harness-tagged entity to confirm Observable detection.
     app.world_mut()
-        .spawn((Name::new("Tagged"), bevy_swarm::contract::Gameplay));
+        .spawn((Name::new("Tagged"), bevy_playtest::contract::Gameplay));
     let report = run_matrix(&mut app);
     assert_eq!(report.scope.tier, Some(ContractTier::Observable));
 }

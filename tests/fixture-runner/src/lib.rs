@@ -1,7 +1,7 @@
 //! Fixture runner: adapter plugins + headless app builder + report writer
 //!
 //! Adapter tier (temporary until zero-contract lands in v0.3):
-//! adapters BRIDGE bevy_swarm's contract to a fixture's own types — they
+//! adapters BRIDGE bevy_playtest's contract to a fixture's own types — they
 //! tag the fixture's entities as Gameplay and translate UserIntent into
 //! the fixture's native messages. They NEVER reimplement game behavior:
 //! the fixture's own systems remain the code under test.
@@ -10,8 +10,8 @@
 //! scaffold "zero".
 
 use bevy::prelude::*;
-use bevy_swarm::contract::*;
-use bevy_swarm::conventions;
+use bevy_playtest::contract::*;
+use bevy_playtest::conventions;
 use std::fs;
 
 /// Minimal headless app builder for fixtures (v0.2; Z2 replaces with real
@@ -145,7 +145,7 @@ impl Plugin for TurnBasedAdapterPlugin {
         );
         // FX1: game-owned resources (Score) must count as liveness —
         // the fixture keeps ALL state in resources.
-        app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
+        app.insert_resource(bevy_playtest::game_types::GameTypes::from_plugin::<
             fixture_turn_based::TurnBasedGamePlugin,
         >());
         // FX2: expose Score as TestApi.score (the checkop_boundary
@@ -153,7 +153,7 @@ impl Plugin for TurnBasedAdapterPlugin {
         app.add_systems(
             bevy::app::Update,
             |score: Res<fixture_turn_based::Score>,
-             mut api: ResMut<bevy_swarm::contract::TestApi>| {
+             mut api: ResMut<bevy_playtest::contract::TestApi>| {
                 // FX1: value-aware write so dead_verb can fire when
                 // Score genuinely stops changing (softlock).
                 if api.score != score.0 as i64 {
@@ -178,7 +178,7 @@ impl Plugin for RegressionPairAdapterPlugin {
             commands.spawn((Gameplay, Transform::default()));
         });
         // FX1: game-owned resources (Damage) count as liveness.
-        app.insert_resource(bevy_swarm::game_types::GameTypes::from_plugin::<
+        app.insert_resource(bevy_playtest::game_types::GameTypes::from_plugin::<
             fixture_regression_pair::RegressionPairGamePlugin,
         >());
     }
@@ -189,7 +189,7 @@ impl Plugin for RegressionPairAdapterPlugin {
 // ============================================================================
 
 pub fn write_report(
-    report: &bevy_swarm::driver::PlaytestReport,
+    report: &bevy_playtest::driver::PlaytestReport,
     run_id: &str,
 ) -> std::path::PathBuf {
     let output_dir = conventions::runs_dir().join(run_id);

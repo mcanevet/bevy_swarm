@@ -304,7 +304,7 @@ fn collect_gameplay_components(
         // is not game state, harness markers/ids would add noise.
         if full_path.starts_with("bevy_")
             || full_path.starts_with("bevy::")
-            || full_path.starts_with("bevy_swarm")
+            || full_path.starts_with("bevy_playtest")
         {
             continue;
         }

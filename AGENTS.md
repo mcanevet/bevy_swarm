@@ -44,8 +44,8 @@ bd dolt push          # Push beads data to remote
 
 ```bash
 cargo build -p fixture-runner  # REQUIRED before acceptance tests
-cargo test -p bevy_swarm --lib # Unit tests
-cargo test -p bevy_swarm --test fx0_gate # Gate integrity tests
+cargo test -p bevy_playtest --lib # Unit tests
+cargo test -p bevy_playtest --test fx0_gate # Gate integrity tests
 cargo test --workspace --all-features # Full battery (end of bead)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --check
@@ -56,7 +56,7 @@ cargo fmt --check
 
 ## Project-Specific Guidelines
 
-- **Zero-contract fixtures:** Games under `fixtures/*` have NO bevy_swarm
+- **Zero-contract fixtures:** Games under `fixtures/*` have NO bevy_playtest
   dependency — they are pure Bevy apps exercising the harness.
 - **Acceptance tests:** Always run `cargo build -p fixture-runner` before
   `cargo test --test acceptance` (stale binary causes misleading failures).

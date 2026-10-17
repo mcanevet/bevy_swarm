@@ -4,8 +4,8 @@ Record and compare per-frame state digests to detect gameplay
 regressions across versions.
 
 ```rust,no_run
-use bevy_swarm::golden::{record_golden, check_golden, GoldenSet, Tolerance};
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::golden::{record_golden, check_golden, GoldenSet, Tolerance};
+use bevy_playtest::scenario::Scenario;
 use bevy::prelude::App;
 
 # fn main() {
@@ -20,9 +20,9 @@ assert!(report.all_same(), "no regressions");
 # }
 ```
 
-- **Approval workflow**: Set `BEVY_SWARM_UPDATE=golden` (or `all`) to
+- **Approval workflow**: Set `BEVY_PLAYTEST_UPDATE=golden` (or `all`) to
   rewrite golden files; commit the diff for review.
-  `BEVY_SWARM_UPDATE` unset means read-only.
+  `BEVY_PLAYTEST_UPDATE` unset means read-only.
 - **Determinism required**: Run `check_determinism` first;
   nondeterministic scenarios are flagged.
 - **Tolerance**: float tolerance smooths timing/platform noise;

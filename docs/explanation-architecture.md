@@ -5,7 +5,7 @@ and how each failure-detection mechanism works.*
 
 ## The one-paragraph model
 
-bevy_swarm is pre/post-processing around a Bevy `App` — not a
+bevy_playtest is pre/post-processing around a Bevy `App` — not a
 separate process, not a driver outside your game. Per frame:
 
 ```mermaid,ignore
@@ -123,4 +123,4 @@ debugger, safe on loopback only.
 | Autotest aggregation | `src/autotest.rs` |
 | Golden snapshots | `src/golden.rs` |
 | Rule registry | `src/rules.rs` (generates `docs/rules.md`) |
-| CLI (init/run/validate/report/reproduce) | `bevy_swarm_cli/` |
+| CLI (init/run/validate/report/reproduce) | `bevy_playtest_cli/` |

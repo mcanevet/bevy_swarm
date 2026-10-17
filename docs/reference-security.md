@@ -11,7 +11,7 @@ transport is plaintext.
   explicitly.
 - **Default-deny**: a token is ALWAYS required for `playtest/*`
   methods. Configure one via `AgentConfig::token` or the
-  `BEVY_SWARM_AGENT_TOKEN` env var. When neither is set, a
+  `BEVY_PLAYTEST_AGENT_TOKEN` env var. When neither is set, a
   cryptographically random session token is generated and printed
   to stderr at startup (eprintln, so it survives even when the
   plugin is added before `LogPlugin`).

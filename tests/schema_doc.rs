@@ -1,14 +1,14 @@
 //! swarm-6k5: docs/schema.json is GENERATED from the `Scenario` struct
 //! (schemars), committed, never hand-edited.
 //!
-//! - Regenerate with: `BEVY_SWARM_UPDATE=schema cargo test --test schema_doc`
+//! - Regenerate with: `BEVY_PLAYTEST_UPDATE=schema cargo test --test schema_doc`
 //! - The drift test fails when `Scenario` changes without regenerating.
 //! - Real sample scenarios from fixtures validate against the schema.
 
-use bevy_swarm::scenario::Scenario;
+use bevy_playtest::scenario::Scenario;
 
 fn schema_json() -> serde_json::Value {
-    let schema = schemars::schema_for!(bevy_swarm::scenario::Scenario);
+    let schema = schemars::schema_for!(bevy_playtest::scenario::Scenario);
     serde_json::to_value(&schema).expect("serialize schema")
 }
 
@@ -84,7 +84,7 @@ fn schema_validates_sample_scenarios() {
 
 /// Drift guard: docs/schema.json equals the schemars output for
 /// `Scenario`. When this fails, regenerate with
-/// `BEVY_SWARM_UPDATE=schema cargo test --test schema_doc`.
+/// `BEVY_PLAYTEST_UPDATE=schema cargo test --test schema_doc`.
 #[test]
 fn schema_doc_is_generated() {
     let generated = schema_json();
@@ -96,14 +96,14 @@ fn schema_doc_is_generated() {
         return;
     }
 
-    if std::env::var("BEVY_SWARM_UPDATE").is_ok() {
+    if std::env::var("BEVY_PLAYTEST_UPDATE").is_ok() {
         let pretty = serde_json::to_string_pretty(&generated).unwrap();
         std::fs::write(schema_path(), pretty).expect("write docs/schema.json");
         panic!("docs/schema.json REGENERATED — commit the diff");
     }
     panic!(
         "docs/schema.json is stale: the Scenario struct changed without \
-         regenerating. Run: BEVY_SWARM_UPDATE=schema cargo test --test schema_doc"
+         regenerating. Run: BEVY_PLAYTEST_UPDATE=schema cargo test --test schema_doc"
     );
 }
 
