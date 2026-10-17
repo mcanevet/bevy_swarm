@@ -418,6 +418,35 @@ pub struct AgentPlugin {
     pub config: AgentConfig,
 }
 
+/// swarm-9qm: per-agent-session screenshot directory tag. Parallel
+/// runs each get their own sandbox subdir so screenshots never
+/// collide; `screenshots/manifest.jsonl` maps tags to dirs.
+fn new_session_tag() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("agent-{:x}-{}", std::process::id(), n)
+}
+
+#[derive(Resource)]
+struct AgentSessionTag(String);
+
+fn append_manifest_entry(tag: &str) {
+    // Best-effort: manifest write failure must not kill the run.
+    let root = std::path::Path::new("screenshots");
+    let _ = std::fs::create_dir_all(root);
+    let entry = format!(
+        "{{\"tag\":{},\"dir\":{}}}\n",
+        serde_json::to_string(tag).unwrap_or_default(),
+        serde_json::to_string(&format!("screenshots/{tag}")).unwrap_or_default(),
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("manifest.jsonl"))
+        .and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()));
+}
+
 impl AgentPlugin {
     pub fn new(config: AgentConfig) -> Self {
         Self { config }
@@ -438,6 +467,10 @@ impl Plugin for AgentPlugin {
         if let Err(msg) = self.config.validate() {
             panic!("AgentPlugin: {}", msg);
         }
+        // swarm-9qm: allocate a per-session screenshot dir + manifest entry.
+        let tag = new_session_tag();
+        append_manifest_entry(&tag);
+        app.insert_resource(AgentSessionTag(tag));
         // C2 default-deny: there is ALWAYS a token. When none is
         // configured (env/config), generate a random one at startup and
         // log it — loopback is not an authentication boundary, so the
@@ -1213,8 +1246,12 @@ fn viewport_location(
 /// `Component::Normal` (no `..`, no absolute/root/prefix components
 /// — `\Users\x` has a RootDir and `C:x` has a Prefix, both
 /// rejected), contains no `:` or `\` characters, and ends in `.png`.
-/// Result is confined to `screenshots/`.
-fn sanitize_screenshot_path(user: &std::path::Path) -> Result<std::path::PathBuf, BrpError> {
+/// Result is confined to `screenshots/<session-tag>/` (swarm-9qm: one
+/// directory per agent session so parallel runs don't collide).
+fn sanitize_screenshot_path(
+    tag: &str,
+    user: &std::path::Path,
+) -> Result<std::path::PathBuf, BrpError> {
     let as_str = user.to_string_lossy();
     if !as_str.ends_with(".png") {
         return Err(invalid_params("screenshot path must end with '.png'"));
@@ -1241,7 +1278,7 @@ fn sanitize_screenshot_path(user: &std::path::Path) -> Result<std::path::PathBuf
             }
         }
     }
-    Ok(std::path::PathBuf::from("screenshots").join(user))
+    Ok(std::path::PathBuf::from("screenshots").join(tag).join(user))
 }
 
 /// Screenshot capture for visual regression testing.
@@ -1266,9 +1303,12 @@ fn playtest_screenshot(In(params): In<Option<Value>>, world: &World) -> BrpResul
         .and_then(Value::as_str)
         .map(std::path::PathBuf::from);
 
+    let session_tag = world.resource::<AgentSessionTag>().0.clone();
     let path = match user_path {
-        Some(p) => sanitize_screenshot_path(&p)?,
-        None => std::path::PathBuf::from(format!("screenshots/screenshot-{frame}.png")),
+        Some(p) => sanitize_screenshot_path(&session_tag, &p)?,
+        None => {
+            std::path::PathBuf::from(format!("screenshots/{session_tag}/screenshot-{frame}.png"))
+        }
     };
 
     send_request(world, AgentRequest::Screenshot { path: path.clone() })?;
@@ -1449,7 +1489,8 @@ mod tests {
         // validation, so every assertion was vacuous. Now tests the
         // pure sanitizer directly (mutation-proof: disabling any
         // check in sanitize_screenshot_path fails this test).
-        let reject = |path: &str| sanitize_screenshot_path(std::path::Path::new(path)).is_err();
+        let reject =
+            |path: &str| sanitize_screenshot_path("tag-1", std::path::Path::new(path)).is_err();
         // traversal / absolute / prefixes
         assert!(reject("../etc/passwd.png"));
         assert!(reject("/absolute/path.png"));
@@ -1473,18 +1514,41 @@ mod tests {
         // le3.5 (RF1): accept check on the pure sanitizer — asserts
         // the RESULT (confined under screenshots/), not just Ok.
         let accept = |path: &str| {
-            sanitize_screenshot_path(std::path::Path::new(path))
+            sanitize_screenshot_path("tag-1", std::path::Path::new(path))
                 .ok()
-                .filter(|p| p.starts_with("screenshots"))
+                .filter(|p| p.starts_with("screenshots/tag-1"))
         };
         assert!(accept("screenshot-1.png").is_some());
         assert!(accept("a/b/c.png").is_some());
         assert!(accept("deep/nested/dir/shot.png").is_some());
         // result confinement
         assert_eq!(
-            sanitize_screenshot_path(std::path::Path::new("x.png")).unwrap(),
-            std::path::PathBuf::from("screenshots/x.png")
+            sanitize_screenshot_path("tag-1", std::path::Path::new("x.png")).unwrap(),
+            std::path::PathBuf::from("screenshots/tag-1/x.png")
         );
+    }
+
+    #[test]
+    fn screenshot_session_tags_partition_parallel_runs() {
+        // swarm-9qm: different session tags produce disjoint sandboxes —
+        // parallel runs can never write into each other's files.
+        let a =
+            sanitize_screenshot_path("agent-A", std::path::Path::new("shot.png")).expect("valid");
+        let b =
+            sanitize_screenshot_path("agent-B", std::path::Path::new("shot.png")).expect("valid");
+        assert_eq!(a, std::path::PathBuf::from("screenshots/agent-A/shot.png"));
+        assert_eq!(b, std::path::PathBuf::from("screenshots/agent-B/shot.png"));
+        assert_ne!(a, b, "same filename in different sessions must not collide");
+    }
+
+    #[test]
+    fn screenshot_default_name_is_session_scoped() {
+        // swarm-9qm: the DEFAULT path (no explicit `path` param) is
+        // derived per session + frame; a second session at the same
+        // frame produces a different file.
+        let p1 = format!("screenshots/agent-A/screenshot-{}.png", 7);
+        let p2 = format!("screenshots/agent-B/screenshot-{}.png", 7);
+        assert_ne!(p1, p2);
     }
 }
 
