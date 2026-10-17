@@ -1,6 +1,8 @@
 //! Branch testing: run variant scenarios, compare reports.
 
-use crate::driver::{check_scenario_determinism, run_scenario, PlaytestReport};
+use crate::driver::{
+    check_scenario_determinism, check_scenario_golden, run_scenario, PlaytestReport,
+};
 use crate::scenario::{Scenario, ScenarioError};
 use bevy::app::App;
 
@@ -133,6 +135,15 @@ fn run_impl<F: Fn() -> App + Sync>(
             // plugin-build draws are seeded.
             crate::entropy::enter_run(scenario.bot.seed);
             let mut app = (factory)();
+            // swarm-s5z: when comparing to golden, capture per-frame
+            // digests (see the non-entropy run_impl twin).
+            if scenario.compare_golden.is_some() {
+                app.insert_resource(crate::determinism::StateTrace {
+                    with_snapshots: false,
+                    stop_after: None,
+                    digests: vec![],
+                });
+            }
             let report = match run_scenario(&mut app, scenario) {
                 Ok(report) if scenario.check_determinism.is_some() => {
                     // swarm-kpl: opt-in cross-run determinism check —
@@ -143,6 +154,9 @@ fn run_impl<F: Fn() -> App + Sync>(
                 }
                 other => other,
             };
+            // swarm-s5z: opt-in golden-trajectory comparison on the
+            // SAME run (no extra runs — digests come from the report).
+            let report = report.map(|r| check_scenario_golden(scenario, r));
             crate::entropy::exit_run();
             report
         })
@@ -159,12 +173,22 @@ fn run_impl<F: Fn() -> App + Sync>(
     scenario: &Scenario,
 ) -> Result<PlaytestReport, ScenarioError> {
     let mut app = (factory)();
+    // swarm-s5z: when comparing to golden, capture per-frame digests.
+    if scenario.compare_golden.is_some() {
+        app.insert_resource(crate::determinism::StateTrace {
+            with_snapshots: false,
+            stop_after: None,
+            digests: vec![],
+        });
+    }
     let report = run_scenario(&mut app, scenario)?;
-    Ok(if scenario.check_determinism.is_some() {
+    let report = if scenario.check_determinism.is_some() {
         check_scenario_determinism(factory, scenario, report)
     } else {
         report
-    })
+    };
+    // swarm-s5z: opt-in golden-trajectory comparison (same run).
+    Ok(check_scenario_golden(scenario, report))
 }
 
 /// Run a matrix of scenarios in PARALLEL — one freshly-spawned scoped

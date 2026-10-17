@@ -40,6 +40,14 @@ pub struct TypedExpectation {
     /// Regressions carry arbitrary metadata — allowed explicitly.
     #[serde(default)]
     pub metadata: Option<Value>,
+    /// le3.37 (RF47): opt-in golden-trajectory comparison. The
+    /// expectation's compare_golden path is passed through to the
+    /// scenario, which triggers the post-run golden check.
+    #[serde(default)]
+    pub compare_golden: Option<String>,
+    /// Scenario name (golden entry key when compare_golden is set).
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]

@@ -1653,6 +1653,95 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     })
 }
 
+/// Z11/swarm-s5z: post-run golden-trajectory comparison. When a
+/// scenario sets `compare_golden: Some(dir)`, compare the run's
+/// per-frame state digests against the recorded golden entry
+/// (`scenario-{name}-{seed}`) and report `golden_diverged` on the
+/// first differing frame or a digest count mismatch. Mirrors
+/// `check_scenario_determinism` (returns the base report with the
+/// violation appended and status recomputed).
+pub fn check_scenario_golden(scenario: &Scenario, base: PlaytestReport) -> PlaytestReport {
+    let Some(dir) = scenario.compare_golden.as_deref() else {
+        return base;
+    };
+    let mut report = base;
+    let mut fail = |detail: String| {
+        report.violations.push(crate::state::ViolationEntry {
+            rule: crate::rules::Rule::GoldenDiverged.to_string(),
+            target: "golden_trajectory".to_string(),
+            first_frame: 0,
+            last_frame: 0,
+            count: 1,
+            detail: detail.clone(),
+            last_detail: detail,
+            fingerprint: None,
+            fingerprint_scheme: 1,
+        });
+    };
+    let golden_set = match crate::golden::GoldenSet::load(dir) {
+        Ok(set) => set,
+        Err(e) => {
+            fail(format!("golden set at '{}' could not be loaded: {e}", dir));
+            report.status = crate::enums::PlaytestStatus::Fail;
+            return report;
+        }
+    };
+    let name = scenario.name.clone().unwrap_or_default();
+    let entry_name = format!(
+        "scenario-{}-{}",
+        crate::golden::sanitize_entry_name(&name),
+        scenario.bot.seed
+    );
+    let golden_path = golden_set.dir.join(format!("{entry_name}.golden.json"));
+    let Ok(json) = std::fs::read_to_string(&golden_path) else {
+        fail(format!(
+            "no golden entry for '{entry_name}' in '{}' (scenario must set `name`)",
+            dir
+        ));
+        report.status = crate::enums::PlaytestStatus::Fail;
+        return report;
+    };
+    let Ok(golden) = serde_json::from_str::<crate::golden::GoldenFile>(&json) else {
+        fail(format!("golden entry '{entry_name}' is not valid JSON"));
+        report.status = crate::enums::PlaytestStatus::Fail;
+        return report;
+    };
+    let current: Vec<String> = report
+        .state_trace
+        .iter()
+        .flatten()
+        .map(|d| format!("{:016x}", d.hash))
+        .collect();
+    if current.len() != golden.digests.len() {
+        fail(format!(
+            "digest count mismatch: golden {} frames, current {} frames",
+            golden.digests.len(),
+            current.len()
+        ));
+    } else {
+        let mut first_diff: Option<u64> = None;
+        for (idx, (stored, cur)) in golden.digests.iter().zip(current.iter()).enumerate() {
+            if stored != cur {
+                first_diff = Some(idx as u64);
+                break;
+            }
+        }
+        if let Some(frame) = first_diff {
+            fail(format!(
+                "state digest diverged from golden at frame {frame}"
+            ));
+        }
+    }
+    if report
+        .violations
+        .iter()
+        .any(|v| v.rule == crate::rules::Rule::GoldenDiverged.to_string())
+    {
+        report.status = crate::enums::PlaytestStatus::Fail;
+    }
+    report
+}
+
 /// A4/swarm-kpl: post-run determinism check. When a scenario sets
 /// `check_determinism: Some(N)`, run it N times (N >= 2) on FRESH Apps
 /// from `app_builder`, compare per-frame state digests, and report the
