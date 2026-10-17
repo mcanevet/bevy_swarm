@@ -29,7 +29,7 @@ repository = "https://github.com/mcanevet/bevy_playtest"
 homepage = "https://github.com/mcanevet/bevy_playtest"
 
 [workspace.dependencies]
-bevy = { version = "0.20.0", default-features = false }
+bevy = { version = ">=0.19, <0.21", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
@@ -86,12 +86,12 @@ schemars = "1.2.3"
 # A consumer building a winit-enabled game with bevy_playtest
 # default-features=false enables `passthrough-winit` so
 # headless_platform() can reference (and disable) WinitPlugin.
-bevy_winit = { version = "0.20", optional = true }
-bevy_render = { version = "0.20", optional = true, default-features = false }
-bevy_audio = { version = "0.20", optional = true, default-features = false }
-bevy_gilrs = { version = "0.20", optional = true, default-features = false }
+bevy_winit = { version = ">=0.19, <0.21", optional = true }
+bevy_render = { version = ">=0.19, <0.21", optional = true, default-features = false }
+bevy_audio = { version = ">=0.19, <0.21", optional = true, default-features = false }
+bevy_gilrs = { version = ">=0.19, <0.21", optional = true, default-features = false }
 # Z10: for disabling render-family/ui-widget plugins in headless_platform.
-bevy_ui_widgets = { version = "0.20", optional = true, default-features = false }
+bevy_ui_widgets = { version = ">=0.19, <0.21", optional = true, default-features = false }
 
 [features]
 default = ["render", "audio", "gamepad"]

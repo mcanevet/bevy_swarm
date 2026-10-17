@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::compat::ecs::{OnAdd, OnDiscard, OnInsert, OnRemove};
 use crate::contract::Gameplay;
 
 /// Deterministic identity for Gameplay entities: assigned in insertion
@@ -107,7 +108,7 @@ impl IdentityIndex {
 
 /// Observer: Gameplay added -> assign StableId + index.
 pub(crate) fn on_add_gameplay(
-    event: On<Add<Gameplay>>,
+    event: OnAdd<'_, '_, Gameplay>,
     mut commands: Commands,
     mut idx: ResMut<IdentityIndex>,
     names: Query<&Name>,
@@ -124,7 +125,7 @@ pub(crate) fn on_add_gameplay(
 
 /// Observer: Gameplay removed/despawned -> unindex.
 pub(crate) fn on_remove_gameplay(
-    event: On<Remove<Gameplay>>,
+    event: OnRemove<'_, '_, Gameplay>,
     mut idx: ResMut<IdentityIndex>,
     ids: Query<&StableId>,
 ) {
@@ -136,7 +137,7 @@ pub(crate) fn on_remove_gameplay(
 
 /// Observer: Name added -> index (entity must already have a StableId).
 pub(crate) fn on_add_name(
-    event: On<Add<Name>>,
+    event: OnAdd<'_, '_, Name>,
     mut idx: ResMut<IdentityIndex>,
     ids: Query<&StableId>,
     names: Query<&Name>,
@@ -152,7 +153,7 @@ pub(crate) fn on_add_name(
 /// the Query sees the OLD name, so we unindex the old and index the
 /// new value is observed by the subsequent `On<Insert<Name>>`.
 pub(crate) fn on_replace_name(
-    event: On<Discard<Name>>,
+    event: OnDiscard<'_, '_, Name>,
     mut idx: ResMut<IdentityIndex>,
     ids: Query<&StableId>,
     names: Query<&Name>,
@@ -175,7 +176,7 @@ impl IdentityIndex {
 
 /// Observer: Name inserted (covers replacement new-value too).
 pub(crate) fn on_insert_name(
-    event: On<Insert<Name>>,
+    event: OnInsert<'_, '_, Name>,
     mut idx: ResMut<IdentityIndex>,
     ids: Query<&StableId>,
     names: Query<&Name>,

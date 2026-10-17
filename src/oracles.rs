@@ -52,7 +52,7 @@ pub(crate) fn check_transform_desync_system(world: &mut World) {
             .resource::<bevy::ecs::reflect::AppTypeRegistry>()
             .0
             .read();
-        for (logical_id, info) in world.components().iter_registered() {
+        for (logical_id, info) in crate::game_types::iter_registered_compat(world.components()) {
             if !info.name().ends_with("LogicalPosition") {
                 continue;
             }

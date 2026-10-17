@@ -80,7 +80,7 @@ pub fn infer_gameplay_archetypes(world: &World, types: &GameTypes) -> HashSet<Ar
     let mut game_component_ids = HashSet::new();
     let mut exclude_component_ids = HashSet::new();
 
-    for (_cid, info) in components.iter_registered() {
+    for (_cid, info) in iter_registered_compat(components) {
         let type_name = info.name().to_string();
         let type_name = type_name.as_str();
         if types.is_game_type(type_name) {
@@ -206,6 +206,26 @@ pub fn inference_active(world: &World) -> bool {
                     .iter()
                     .all(|a| !a.contains(gid) || inferred.is_some_and(|iid| a.contains(iid)))
             })
+}
+
+/// bevy 0.19 `Components::iter_registered` yields `&ComponentInfo`;
+/// 0.20 yields `(ComponentId, &ComponentInfo)`. Normalized to 0.20.
+pub(crate) fn iter_registered_compat<'a>(
+    components: &'a bevy::ecs::component::Components,
+) -> impl Iterator<
+    Item = (
+        bevy::ecs::component::ComponentId,
+        &'a bevy::ecs::component::ComponentInfo,
+    ),
+> + 'a {
+    #[cfg(bevy_0_19)]
+    {
+        components.iter_registered().map(|info| (info.id(), info))
+    }
+    #[cfg(not(bevy_0_19))]
+    {
+        components.iter_registered()
+    }
 }
 
 #[cfg(test)]

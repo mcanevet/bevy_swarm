@@ -106,25 +106,28 @@ impl bevy::app::Plugin for PlaytestPlugin {
         // DefaultPlugins lack. Install them (idempotent).
         app.init_resource::<bevy::picking::hover::HoverMap>();
         app.init_resource::<bevy::picking::hover::PreviousHoverMap>();
-        app.init_resource::<bevy::picking::events::PointerState>();
+        app.init_resource::<crate::compat::picking::PointerState>();
         app.add_message::<bevy::picking::backend::PointerHits>();
         app.add_message::<bevy::picking::pointer::PointerInput>();
-        app.add_message::<bevy::picking::events::PointerCancel>();
-        app.add_message::<bevy::picking::events::PointerClick>();
-        app.add_message::<bevy::picking::events::PointerPress>();
-        app.add_message::<bevy::picking::events::PointerDragDrop>();
-        app.add_message::<bevy::picking::events::PointerDragEnd>();
-        app.add_message::<bevy::picking::events::PointerDragEnter>();
-        app.add_message::<bevy::picking::events::PointerDragLeave>();
-        app.add_message::<bevy::picking::events::PointerDragOver>();
-        app.add_message::<bevy::picking::events::PointerDragStart>();
-        app.add_message::<bevy::picking::events::PointerDrag>();
-        app.add_message::<bevy::picking::events::PointerMove>();
-        app.add_message::<bevy::picking::events::PointerOut>();
-        app.add_message::<bevy::picking::events::PointerOver>();
-        app.add_message::<bevy::picking::events::PointerEnter>();
-        app.add_message::<bevy::picking::events::PointerLeave>();
+        use crate::compat::picking as pk;
+        app.add_message::<pk::Cancel>();
+        app.add_message::<pk::Click>();
+        app.add_message::<pk::Press>();
+        app.add_message::<pk::DragDrop>();
+        app.add_message::<pk::DragEnd>();
+        app.add_message::<pk::DragEnter>();
+        app.add_message::<pk::DragLeave>();
+        app.add_message::<pk::DragOver>();
+        app.add_message::<pk::DragStart>();
+        app.add_message::<pk::Drag>();
+        app.add_message::<pk::Move>();
+        app.add_message::<pk::Out>();
+        app.add_message::<pk::Over>();
+        app.add_message::<pk::Enter>();
+        app.add_message::<pk::Leave>();
         app.init_resource::<bevy::picking::PickingSettings>();
+        // PointerCaptureMap is 0.20-only; 0.19 has no pointer-capture concept.
+        #[cfg(not(bevy_0_19))]
         app.init_resource::<bevy::picking::hover::PointerCaptureMap>();
         app.init_resource::<bevy::picking::pointer::PointerMap>();
         app.init_resource::<bevy::picking::backend::ray::RayMap>();
@@ -773,11 +776,18 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .remove_resource::<bevy::ecs::error::FallbackErrorHandler>();
     let already_wrapped = app.world().get_resource::<SwarmHandlerRestore>().is_some();
     if !already_wrapped {
-        fn swarm_error_handler(mut err: bevy::ecs::error::BevyError, ctx: ErrorContext) {
+        fn swarm_error_handler(
+            #[cfg_attr(bevy_0_19, allow(unused_mut))] mut err: bevy::ecs::error::BevyError,
+            ctx: ErrorContext,
+        ) {
             let is_panic = matches!(err.severity(), bevy::ecs::error::Severity::Panic);
             // Capture first (severity/context/message), then chain.
             crate::sinks::capture_bevy_error(&err, &ctx);
             if is_panic {
+                // Resume-unwinding with the panic payload is 0.20-only
+                // (`BevyError::take_payload`); on 0.19 the payload is not
+                // retrievable — the error has already been captured above.
+                #[cfg(not(bevy_0_19))]
                 if let Some(payload) = err.take_payload() {
                     std::panic::resume_unwind(payload);
                 }

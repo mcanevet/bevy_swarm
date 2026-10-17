@@ -26,6 +26,14 @@
 
 use bevy::app::PluginGroupBuilder;
 
+// The strip! macro expands `$p:ty` inside `contains::<$p>()` and cannot
+// carry cfg attributes per item, so version-divergent plugin paths are
+// unified behind these aliases before reaching the macro.
+#[cfg(bevy_0_19)]
+type TextInputPlugin = bevy_ui_widgets::EditableTextInputPlugin;
+#[cfg(not(bevy_0_19))]
+type TextInputPlugin = bevy::ui_widgets::TextInputPlugin;
+
 /// Strip the render family (plus UI widgets) from a plugin group.
 ///
 /// All disables are `contains`-guarded: correct for any bevy feature
@@ -48,7 +56,7 @@ pub(crate) fn strip_render_family(group: PluginGroupBuilder) -> PluginGroupBuild
             g
         }};
     }
-    strip!(
+    let stripped = strip!(
         group,
         bevy_render::RenderPlugin,
         bevy::image::ImagePlugin,
@@ -72,19 +80,30 @@ pub(crate) fn strip_render_family(group: PluginGroupBuilder) -> PluginGroupBuild
         bevy::scene::ScenePlugin,
         bevy::ui_widgets::ButtonPlugin,
         bevy::ui_widgets::CheckboxPlugin,
-        bevy::ui_widgets::TextInputPlugin,
+        TextInputPlugin,
         bevy::ui_widgets::ListBoxPlugin,
         bevy::ui_widgets::MenuPlugin,
-        bevy::ui_widgets::DialogPlugin,
-        bevy::ui_widgets::ModalDialogPlugin,
         bevy_ui_widgets::popover::PopoverPlugin,
         bevy::ui_widgets::RadioGroupPlugin,
         bevy::ui_widgets::ScrollAreaPlugin,
         bevy::ui_widgets::ScrollbarPlugin,
         bevy::ui_widgets::SliderPlugin,
+    );
+
+    // Dialog/ModalDialog/Tab plugins and the pointer-focus plugin are
+    // 0.20-only; on 0.19 those widgets do not exist, so there is
+    // nothing to strip. (Macro invocations cannot carry cfg attrs on
+    // individual items, hence the separate cfg'd strip calls.)
+    #[cfg(not(bevy_0_19))]
+    let stripped = strip!(
+        stripped,
+        bevy::ui_widgets::DialogPlugin,
+        bevy::ui_widgets::ModalDialogPlugin,
         bevy::ui_widgets::TabPlugin,
         bevy::input_focus::pointer_focus::PointerFocusPlugin,
-    )
+    );
+
+    stripped
 }
 
 #[cfg(all(test, feature = "render"))]
