@@ -12,3 +12,6 @@ Cargo.lock.bak
 
 # swarm-9qm: runtime agent screenshot output
 screenshots/
+
+# nested crate build dirs (spike lesson: "/target" is root-anchored)
+target/
