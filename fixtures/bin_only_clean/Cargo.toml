@@ -9,7 +9,7 @@ test = false
 bench = false
 
 [dependencies]
-bevy = { version = "0.20", default-features = false, features = ["std"] }
+bevy = { version = ">=0.19, <0.21", default-features = false, features = ["std"] }
 
 # Z19: bin-only fixtures have no tests; `test = false` above stops
 # cargo/nextest from linking an unused test binary (repeated CI lld

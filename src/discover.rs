@@ -505,6 +505,7 @@ fn empty_replay_scenario(duration_s: f32, tps: u32) -> Scenario {
 /// systems actually read? Uses per-system access sets (public in
 /// bevy_ecs 0.20). Returns (readers per class, pruned classes).
 fn static_device_readers(app: &bevy::prelude::App) -> (Vec<(String, Vec<String>)>, Vec<String>) {
+    #[cfg(not(bevy_0_19))]
     use std::any::TypeId;
     let world = app.world();
 
@@ -519,10 +520,15 @@ fn static_device_readers(app: &bevy::prelude::App) -> (Vec<(String, Vec<String>)
     }
 
     let mut acc = Acc::default();
-    let Some(schedules) = world.get_resource::<bevy::ecs::schedule::Schedules>() else {
+    let Some(_schedules) = world.get_resource::<bevy::ecs::schedule::Schedules>() else {
         return (vec![], vec![]);
     };
-    for (_label, schedule) in schedules.iter() {
+    // bevy 0.19 has no public per-system access API
+    // (`Schedule::systems_with_access` / `SystemAccess` are 0.20-only);
+    // the 0.19 path conservatively assumes every game system may read
+    // any device class (nothing is pruned).
+    #[cfg(not(bevy_0_19))]
+    for (_label, schedule) in _schedules.iter() {
         let Ok(systems) = schedule.systems_with_access() else {
             continue;
         };

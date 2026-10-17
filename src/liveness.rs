@@ -403,6 +403,31 @@ fn frame_start_tick_of(state: &PlaytestState, target: u64) -> Option<u32> {
     state.frame_start_ticks.iter().rev().nth(back).copied()
 }
 
+/// bevy 0.19 `World::iter_resources` yields `(&ComponentInfo, Ptr)`;
+/// 0.20 yields `(ComponentId, &ComponentInfo, Ptr)`. Normalized here to
+/// the 0.20 shape (id derived from `ComponentInfo::id()` on 0.19).
+#[allow(clippy::type_complexity)]
+pub(crate) fn iter_resources_compat(
+    world: &World,
+) -> impl Iterator<
+    Item = (
+        bevy::ecs::component::ComponentId,
+        &bevy::ecs::component::ComponentInfo,
+        bevy::ptr::Ptr<'_>,
+    ),
+> + '_ {
+    #[cfg(bevy_0_19)]
+    {
+        world
+            .iter_resources()
+            .map(|(info, ptr)| (info.id(), info, ptr))
+    }
+    #[cfg(not(bevy_0_19))]
+    {
+        world.iter_resources()
+    }
+}
+
 /// True if any GAME-OWNED resource changed in `(since, now]` — Z6
 /// GameTypes crate prefixes; engine resources (bevy_transform etc.)
 /// churn every frame and would mask a frozen world.
@@ -414,7 +439,7 @@ pub fn game_resource_changed_since(world: &World, since: Tick, now: Tick) -> boo
         .map(|s| s.0.liveness.watch.clone())
         .unwrap_or_default();
     if !watched.is_empty() {
-        for (id, info, _) in world.iter_resources() {
+        for (id, info, _ptr) in iter_resources_compat(world) {
             let name = info.name().to_string();
             if watched.iter().any(|w| name.contains(w.as_str())) {
                 if let Some(ticks) = world.get_resource_change_ticks_by_id(id) {
@@ -432,7 +457,8 @@ pub fn game_resource_changed_since(world: &World, since: Tick, now: Tick) -> boo
     if prefixes.is_empty() {
         return false;
     }
-    for (id, info, _) in world.iter_resources() {
+    for (id, info, ptr) in iter_resources_compat(world) {
+        let _ = ptr;
         let name = info.name().to_string();
         if !prefixes.iter().any(|p| name.starts_with(p.as_str())) {
             continue;

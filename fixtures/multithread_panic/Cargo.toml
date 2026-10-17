@@ -10,4 +10,4 @@ test = false
 bench = false
 
 [dependencies]
-bevy = { version = "0.20", default-features = false, features = ["std", "multi_threaded"] }
+bevy = { version = ">=0.19, <0.21", default-features = false, features = ["std", "multi_threaded"] }

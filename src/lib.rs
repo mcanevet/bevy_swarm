@@ -97,6 +97,9 @@ pub mod builder;
 pub mod choice;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
+pub mod compat;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod compiled;
 pub mod contract;
 pub mod conventions;
