@@ -180,8 +180,20 @@ pub fn load_regressions(
         }
         let contents = fs::read_to_string(&path)?;
         // Try parsing as RegressionRecord first; fallback to Scenario.
+        // le3.17: schema_version is CHECKED — a file from a FUTURE
+        // schema (version > 1) must be rejected loudly, not parsed
+        // into garbage or silently legacy-wrapped.
         match serde_json::from_str::<RegressionRecord>(&contents) {
-            Ok(rec) => records.push(rec),
+            Ok(rec) => {
+                if rec.schema_version != 1 {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    return Err(std::io::Error::other(format!(
+                        "regression file '{}' has schema_version {} — this build only                          understands schema_version 1; regenerate or upgrade                          bevy_playtest",
+                        name, rec.schema_version
+                    )));
+                }
+                records.push(rec)
+            }
             Err(e1) => {
                 // Legacy: bare Scenario — wrap it.
                 if let Ok(scen) = serde_json::from_str::<Scenario>(&contents) {
@@ -413,5 +425,41 @@ mod tests_qa8_14 {
             skipped_regression_files: 2,
         };
         assert_eq!(rep.skipped_regression_files, 2);
+    }
+}
+
+#[cfg(test)]
+mod tests_le3_17 {
+    use super::*;
+    use std::io::Write;
+
+    /// le3.17: a regression file with a FUTURE schema_version must be
+    /// rejected LOUDLY (naming the file, with a remediation hint) —
+    /// not parsed into garbage or silently legacy-wrapped.
+    #[test]
+    fn future_schema_version_rejected_loudly() {
+        let dir = std::env::temp_dir().join(format!("le3_17_sweep_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut f = std::fs::File::create(dir.join("regression_future.json")).unwrap();
+        write!(
+            f,
+            "{{\"schema_version\":2,\"fingerprint\":\"x\",\"found_by_seeds\":[],\"status\":\"staging\",\"scenario\":{{\"bot\":{{\"type\":\"chaos\",\"seed\":1}},\"duration_s\":0.1}}}}"
+        )
+        .unwrap();
+        drop(f);
+
+        let mut skipped = 0u64;
+        let err = load_regressions(&dir, &mut skipped).expect_err("must reject schema_version 2");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("regression_future.json"),
+            "must name the file: {msg}"
+        );
+        assert!(
+            msg.contains("schema_version 2"),
+            "must state the version: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

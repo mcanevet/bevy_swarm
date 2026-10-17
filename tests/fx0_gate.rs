@@ -23,15 +23,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_playtest::branch::{InProcess, ScenarioRunner};
-use bevy_playtest::contract::*;
 use bevy_playtest::harness::Scenario;
-use fixture_regression_pair::RegressionPairGamePlugin;
-use fixture_runner::{
-    headless_app, RegressionPairAdapterPlugin, SpawnerAdapterPlugin, SpinnerAdapterPlugin,
-    TurnBasedAdapterPlugin, WalkerAdapterPlugin,
-};
-use fixture_spawner::SpawnerGamePlugin;
-use fixture_turn_based::TurnBasedGamePlugin;
+use fixture_runner::build_app_for;
 use fixture_walker::WalkerGamePlugin;
 
 const SEEDS: &[u64] = &[
@@ -139,51 +132,10 @@ fn build_scenario_json(fixture: &str, variant: &str, seed: u64) -> String {
     scenario.to_string()
 }
 
-/// Build the in-process app for a fixture, mirroring fixture-runner's
-/// main.rs wiring (adapters + IntentSurface + game plugin).
-fn build_app_for(fixture: &str) -> App {
-    let mut app = headless_app();
-    app.add_plugins(TestConventionsPlugin);
-    app.add_plugins(bevy_playtest::driver::PlaytestPlugin);
-    match fixture {
-        "spinner" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(SpinnerAdapterPlugin);
-            app.add_plugins(fixture_spinner::SpinnerGamePlugin);
-        }
-        "walker" => {
-            // le3.33 (RF43): Wait restored — the RF27 removal masked
-            // the frozen_frames/timeout accounting bug.
-            app.insert_resource(IntentSurface::new(vec![
-                SurfaceVariant::Move,
-                SurfaceVariant::Wait,
-            ]));
-            app.add_plugins(WalkerAdapterPlugin);
-            app.add_plugins(WalkerGamePlugin);
-        }
-        "spawner" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(SpawnerAdapterPlugin);
-            app.add_plugins(SpawnerGamePlugin);
-        }
-        "turn_based" => {
-            app.insert_resource(IntentSurface::new(vec![
-                SurfaceVariant::Choice(3),
-                SurfaceVariant::Wait,
-            ]));
-            app.add_plugins(TurnBasedAdapterPlugin);
-            app.add_plugins(TurnBasedGamePlugin);
-        }
-        "regression_pair" => {
-            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-            app.add_plugins(RegressionPairAdapterPlugin);
-            app.add_plugins(RegressionPairGamePlugin);
-        }
-        _ => panic!("unknown fixture: {}", fixture),
-    }
-    app
-}
-
+/// le3.17: app construction now comes from the SAME source as the
+/// fixture-runner binary (fixture_runner::build_app_for) — the two
+/// wirings can no longer drift.
+///
 /// RAII guard that saves the prior value of `FIXTURE_BUG` and restores
 /// it on scope exit — including panics inside the factory/runner, which
 /// would otherwise leak a set env var into subsequent tests.
@@ -463,12 +415,47 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
         }
     }
     eprintln!("=== bug detection rates (seeds 1..8) ===");
+    // le3.17 (review #2): make pending LOUD — unverified capabilities
+    // must be visible in every run summary, not silently skipped.
+    let mut pending_caps: Vec<String> = Vec::new();
+    for fixture in discover_fixtures() {
+        let variants: Vec<String> = std::fs::read_dir(expectations_dir().join(&fixture))
+            .expect("fixture dir readable")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .map(|p| p.file_stem().unwrap().to_string_lossy().to_string())
+            .collect();
+        for variant in variants {
+            let exp = load_expectation(&fixture, &variant);
+            if let Some(bead) = exp.get("pending").and_then(|p| p.as_str()) {
+                pending_caps.push(format!(
+                    "{}/{} — UNVERIFIED (pending: {})",
+                    fixture, variant, bead
+                ));
+            }
+        }
+    }
+    if !pending_caps.is_empty() {
+        eprintln!("=== unverified capabilities (pending expectations) ===");
+        for p in &pending_caps {
+            eprintln!("  pending: {p}");
+        }
+    }
     for line in &summary {
         eprintln!("{}", line);
     }
     // 6wt: per-seed detection floor — a variant detected on ZERO seeds
     // must fail loudly even if errors were somehow empty; and any
     // variant below the floor is reported explicitly.
+    // le3.17: floor RAISED from 50% (hits*2 >= total) to 90% — a
+    // signal firing on only half the seeds shipping is a coin flip,
+    // not a detector. Documented low-power signals are allowlisted
+    // with their reason + tracking bead.
+    const ALLOWLIST: &[(&str, &str)] = &[
+        // walker seed-5 dead_verb miss: intermittent timing (swarm-lgn)
+        ("walker/bug_dead_left_key", "swarm-lgn"),
+    ];
     let mut rate_errors: Vec<String> = Vec::new();
     for line in &summary {
         // Format: "fixture/variant: H/T seeds detected (...)"
@@ -477,9 +464,14 @@ fn fx0_bug_fixtures_emit_specific_signals_seeds_1_to_8() {
                 if let Some((hits, total)) = ht.split_once('/') {
                     let (hits, total): (u64, u64) =
                         (hits.parse().unwrap_or(0), total.parse().unwrap_or(1));
-                    if total > 0 && hits * 2 < total {
+                    if total > 0 && hits * 10 < total * 9 {
+                        let key = line.split(": ").next().unwrap_or("");
+                        if let Some((_, bead)) = ALLOWLIST.iter().find(|(k, _)| *k == key) {
+                            eprintln!("NOTE: {line} below 90% floor — allowlisted ({bead})");
+                            continue;
+                        }
                         rate_errors.push(format!(
-                            "{line} — detection rate {}/{} below floor",
+                            "{line} — detection rate {}/{} below 90% floor",
                             hits, total
                         ));
                     }

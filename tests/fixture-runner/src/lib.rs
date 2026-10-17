@@ -199,3 +199,53 @@ pub fn write_report(
     fs::write(&path, json).expect("write report");
     path
 }
+
+// ============================================================================
+// le3.17: SINGLE SOURCE of fixture app wiring — used by both main.rs
+// (the binary/acceptance path) and fx0_gate.rs (the in-process gate).
+// Two hand-maintained copies WILL drift; this one function prevents it.
+// ============================================================================
+
+pub fn build_app_for(fixture: &str) -> App {
+    use bevy_playtest::driver::PlaytestPlugin;
+    let mut app = headless_app();
+    app.add_plugins(TestConventionsPlugin);
+    app.add_plugins(PlaytestPlugin);
+    match fixture {
+        "spinner" => {
+            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+            app.add_plugins(SpinnerAdapterPlugin);
+            app.add_plugins(fixture_spinner::SpinnerGamePlugin);
+        }
+        "walker" => {
+            // le3.33 (RF43): Wait restored — the RF27 removal masked
+            // the frozen_frames/timeout accounting bug.
+            app.insert_resource(IntentSurface::new(vec![
+                SurfaceVariant::Move,
+                SurfaceVariant::Wait,
+            ]));
+            app.add_plugins(WalkerAdapterPlugin);
+            app.add_plugins(fixture_walker::WalkerGamePlugin);
+        }
+        "spawner" => {
+            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+            app.add_plugins(SpawnerAdapterPlugin);
+            app.add_plugins(fixture_spawner::SpawnerGamePlugin);
+        }
+        "turn_based" => {
+            app.insert_resource(IntentSurface::new(vec![
+                SurfaceVariant::Choice(3),
+                SurfaceVariant::Wait,
+            ]));
+            app.add_plugins(TurnBasedAdapterPlugin);
+            app.add_plugins(fixture_turn_based::TurnBasedGamePlugin);
+        }
+        "regression_pair" => {
+            app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
+            app.add_plugins(RegressionPairAdapterPlugin);
+            app.add_plugins(fixture_regression_pair::RegressionPairGamePlugin);
+        }
+        _ => panic!("unknown fixture: {}", fixture),
+    }
+    app
+}

@@ -1443,13 +1443,23 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         .world()
         .get_resource::<crate::game_types::GameTypes>()
         .is_some();
+    // swarm-6i8: hoist ambient_only hint from the snapshot rows
+    // (PlaytestState was removed above; the owned `state` retains the
+    // effect_window_snapshots). Ambient-only worlds (attract-mode
+    // heartbeat, nothing bound to input) are not vacuous harness
+    // failures — the game simply binds no input.
+    let ambient_only_hint = crate::effects::ambient_only_from_snaps(&state.effect_window_snapshots);
     if let Some(rate) = crate::effects::overall_effect_rate(app.world()) {
         let total_actions: u64 = app
             .world()
             .get_resource::<crate::effects::ActionEffects>()
             .map(|e| e.rates.values().map(|r| r.total).sum())
             .unwrap_or(0);
-        if rate == 0.0 && total_actions >= VACUITY_MIN_ACTIONS && observable_gameplay {
+        if rate == 0.0
+            && total_actions >= VACUITY_MIN_ACTIONS
+            && observable_gameplay
+            && !ambient_only_hint
+        {
             let top_keys: Vec<String> = app
                 .world()
                 .get_resource::<crate::effects::ActionEffects>()

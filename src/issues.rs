@@ -67,14 +67,30 @@ impl IssueDb {
     /// (the common case in a fresh checkout).
     pub fn load_from(path: &std::path::Path) -> Self {
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                eprintln!(
-                    "WARNING: malformed issue DB {} ({}); treating as empty",
-                    path.display(),
-                    e
-                );
-                Self::default()
-            }),
+            Ok(text) => {
+                // le3.17: a FUTURE schema version must be rejected
+                // loudly — a version-2 file parsed as version-1 would
+                // silently drop or garble issue records.
+                let peek: Result<Self, _> = serde_json::from_str(&text);
+                if let Ok(db) = &peek {
+                    if db.schema_version > conventions::SCHEMA_VERSION {
+                        panic!(
+                            "issue DB {} has schema_version {} — this build only                              understands version {}; regenerate or upgrade bevy_playtest",
+                            path.display(),
+                            db.schema_version,
+                            conventions::SCHEMA_VERSION
+                        );
+                    }
+                }
+                peek.unwrap_or_else(|e| {
+                    eprintln!(
+                        "WARNING: malformed issue DB {} ({}); treating as empty",
+                        path.display(),
+                        e
+                    );
+                    Self::default()
+                })
+            }
             Err(_) => Self {
                 schema_version: conventions::SCHEMA_VERSION,
                 issues: HashMap::new(),
@@ -257,6 +273,29 @@ mod tests {
         let mut keys: Vec<String> = loaded.issues.keys().map(|f| f.0.clone()).collect();
         keys.sort();
         assert_eq!(keys, vec!["a".to_string(), "b".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_le3_17 {
+    use super::*;
+
+    /// le3.17: an issue DB with a FUTURE schema_version must be
+    /// rejected loudly, not parsed as version-1 garbage.
+    #[test]
+    #[should_panic(expected = "schema_version")]
+    fn future_schema_version_db_rejected_loudly() {
+        let dir = std::env::temp_dir().join(format!("le3_17_issues_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("issues.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":2,"issues":{"fp":{"state":"open","title":"t","first_seen":"","last_seen":"","occurrences":0,"seeds":[],"rule":"r"}}}"#,
+        )
+        .unwrap();
+        let _ = IssueDb::load_from(&path);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

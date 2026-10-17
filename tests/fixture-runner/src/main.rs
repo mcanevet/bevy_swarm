@@ -1,13 +1,8 @@
 //! Fixture runner CLI: run a fixture with a scenario and write the report
 
-use bevy_playtest::contract::{IntentSurface, SurfaceVariant};
 use bevy_playtest::conventions;
-use bevy_playtest::driver::PlaytestPlugin;
 use bevy_playtest::scenario::Scenario;
-use fixture_runner::{
-    headless_app, write_report, RegressionPairAdapterPlugin, SpawnerAdapterPlugin,
-    SpinnerAdapterPlugin, TurnBasedAdapterPlugin, WalkerAdapterPlugin,
-};
+use fixture_runner::{build_app_for, write_report};
 use std::env;
 
 fn main() {
@@ -138,51 +133,7 @@ fn main() {
         }
     }
 
-    let build_app = || {
-        let mut app = headless_app();
-        app.add_plugins(bevy_playtest::contract::TestConventionsPlugin);
-        app.add_plugins(PlaytestPlugin);
-        // Insert AFTER TestConventionsPlugin so it persists
-
-        match fixture.as_str() {
-            "spinner" => {
-                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-                app.add_plugins(SpinnerAdapterPlugin);
-                app.add_plugins(fixture_spinner::SpinnerGamePlugin);
-            }
-            "walker" => {
-                // le3.33 (RF43): Wait RESTORED to the surface — the
-                // RF27 removal was masking the frozen_frames/timeout
-                // accounting bug (2Hz chaos now passes with the fix).
-                app.insert_resource(IntentSurface::new(vec![
-                    SurfaceVariant::Move,
-                    SurfaceVariant::Wait,
-                ]));
-                app.add_plugins(WalkerAdapterPlugin);
-                app.add_plugins(fixture_walker::WalkerGamePlugin);
-            }
-            "spawner" => {
-                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-                app.add_plugins(SpawnerAdapterPlugin);
-                app.add_plugins(fixture_spawner::SpawnerGamePlugin);
-            }
-            "turn_based" => {
-                app.insert_resource(IntentSurface::new(vec![
-                    SurfaceVariant::Choice(3),
-                    SurfaceVariant::Wait,
-                ]));
-                app.add_plugins(TurnBasedAdapterPlugin);
-                app.add_plugins(fixture_turn_based::TurnBasedGamePlugin);
-            }
-            "regression_pair" => {
-                app.insert_resource(IntentSurface::new(vec![SurfaceVariant::Wait]));
-                app.add_plugins(RegressionPairAdapterPlugin);
-                app.add_plugins(fixture_regression_pair::RegressionPairGamePlugin);
-            }
-            _ => panic!("unknown fixture: {}", fixture),
-        }
-        app
-    };
+    let build_app = || build_app_for(&fixture);
 
     let runner = bevy_playtest::branch::InProcess { factory: build_app };
     let report =
