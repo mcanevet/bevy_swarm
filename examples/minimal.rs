@@ -3,11 +3,7 @@
 //! Run: `cargo run --example minimal`
 
 use bevy::prelude::*;
-use bevy_swarm::{
-    contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin},
-    driver::{run_scenario, PlaytestPlugin, PlaytestReport},
-    scenario::Scenario,
-};
+use bevy_swarm::prelude::*;
 
 #[derive(Component)]
 struct Player;
@@ -20,11 +16,11 @@ fn spawn_player(mut commands: Commands) {
 }
 
 fn handle_choice(
-    mut reader: bevy::ecs::message::MessageReader<bevy_swarm::contract::UserIntent>,
+    mut reader: bevy::ecs::message::MessageReader<UserIntent>,
     mut score: ResMut<Score>,
 ) {
     for intent in reader.read() {
-        if let bevy_swarm::contract::UserIntent::Choice { .. } = intent {
+        if let UserIntent::Choice { .. } = intent {
             score.0 += 1;
         }
     }
@@ -41,12 +37,12 @@ fn main() {
     app.add_systems(Startup, spawn_player);
     app.add_systems(Update, handle_choice);
 
-    let scenario: Scenario = serde_json::from_str(
+    let scenario = serde_json::from_str(
         r#"{"bot":{"type":"chaos","seed":42},"duration_s":0.5,"invariants":[],"setup":{}}"#,
     )
     .unwrap();
 
-    let report: PlaytestReport = run_scenario(&mut app, &scenario).expect("run scenario");
+    let report = run_scenario(&mut app, &scenario).expect("run scenario");
     println!("Status: {:?}", report.status);
     println!("Intents emitted: {:?}", report.coverage.intents_emitted);
 }

@@ -201,7 +201,19 @@ pub fn record_golden<F: Fn() -> bevy::app::App + Sync>(
             digests: vec![],
         });
 
-        // Run the scenario (consumes StateTrace into report.state_trace)
+        // Run the scenario (consumes StateTrace into report.state_trace).
+        // Under deterministic-entropy the harness runs each scenario
+        // inside `entropy::enter_run(seed)` (branch::run_impl); record
+        // the golden the SAME way or the digests won't match the
+        // comparison run (different RNG stream).
+        #[cfg(feature = "deterministic-entropy")]
+        let mut report = {
+            crate::entropy::enter_run(scenario.bot.seed);
+            let r = crate::driver::run_scenario(&mut app, scenario)?;
+            crate::entropy::exit_run();
+            r
+        };
+        #[cfg(not(feature = "deterministic-entropy"))]
         let mut report = crate::driver::run_scenario(&mut app, scenario)?;
 
         let run_digests = report.state_trace.take().unwrap_or_default();
