@@ -9,3 +9,6 @@ Cargo.lock.bak
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# swarm-9qm: runtime agent screenshot output
+screenshots/
