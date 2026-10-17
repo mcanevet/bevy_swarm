@@ -61,6 +61,7 @@ Expectation files (X2) reference only these names.
 | `scenario_error` | major |
 | `no_active_camera` | major |
 | `nothing_on_screen` | informational |
+| `pass_through` | major |
 
 ## Reference
 
@@ -479,6 +480,14 @@ Expectation files (X2) reference only these names.
 **Detects:** Post-readiness projection scan: no drawable lands inside the camera viewport.
 
 **False-positive modes:** Orthographic camera framing wider than content, or HUD-only sprites anchored off-camera by design.
+
+### `pass_through`
+
+**Kind:** major (fails the run) — An entity fully traversed another (entered near side, exited far side, no separation) while collision semantics exist elsewhere in the run — a collider was likely missed.
+
+**Detects:** Inference-based overlap tracking: another pair reversed velocity/clamped penetration this run, but this pair completed a full pass-through (near-side entry to far-side exit, no reversal). Games with zero collision behavior never fire it.
+
+**False-positive modes:** Ghost/intangible-by-design entities in games that ALSO have real collisions (opt out with collision_policy: off); despawn-mid-overlap and shallow corner grazes are excluded.
 
 Notes:
 - `crash` is a report **status**, not a rule.

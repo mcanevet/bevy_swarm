@@ -887,7 +887,7 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         // (port of bevy_headless_test's prime_time).
         {
             let now = std::time::Instant::now();
-            let mut world = app.world_mut();
+            let world = app.world_mut();
             // Apps without a time plugin have no Time<Real>; insert it
             // so priming works everywhere (update_with_instant then
             // behaves like the first ManualDuration tick).
