@@ -58,6 +58,7 @@ fn bodies() -> impl Bundle {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn pass_through_fires_when_collision_semantics_exist_elsewhere() {
     let mut app = build_app();
     // Obstacle + traveller: traveller crosses at constant velocity.
@@ -113,6 +114,7 @@ fn pass_through_fires_when_collision_semantics_exist_elsewhere() {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn pass_through_silent_when_no_collision_semantics_anywhere() {
     // Only the traveller + obstacle: no bouncer, no collision
     // anywhere — genre-neutral gate keeps the rule silent.
@@ -140,6 +142,7 @@ fn pass_through_silent_when_no_collision_semantics_anywhere() {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn pass_through_opt_out_via_collision_policy_off() {
     let mut app = build_app();
     app.world_mut()
@@ -182,6 +185,7 @@ fn pass_through_opt_out_via_collision_policy_off() {
 }
 
 #[test]
+#[allow(clippy::type_complexity)]
 fn pass_through_silent_on_despawn_mid_overlap() {
     // Traveller overlaps the obstacle, then the obstacle despawns
     // (pickup/projectile pattern) — the pair must not count.

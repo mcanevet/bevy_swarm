@@ -1,5 +1,91 @@
 {
   "$defs": {
+    "AllowRule": {
+      "description": "One allowed ambiguity, matched against extracted conflicts.\n\nPatterns support exact names, `crate::module::` prefixes (trailing\n`::` matches any system in that module/crate), and `::suffix`\nmatching (leading `::` matches any system whose name ends with the\nsuffix).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Allow a specific pair of systems (matched in either order).",
+          "properties": {
+            "a": {
+              "description": "First system name or pattern.",
+              "type": "string"
+            },
+            "b": {
+              "description": "Second system name or pattern.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "pair",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "a",
+            "b"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Allow all conflicts involving one system.",
+          "properties": {
+            "kind": {
+              "const": "system",
+              "type": "string"
+            },
+            "name": {
+              "description": "System name or pattern.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Allow all conflicts where BOTH systems belong to the given\ncrate/module prefix (library-internal ambiguity).",
+          "properties": {
+            "kind": {
+              "const": "among",
+              "type": "string"
+            },
+            "prefix": {
+              "description": "Crate or module prefix (e.g. `\"bevy_ui::\"`).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "prefix"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Allow all conflicts on a data type (component/resource name),\nregardless of the systems involved. Pairs conflicting only on\nexclusive `World` access are never allowed this way (they are\nalready always permitted).",
+          "properties": {
+            "kind": {
+              "const": "data",
+              "type": "string"
+            },
+            "name": {
+              "description": "Data type name, e.g. `\"Transform\"`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "BotConfig": {
       "additionalProperties": false,
       "properties": {
@@ -209,6 +295,21 @@
         "bound"
       ],
       "type": "object"
+    },
+    "CollisionPolicy": {
+      "description": "swarm-uz8: collision-observation policy for the pass_through rule.",
+      "oneOf": [
+        {
+          "const": "infer",
+          "description": "Infer collision semantics from observed behavior (default).",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Never report pass_through.",
+          "type": "string"
+        }
+      ]
     },
     "Continuation": {
       "description": "Continuation semantics once replayed choices run out.",
@@ -1246,6 +1347,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "allow_ambiguities": {
+      "description": "swarm-b6t: allow-list for the `deny_ambiguities` gate. Each rule\npermits specific system pairs, single systems, crate-internal\ngroups, or whole data types — an escape hatch for\nlibrary-internal ambiguities (bevy_ui etc.) that a game cannot\notherwise fix. Only consulted when `deny_ambiguities` is true.",
+      "items": {
+        "$ref": "#/$defs/AllowRule"
+      },
+      "type": "array"
+    },
     "bot": {
       "$ref": "#/$defs/BotConfig"
     },
@@ -1258,6 +1366,11 @@
         "integer",
         "null"
       ]
+    },
+    "collision_policy": {
+      "$ref": "#/$defs/CollisionPolicy",
+      "default": "infer",
+      "description": "swarm-uz8: pass_through rule policy. Default \"infer\": the rule\nfires only when collision semantics were observed elsewhere in\nthe run. \"off\": silence the rule entirely (ghost/intangible\nentities in games that also have real collisions)."
     },
     "compare_golden": {
       "description": "Z11/swarm-s5z: opt-in golden-trajectory comparison. Some(dir)\npoints at a recorded golden set (see `crate::golden::record_golden`);\nthe run's per-frame state digests are compared against the stored\ngolden for `scenario-{name}-{seed}` and a `golden_diverged`\nviolation is reported on the first differing frame (or a digest\ncount mismatch). Requires `name` to select the entry.",

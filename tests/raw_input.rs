@@ -607,7 +607,6 @@ fn s9o4_key_just_pressed_exactly_one_frame() {
         "press frame must be just_pressed"
     );
     assert!(!keys.pressed(KeyCode::KeyA) || true);
-    drop(keys);
     set_frame(&mut app, 1);
     app.update(); // frame 1: release written (hold 0 -> release next frame)
     let keys = app.world().resource::<ButtonInput<KeyCode>>();
@@ -665,7 +664,6 @@ fn s9o4_burst_same_key_defers_past_release() {
     // and the B press must not have fired yet (A held, B untouched).
     let keys = app.world().resource::<ButtonInput<KeyCode>>();
     assert!(keys.pressed(KeyCode::KeyA), "first press active");
-    drop(keys);
     set_frame(&mut app, 1);
     app.update();
     let keys = app.world().resource::<ButtonInput<KeyCode>>();
@@ -674,7 +672,6 @@ fn s9o4_burst_same_key_defers_past_release() {
         !keys.pressed(KeyCode::KeyB),
         "head-of-line: B deferred behind A re-press"
     );
-    drop(keys);
     set_frame(&mut app, 2);
     app.update(); // release of first hold
     set_frame(&mut app, 3);
@@ -751,7 +748,6 @@ fn s9o4_zero_hold_press_then_release_next_frame() {
         btns.just_pressed(bevy::input::mouse::MouseButton::Left),
         "zero-hold press still lands as a press edge"
     );
-    drop(btns);
     set_frame(&mut app, 1);
     app.update();
     let btns = app

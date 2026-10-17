@@ -16,6 +16,71 @@ use crate::state::{PlaytestState, Violations};
 /// Minimum samples before an action key can be declared a dead verb.
 pub const DEAD_VERB_MIN_SAMPLES: u64 = 10;
 
+/// swarm-6i8: hint that the world's recent change activity looks
+/// purely ambient (all recently-changed digest keys were already
+/// changing in an action-free baseline window). Used to quiet
+/// unused_input noise in attract-mode worlds where no input is bound.
+pub fn ambient_only_hint(world: &World) -> bool {
+    let Some(state) = world.get_resource::<PlaytestState>() else {
+        return false;
+    };
+    ambient_only_from_snaps(&state.effect_window_snapshots)
+}
+
+/// Pure snapshot-based ambient check — callable after PlaytestState
+/// has left the World (the vacuity guard runs at report-finalize
+/// time, past the remove_resource).
+pub fn ambient_only_from_snaps(
+    snaps: &[(u64, u32, std::collections::BTreeMap<String, String>)],
+) -> bool {
+    if snaps.len() < 3 {
+        return false;
+    }
+    // Baseline pair: the two OLDEST snapshots AFTER the digest map
+    // reaches its steady state (early snapshots can predate Startup
+    // spawns — an empty r0 vs populated r1 would look like wholesale
+    // change). Steady state = first index whose map has the same
+    // length as the LAST snapshot's map.
+    let steady_len = snaps.last().map(|(_, _, m)| m.len()).unwrap_or(0);
+    let steady_start = snaps
+        .iter()
+        .position(|(_, _, m)| m.len() == steady_len)
+        .unwrap_or(0);
+    if steady_start + 1 >= snaps.len() {
+        return false;
+    }
+    let r0 = &snaps[steady_start].2;
+    let r1 = &snaps[steady_start + 1].2;
+    let ambient: std::collections::HashSet<String> = r0
+        .iter()
+        .filter(|(k, v)| r1.get(*k) != Some(v))
+        .map(|(k, _)| k.clone())
+        .collect();
+    if ambient.is_empty() {
+        // A world with digest rows but ZERO change in the baseline gap
+        // is a STATIC world — vacuity/dead-verb oracles own it. But a
+        // world with NO digest rows in its steady state is purely
+        // cosmetic (no Gameplay entities, no reflected resources): the
+        // effect attribution is structurally blind, not vacuous —
+        // treat as ambient-only to quiet unused_input/vacuity noise.
+        return steady_len == 0;
+    }
+    // Every LATER change must be confined to ambient keys. New rows
+    // appearing (spawns) or disappearing (despawns) make the world
+    // non-ambient-quiet.
+    let bad: std::collections::BTreeSet<String> = snaps[steady_start + 1..]
+        .windows(2)
+        .flat_map(|w| {
+            w[0].2
+                .iter()
+                .filter(|(k, v)| w[1].2.get(*k) != Some(*v) && !ambient.contains(*k))
+                .map(|(k, _)| k.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    bad.is_empty()
+}
+
 /// RF8: verb family for sibling-drivability grouping. Arrow keys form
 /// one family, WASD letters another; everything else is individual.
 pub fn verb_family(key: &str) -> String {
@@ -100,13 +165,15 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
     // PlaytestState. The previous late-snapshot (taken in Last, AFTER
     // the game reacted) counted the reaction itself as pre-action
     // state, marking every action ineffective.
-    // FX1: snapshot digests for value-based effect attribution.
-    let frame_digests: HashMap<u64, (u32, String)> = {
+    // FX1: snapshot rows for value-based effect attribution.
+    // swarm-6i8: keep per-key rows (not flattened digests) so ambient
+    // motion can be subtracted.
+    let frame_rows: HashMap<u64, std::collections::BTreeMap<String, String>> = {
         let state = world.resource::<PlaytestState>();
         state
             .effect_window_snapshots
             .iter()
-            .map(|&(f, t, ref d)| (f, (t, d.clone())))
+            .map(|&(f, _, ref d)| (f, d.clone()))
             .collect()
     };
 
@@ -143,7 +210,7 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
     // time (current frame). This aligns with le3.23's value-based
     // liveness and prevents same-value writes (ambient counters,
     // idempotent rewrites) from masking dead verbs.
-    let now_digest = {
+    let now_rows: std::collections::BTreeMap<String, String> = {
         let rows = crate::determinism::canonical_state(world);
         let mut m = std::collections::BTreeMap::new();
         for (k, v) in rows {
@@ -151,18 +218,69 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
                 m.insert(k, v);
             }
         }
-        format!("{:?}", m)
+        m
     };
+    // swarm-6i8: ambient-only hint, computed ONCE per oracle pass
+    // from the snapshot rows.
+    let world_ambient_only = {
+        let state = world.resource::<PlaytestState>();
+        ambient_only_from_snaps(&state.effect_window_snapshots)
+    };
+    // swarm-6i8 (RF43 remainder): AMBIENT MOTION SUBTRACTION. Some
+    // fixtures legitimately animate without input (attract modes,
+    // elapsed-time-scaled values like spawner's IdlePhase sine and
+    // regression_pair's Damage). Whole-digest comparison counted that
+    // ambient churn as the effect of whatever intent preceded it,
+    // masking dead verbs. Fix: for each pending action, identify the
+    // keys that were ALREADY changing during the action-free baseline
+    // window (the `window` frames immediately before the action —
+    // guaranteed action-free by FX1's window <= interval/2 cap) and
+    // exclude them: an action is effective iff it produced change
+    // BEYOND the ambient dynamics. Intent-causality, not raw change.
+    fn ambient_keys(
+        frames: &HashMap<u64, std::collections::BTreeMap<String, String>>,
+        action_frame: u64,
+        window: u64,
+    ) -> std::collections::HashSet<String> {
+        let mut ambient = std::collections::HashSet::new();
+        if window < 2 {
+            return ambient;
+        }
+        let start = action_frame.saturating_sub(window);
+        let baseline: Vec<&std::collections::BTreeMap<String, String>> = (start..action_frame)
+            .filter_map(|f| frames.get(&f))
+            .collect();
+        if baseline.len() < 2 {
+            return ambient;
+        }
+        for w in baseline.windows(2) {
+            for (k, v) in w[0].iter() {
+                if w[1].get(k) != Some(v) {
+                    ambient.insert(k.clone());
+                }
+            }
+        }
+        ambient
+    }
     for p in take_pending.drain(..) {
         if frame.saturating_sub(p.frame) < window {
             still_pending.push(p);
             continue;
         }
-        let Some((_tick, digest_at_action)) = frame_digests.get(&p.frame) else {
+        let Some(rows_at_action) = frame_rows.get(&p.frame) else {
             still_pending.push(p);
             continue;
         };
-        let effective = now_digest != *digest_at_action;
+        // Effective = some NON-ambient key changed (or a brand-new key
+        // appeared) between the action frame and now.
+        let ambient = ambient_keys(&frame_rows, p.frame, window);
+        let effective = now_rows
+            .iter()
+            .any(|(k, v)| rows_at_action.get(k) != Some(v) && !ambient.contains(k))
+            || rows_at_action.keys().any(|k| {
+                // Disappeared rows also count (despawns) unless ambient.
+                !now_rows.contains_key(k) && !ambient.contains(k)
+            });
         new_rates.push((p.action_key.clone(), effective));
     }
     world
@@ -222,8 +340,21 @@ pub(crate) fn action_effect_oracle_system(world: &mut World) {
                 // never-alive world belongs to the liveness oracle's
                 // undrivable_game diagnosis) and recently on the
                 // liveness timescale.
-                state.last_alive_frame > 0
-                    && frame.saturating_sub(state.last_alive_frame) <= timeout_frames
+                let live = state.last_alive_frame > 0
+                    && frame.saturating_sub(state.last_alive_frame) <= timeout_frames;
+                // swarm-6i8: liveness alone is not enough when the ONLY
+                // thing keeping the world live is AMBIENT motion (an
+                // attract-mode heartbeat watched by liveness config —
+                // spawner's IdlePhase). In such a world the entire
+                // default input surface is unbound by design; reporting
+                // every key as unused_input is noise, not signal. If ANY
+                // audited action anywhere in the run demonstrated a
+                // non-ambient effect, the world genuinely responds to
+                // input and dead/unused verbs deserve reporting.
+                let any_real_effect = eff_snapshot.0.values().any(|r| r.effective > 0);
+                live && (any_real_effect
+                    || (!declared_keys.is_empty() && declared_keys.contains(&key))
+                    || !world_ambient_only)
             };
             // RF8: at tier 0 the default surface is a GUESS. An
             // ineffective key only gates when the game/scenario

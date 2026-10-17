@@ -111,7 +111,7 @@ pub fn extract_conflicts(world: &mut World) -> Vec<Conflict> {
         // Warn-level: initialize() records conflicts in the graph
         // without failing; we read them structurally. Other build
         // errors (cycles etc.) panic later in Schedule::run anyway.
-        sched.initialize(world);
+        let _ = sched.initialize(world);
         let graph = sched.graph();
         {
             let components = world.components();

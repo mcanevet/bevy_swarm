@@ -220,7 +220,7 @@ pub struct PlaytestState {
     pub(crate) frame_start_ticks: std::collections::VecDeque<u32>,
     /// FX1: pending effect-window snapshots: (frame, tick, digest) taken at
     /// action application time; the effect oracle consumes them.
-    pub(crate) effect_window_snapshots: Vec<(u64, u32, String)>,
+    pub(crate) effect_window_snapshots: Vec<(u64, u32, std::collections::BTreeMap<String, String>)>,
     /// Readiness gate: frames spent waiting for `GameReady` before
     /// scenario duration began accruing (UE IsReady analog).
     pub pre_ready_frames: u64,
