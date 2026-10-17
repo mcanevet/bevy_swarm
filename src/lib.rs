@@ -49,45 +49,129 @@ struct _ReferenceGoldenDoctests;
 #[cfg(feature = "agent")]
 pub mod agent;
 pub mod autotest;
+/// The curated prelude: everything a playtest needs in one glob import.
+///
+/// ```rust,no_run
+/// use bevy_swarm::prelude::*;
+/// ```
+///
+/// This is the SUPPORTED surface of bevy_swarm 0.1. Everything outside
+/// `prelude` (and the specific modules named in the docs) is internal
+/// machinery with no stability guarantee until the core/adapter split
+/// lands.
+pub mod prelude {
+    #[cfg(feature = "agent")]
+    pub use crate::agent::{AgentConfig, AgentPlugin};
+    pub use crate::builder::ScenarioBuilder;
+    pub use crate::contract::{IntentSurface, SurfaceVariant, TestConventionsPlugin, UserIntent};
+    pub use crate::driver::{run_scenario, PlaytestPlugin, PlaytestReport};
+    pub use crate::enums::PlaytestStatus;
+    pub use crate::rules::Rule;
+    pub use crate::scenario::{BotConfig, Scenario};
+    pub use crate::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
+}
+
+#[cfg(doctest)]
+/// le3.30: the prelude alone must suffice for the documented quick-start
+/// pattern (tiny game + scenario + run).
+#[doc = include_str!("../docs/prelude-smoke.md")]
+struct _PreludeSmokeDoctests;
+
 /// Z18.H: crate-root re-exports so the Z10-generated test can call
 /// `bevy_swarm::autotest(GamePlugin, AutotestConfig::from_env())`.
 pub use autotest::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod bots;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod branch;
 pub mod builder;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod choice;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod compiled;
 pub mod contract;
 pub mod conventions;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod determinism;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod diagnostics;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod discover;
 pub mod driver;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod effects;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod entropy;
 pub mod enums;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod external;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod fingerprint;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod game_types;
 pub mod golden;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod harness;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod headless;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod headless_strip;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod identity;
 pub mod junit;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod liveness;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod minimize;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod oracles;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod planner;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod raw_input;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod render_check;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod robustness;
 pub mod rules;
 pub mod scenario;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod sinks;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod smoke;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod state;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod sweep;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod typed;
 
 #[cfg(test)]
