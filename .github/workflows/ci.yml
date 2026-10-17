@@ -197,11 +197,11 @@ jobs:
         run: |
           # `cargo publish --dry-run` resolves versioned deps from
           # crates.io; until bevy_swarm 0.1.0 is published (the user's
-          # swarm-le3.15 action) the dry-run cannot resolve it. Verify
-          # what CAN be verified now: the package packs cleanly and the
-          # manifest metadata is complete. Flip this to a real dry-run
-          # once bevy_swarm is on crates.io.
-          if cargo search bevy_swarm --limit 1 | grep -q '^bevy_swarm = '; then
+          # swarm-le3.15 action) the dry-run cannot resolve it. Probe
+          # the sparse index for the EXACT crate name (cargo search
+          # fuzzy-matches unrelated crates, so it can't be used here).
+          if curl --silent --fail -o /dev/null \
+               https://index.crates.io/be/vy/bevy_swarm; then
             cargo publish --dry-run -p cargo-bevy-swarm
           else
             echo "bevy_swarm not yet on crates.io — running package check only"
