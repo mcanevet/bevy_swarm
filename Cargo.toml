@@ -153,3 +153,11 @@ roxmltree = "0.20"
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+# RF41: mirror this configuration in the CI docs job
+# (.github/workflows/ci.yml, docs-with-docsrs-config).
+[package.metadata.docs.rs]
+# docs.rs builds have no display server; document the headless
+# feature set users get by default, plus the optional extras.
+features = ["agent", "deterministic-entropy"]
+rustdoc-args = ["--cfg", "docsrs"]

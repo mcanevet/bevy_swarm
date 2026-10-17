@@ -29,6 +29,9 @@
 // `cargo bevy-playtest run` wrapper will set it automatically).
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
+// RF41: docs.rs builds with --cfg docsrs; expose feature names on
+// feature-gated items.
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // le3.12 (RF13): the README is part of the doctest suite — its
 // code blocks compile in CI, so the Usage snippet can never rot.
 #[cfg(doctest)]

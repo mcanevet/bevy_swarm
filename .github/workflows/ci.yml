@@ -181,3 +181,18 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-deps
+
+  # RF41: build docs with EXACTLY the docs.rs configuration so
+  # docs.rs output (feature-gated items, badges) can never diverge
+  # from what CI validated. Mirrors [package.metadata.docs.rs].
+  docs-with-docsrs-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux dependencies (bevy_render + winit backends)
+        run: sudo apt-get update -yq && sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Build docs with docs.rs config
+        env:
+          RUSTDOCFLAGS: "-D warnings --cfg docsrs"
+        run: cargo doc --no-deps --features agent,deterministic-entropy
