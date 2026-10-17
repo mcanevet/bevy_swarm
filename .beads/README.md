@@ -83,9 +83,10 @@ bd create "Try out Beads"
 ## Repository layout notes (bevy_swarm specifics)
 
 - `config.yaml`, `metadata.json`, `README.md`, and `hooks/*` are
-  TRACKED in git. Hooks are ACTIVE: `core.hooksPath` points at
-  `.beads/hooks` (bd-managed validation hooks for
-  commit messages, push, checkout, merge).
+  TRACKED in git. Hooks are INSTALLED via `core.hooksPath` pointing at
+  `.beads/hooks` in the MAIN checkout — but `core.hooksPath` is not
+  propagated to linked worktrees, so hooks are INACTIVE there. Verify
+  with `git config --get-all core.hooksPath` (empty = inactive).
 - The embedded Dolt database (`.beads/dolt/`) and credential key are
   UNTRACKED (local only); sync happens via `bd dolt push/pull` under
   `refs/dolt/data` on the git remote.

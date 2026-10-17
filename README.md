@@ -288,10 +288,9 @@ token setup, and the design decision context.
 
 ## Contributing
 
-Contributions are welcome! Unless you explicitly state otherwise, any
-contribution intentionally submitted for inclusion in the work by you,
-as defined in the Apache-2.0 license, shall be dual licensed as above,
-without any additional terms or conditions.
+Contributions are welcome! Any contribution intentionally submitted
+for inclusion in the work shall be dual licensed as described in the
+License section below.
 
 ## License
 

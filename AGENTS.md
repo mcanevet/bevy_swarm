@@ -13,7 +13,7 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 > source of truth; don't `bd import` during normal operation; don't
 > reach for third-party Dolt hosting before trying the default).
 
-## Quick Reference
+## Quick Reference (curated — see `bd prime` for the full set)
 
 ```bash
 bd ready              # Find available work
@@ -65,7 +65,9 @@ cargo fmt --check
   watch CI green, merge, close bead, push ledger.
 - **Autonomous implementation:** This repo opts into "team-maintainer"
   mode for the overnight implementer — you MAY commit, push, open PRs,
-  merge green PRs, and close beads without stopping for approval.
+  merge green PRs, and close beads without stopping for approval, subject
+  to the "Release Order and Dependencies" rules above (dependency gates,
+  close-reason completeness, RV-bead protection).
 - **Never tag/publish/release:** Tagging, crates.io publishing, and
   GitHub releases are USER-ONLY actions. Never perform them.
 
