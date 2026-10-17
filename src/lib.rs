@@ -84,6 +84,7 @@ struct _PreludeSmokeDoctests;
 /// Z18.H: crate-root re-exports so the Z10-generated test can call
 /// `bevy_playtest::autotest(GamePlugin, AutotestConfig::from_env())`.
 pub use autotest::{autotest, autotest_factory, autotest_with, AutotestConfig, AutotestReport};
+pub mod ambiguity;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod bots;

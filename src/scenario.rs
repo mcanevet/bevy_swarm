@@ -40,6 +40,13 @@ pub struct Scenario {
     /// games have benign ambiguities.
     #[serde(default)]
     pub deny_ambiguities: bool,
+    /// swarm-b6t: allow-list for the `deny_ambiguities` gate. Each rule
+    /// permits specific system pairs, single systems, crate-internal
+    /// groups, or whole data types — an escape hatch for
+    /// library-internal ambiguities (bevy_ui etc.) that a game cannot
+    /// otherwise fix. Only consulted when `deny_ambiguities` is true.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_ambiguities: Vec<crate::ambiguity::AllowRule>,
     /// dbt: escalate warning-class violations (bevy_warning, log_warn)
     /// to gating severity. Default false: those rules are informational
     /// because headless runs routinely trip render/audio warnings that

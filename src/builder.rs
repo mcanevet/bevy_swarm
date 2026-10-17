@@ -51,6 +51,7 @@ impl ScenarioBuilder {
                 simulated_time: true,
                 single_threaded: true,
                 deny_ambiguities: false,
+                allow_ambiguities: Vec::new(),
                 strict_warnings: false,
                 duration_s: 15.0,
                 invariants: vec![],
