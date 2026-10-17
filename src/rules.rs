@@ -94,6 +94,7 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ScenarioError => "The scenario itself failed (rejected config, unloadable state) rather than the game misbehaving.",
             Rule::NoActiveCamera => "After readiness, if drawable entities exist but zero active cameras, the game likely renders nothing.",
             Rule::NothingOnScreen => "Drawable entities exist but none project inside the viewport after readiness — they may be off-screen.",
+            Rule::PassThrough => "An entity fully traversed another (entered near side, exited far side, no separation) while collision semantics exist elsewhere in the run — a collider was likely missed.",
         }
     }
 
@@ -152,6 +153,7 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ScenarioError => "Load-time or runtime ScenarioError paths.",
             Rule::NoActiveCamera => "Post-readiness ECS scan: drawable entities present, zero active Camera components.",
             Rule::NothingOnScreen => "Post-readiness projection scan: no drawable lands inside the camera viewport.",
+            Rule::PassThrough => "Inference-based overlap tracking: another pair reversed velocity/clamped penetration this run, but this pair completed a full pass-through (near-side entry to far-side exit, no reversal). Games with zero collision behavior never fire it.",
         }
     }
 
@@ -210,6 +212,7 @@ informational by default, escalate with scenario strict_warnings.",
             Rule::ScenarioError => "None known — the error text names the rejected field.",
             Rule::NoActiveCamera => "Headless/gameplay-only tests with drawables intentionally left unrendered.",
             Rule::NothingOnScreen => "Orthographic camera framing wider than content, or HUD-only sprites anchored off-camera by design.",
+            Rule::PassThrough => "Ghost/intangible-by-design entities in games that ALSO have real collisions (opt out with collision_policy: off); despawn-mid-overlap and shallow corner grazes are excluded.",
         }
     }
 
@@ -296,6 +299,7 @@ declare_rules! {
     ScenarioError => "scenario_error",
     NoActiveCamera => "no_active_camera",
     NothingOnScreen => "nothing_on_screen",
+    PassThrough => "pass_through",
 }
 
 #[cfg(test)]

@@ -59,6 +59,7 @@ impl ScenarioBuilder {
                 liveness: Default::default(),
                 check_determinism: None,
                 compare_golden: None,
+                collision_policy: Default::default(),
             },
         }
     }

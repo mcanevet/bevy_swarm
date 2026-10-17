@@ -274,6 +274,7 @@ fn replay_scenario(scenario: &Scenario, inputs: Vec<ReplayInput>, duration_s: f3
     Scenario {
         name: scenario.name.clone(),
         compare_golden: scenario.compare_golden.clone(),
+        collision_policy: scenario.collision_policy,
         tps: scenario.tps,
         simulated_time: scenario.simulated_time,
         single_threaded: scenario.single_threaded,

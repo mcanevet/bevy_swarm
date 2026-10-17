@@ -251,6 +251,8 @@ impl bevy::app::Plugin for PlaytestPlugin {
                 // RF38: rendering checks (no_active_camera /
                 // nothing_on_screen) — one-shot, after liveness settles.
                 crate::render_check::render_check_oracle_system,
+                // swarm-uz8: pass_through overlap tracking.
+                crate::pass_through::pass_through_oracle_system,
                 intent_audit_log_system,
                 crate::determinism::record_state_digest_system,
             )
@@ -883,9 +885,20 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
         // zero/near-zero delta while frames 2..N advance the full
         // manual delta. Priming makes frame 1 uniform with the rest
         // (port of bevy_headless_test's prime_time).
-        app.world_mut()
-            .resource_mut::<bevy::time::Time<bevy::time::Real>>()
-            .update_with_instant(std::time::Instant::now());
+        {
+            let now = std::time::Instant::now();
+            let mut world = app.world_mut();
+            // Apps without a time plugin have no Time<Real>; insert it
+            // so priming works everywhere (update_with_instant then
+            // behaves like the first ManualDuration tick).
+            if let Some(mut t) = world.get_resource_mut::<bevy::time::Time<bevy::time::Real>>() {
+                t.update_with_instant(now);
+            } else {
+                let mut t = bevy::time::Time::<bevy::time::Real>::default();
+                t.update_with_instant(now);
+                world.insert_resource(t);
+            }
+        }
     }
     app.insert_resource(ScenarioResource(std::sync::Arc::new(scenario.clone())));
 
@@ -1108,6 +1121,9 @@ pub fn run_scenario(app: &mut App, scenario: &Scenario) -> Result<PlaytestReport
     // (no_active_camera / nothing_on_screen) while the world is
     // still alive.
     crate::render_check::finalize_render_checks(app.world_mut());
+
+    // swarm-uz8: finalize the pass_through verdicts.
+    crate::pass_through::finalize_pass_through(app.world_mut());
 
     // Unwind-safety net: an exclusive system that panicked mid-flight
     // (planner, cheat scheduler) may have removed a resource it was

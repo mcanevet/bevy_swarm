@@ -74,6 +74,33 @@ pub struct Scenario {
     /// count mismatch). Requires `name` to select the entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compare_golden: Option<String>,
+    /// swarm-uz8: pass_through rule policy. Default "infer": the rule
+    /// fires only when collision semantics were observed elsewhere in
+    /// the run. "off": silence the rule entirely (ghost/intangible
+    /// entities in games that also have real collisions).
+    #[serde(default)]
+    pub collision_policy: CollisionPolicy,
+}
+
+/// swarm-uz8: collision-observation policy for the pass_through rule.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CollisionPolicy {
+    /// Infer collision semantics from observed behavior (default).
+    #[default]
+    Infer,
+    /// Never report pass_through.
+    Off,
 }
 /// Key name → KeyCode (common subset; extend as games need).
 pub fn parse_key_code(name: &str) -> Option<bevy::input::keyboard::KeyCode> {

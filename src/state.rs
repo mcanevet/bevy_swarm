@@ -159,6 +159,14 @@ pub struct PlaytestState {
     /// (fail-open when no camera could project at all — e.g. apps
     /// without WindowPlugin have no derivable viewport).
     pub(crate) rendering_saw_projection: bool,
+    /// swarm-uz8: per-pair overlap trackers for the pass_through rule.
+    pub(crate) pass_through_pairs: HashMap<
+        (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity),
+        crate::pass_through::PairTracker,
+    >,
+    /// swarm-uz8: entity centers at the previous oracle check (relative
+    /// velocity inference for collision-response detection).
+    pub(crate) pass_through_prev_centers: HashMap<bevy::ecs::entity::Entity, bevy::math::Vec2>,
     /// x4k: one-shot — liveness frame history evicted before an intent
     /// frame (should be unreachable since the ring cap scales with tps).
     pub(crate) warned_liveness_history_evicted: bool,
@@ -475,6 +483,8 @@ impl PlaytestState {
             rendering_seen_active_camera: true,
             rendering_seen_drawable_inside: false,
             rendering_saw_projection: false,
+            pass_through_pairs: HashMap::new(),
+            pass_through_prev_centers: HashMap::new(),
             warned_liveness_history_evicted: false,
             coverage: Coverage::default(),
             frame_timing: FrameTimingStats::default(),

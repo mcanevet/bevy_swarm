@@ -30,8 +30,9 @@
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 // RF41: docs.rs builds with --cfg docsrs; expose feature names on
-// feature-gated items.
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+// feature-gated items. (doc_auto_cfg was removed in Rust 1.92,
+// merged into doc_cfg.)
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // le3.12 (RF13): the README is part of the doctest suite — its
 // code blocks compile in CI, so the Usage snippet can never rot.
 #[cfg(doctest)]
@@ -147,6 +148,9 @@ pub mod minimize;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod oracles;
+#[doc(hidden)]
+/// Internal machinery — no stability guarantee before the core/adapter split.
+pub mod pass_through;
 #[doc(hidden)]
 /// Internal machinery — no stability guarantee before the core/adapter split.
 pub mod planner;
