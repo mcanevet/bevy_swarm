@@ -578,7 +578,7 @@ fn fx9_item8_naming_by_name_plus_seed() {
 /// TEST: No "FX9:" bead-status comments remain in the golden module.
 #[test]
 fn fx9_item9_no_fx_comments_in_code() {
-    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/golden.rs"))
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/analysis/golden.rs"))
         .expect("golden.rs source should be readable");
     assert!(
         !src.contains("FX9"),
